@@ -350,10 +350,54 @@ internal ref struct AmqpReader
     }
 
     /// <summary>
-    /// Reads a map keyed by symbols, such as <c>fields</c> or annotations. Numeric keys, which annotations
-    /// reserve for future use, are skipped.
+    /// Reads a <c>fields</c> map: a map keyed by symbols, such as the <c>properties</c> of a performative,
+    /// an error's <c>info</c> or a terminus's node properties (AMQP 1.0 Part 1, section 1.6; Part 2,
+    /// section 2.8.3).
     /// </summary>
-    public Dictionary<AmqpSymbol, object?>? ReadSymbolMap()
+    /// <exception cref="AmqpException">Thrown with <c>amqp:decode-error</c> when a key is not a symbol or appears twice.</exception>
+    public Dictionary<AmqpSymbol, object?>? ReadFields()
+    {
+        if (TryReadNull())
+        {
+            return null;
+        }
+
+        AmqpReader entries = ReadMap(out int count);
+        Dictionary<AmqpSymbol, object?> map = new(count / 2);
+
+        for (int i = 0; i < count; i += 2)
+        {
+            byte code = entries.ReadByte();
+
+            if (code is not (AmqpFormatCode.Symbol8 or AmqpFormatCode.Symbol32))
+            {
+                throw AmqpException.DecodeError(ErrorMessages.MapKeyNotSymbol);
+            }
+
+            if (!map.TryAdd(entries.ReadSymbolBody(code), entries.ReadValue()))
+            {
+                throw AmqpException.DecodeError(ErrorMessages.MapKeyDuplicate);
+            }
+        }
+
+        return map;
+    }
+
+    /// <summary>
+    /// Reads an <c>annotations</c> map: delivery annotations, message annotations or a footer (AMQP 1.0
+    /// Part 3, section 3.2.10). Keys are symbols or unsigned longs, and every unsigned long key is reserved.
+    /// </summary>
+    /// <remarks>
+    /// The codec understands no unsigned long key, and a receiver that meets a key it does not understand,
+    /// outside the <c>x-opt</c> prefix, detaches the link with <c>amqp:not-implemented</c>; dropping the
+    /// key would hide it from that rule, so the map is refused with that condition. Symbolic keys are kept
+    /// whatever their prefix: only the application knows which of them it understands.
+    /// </remarks>
+    /// <exception cref="AmqpException">
+    /// Thrown with <c>amqp:not-implemented</c> when a key is an unsigned long, or with
+    /// <c>amqp:decode-error</c> when a key is of another type or appears twice.
+    /// </exception>
+    public Dictionary<AmqpSymbol, object?>? ReadAnnotations()
     {
         if (TryReadNull())
         {
@@ -380,11 +424,11 @@ internal ref struct AmqpReader
                 case AmqpFormatCode.ULong0:
                 case AmqpFormatCode.SmallULong:
                 case AmqpFormatCode.ULong:
-                    entries.SkipBody(code);
-                    entries.Skip();
-                    break;
+                    throw AmqpException.ProtocolViolation(
+                        AmqpErrorCondition.NotImplemented,
+                        string.Format(CultureInfo.CurrentCulture, ErrorMessages.AnnotationKeyReserved, entries.ReadULongBody(code)));
                 default:
-                    throw AmqpException.DecodeError(ErrorMessages.MapKeyNotSymbol);
+                    throw AmqpException.DecodeError(ErrorMessages.AnnotationKeyInvalid);
             }
         }
 
@@ -393,8 +437,8 @@ internal ref struct AmqpReader
 
     /// <summary>
     /// Reads a filter set: a map from filter names to described filters or <c>null</c> (AMQP 1.0 Part 3,
-    /// section 3.5.8). Unlike <see cref="ReadSymbolMap"/>, a key that is not a symbol is refused rather
-    /// than skipped: a filter dropped on the way in would admit the messages the receiver filtered out.
+    /// section 3.5.8). A key that is not a symbol is refused, as in <see cref="ReadFields"/>: a filter
+    /// dropped on the way in would admit the messages the receiver filtered out.
     /// </summary>
     /// <exception cref="AmqpException">
     /// Thrown with <c>amqp:invalid-field</c> when a filter's value is neither described nor <c>null</c>,

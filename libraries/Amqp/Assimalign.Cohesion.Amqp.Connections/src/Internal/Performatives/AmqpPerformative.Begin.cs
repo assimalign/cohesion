@@ -61,7 +61,7 @@ internal sealed class AmqpBeginPerformative : AmqpPerformative
             HandleMax = (count > 4 ? fields.ReadNullableUInt() : null) ?? uint.MaxValue,
             OfferedCapabilities = count > 5 ? fields.ReadSymbolMultiple() : null,
             DesiredCapabilities = count > 6 ? fields.ReadSymbolMultiple() : null,
-            Properties = count > 7 ? fields.ReadSymbolMap() : null
+            Properties = count > 7 ? fields.ReadFields() : null
         };
     }
 }

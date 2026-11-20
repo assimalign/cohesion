@@ -1,3 +1,5 @@
+using Assimalign.Cohesion.Amqp;
+
 namespace Assimalign.Cohesion.Amqp.Connections.Tests;
 
 /// <summary>
@@ -7,4 +9,5 @@ namespace Assimalign.Cohesion.Amqp.Connections.Tests;
 /// <param name="Rule">The identifier of the rule the case exercises.</param>
 /// <param name="Hex">The encoded message, in hexadecimal.</param>
 /// <param name="Refusal">The message decoding must fail with, or <see langword="null"/> for a message it must accept.</param>
-internal sealed record AmqpMessageFormatCase(string Name, string Rule, string Hex, string? Refusal);
+/// <param name="Condition">The error condition of the refusal, or <see langword="null"/> for <c>amqp:decode-error</c>.</param>
+internal sealed record AmqpMessageFormatCase(string Name, string Rule, string Hex, string? Refusal, AmqpSymbol? Condition = null);

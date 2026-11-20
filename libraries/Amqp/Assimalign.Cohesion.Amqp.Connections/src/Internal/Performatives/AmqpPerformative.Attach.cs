@@ -104,7 +104,7 @@ internal sealed class AmqpAttachPerformative : AmqpPerformative
         attach.MaxMessageSize = maxMessageSize is 0ul ? null : maxMessageSize;
         attach.OfferedCapabilities = count > 11 ? fields.ReadSymbolMultiple() : null;
         attach.DesiredCapabilities = count > 12 ? fields.ReadSymbolMultiple() : null;
-        attach.Properties = count > 13 ? fields.ReadSymbolMap() : null;
+        attach.Properties = count > 13 ? fields.ReadFields() : null;
 
         return attach;
     }

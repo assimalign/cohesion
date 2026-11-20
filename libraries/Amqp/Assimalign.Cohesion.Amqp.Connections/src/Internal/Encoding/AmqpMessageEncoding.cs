@@ -22,9 +22,17 @@ namespace Assimalign.Cohesion.Amqp.Connections.Internal;
 /// <see langword="null"/> encodes without one. Application properties are held to simple values when
 /// they are encoded (section 3.2.5) and kept as they arrive when they are decoded, as other libraries do.
 /// </para>
+/// <para>
+/// Annotations are keyed by symbols. An unsigned long key, which AMQP reserves, fails decoding with
+/// <c>amqp:not-implemented</c> (section 3.2.10), and the delivery annotation <c>rejected</c> must hold an
+/// error when it is encoded (section 3.2.2); a received one keeps whatever it carries.
+/// </para>
 /// </remarks>
 internal static class AmqpMessageEncoding
 {
+    // The delivery-annotations key AMQP reserves for the error a rejected message carries (Part 3, section 3.2.2).
+    private static readonly AmqpSymbol _rejectedKey = new("rejected");
+
     public static void Encode(AmqpBufferWriter writer, AmqpMessage message)
     {
         if (message.Header is AmqpHeader header)
@@ -98,10 +106,10 @@ internal static class AmqpMessageEncoding
                     message.Header = ReadHeaderBody(ref reader);
                     break;
                 case AmqpDescriptor.DeliveryAnnotations:
-                    message.DeliveryAnnotations = reader.ReadSymbolMap();
+                    message.DeliveryAnnotations = reader.ReadAnnotations();
                     break;
                 case AmqpDescriptor.MessageAnnotations:
-                    message.MessageAnnotations = reader.ReadSymbolMap();
+                    message.MessageAnnotations = reader.ReadAnnotations();
                     break;
                 case AmqpDescriptor.Properties:
                     message.Properties = ReadPropertiesBody(ref reader, payload);
@@ -129,7 +137,7 @@ internal static class AmqpMessageEncoding
                     value = new AmqpValueBody(reader.ReadValue());
                     break;
                 case AmqpDescriptor.Footer:
-                    message.Footer = reader.ReadSymbolMap();
+                    message.Footer = reader.ReadAnnotations();
                     break;
             }
         }
@@ -196,11 +204,28 @@ internal static class AmqpMessageEncoding
         list.Complete();
     }
 
+    /// <summary>
+    /// Writes an annotations section: delivery annotations, message annotations or the footer.
+    /// </summary>
+    /// <exception cref="ArgumentException">
+    /// Thrown when a key is a default symbol, a value has no AMQP representation, or the delivery
+    /// annotation <c>rejected</c> holds anything but an <see cref="AmqpError"/>.
+    /// </exception>
     public static void WriteAnnotations(AmqpBufferWriter writer, ulong descriptor, IReadOnlyDictionary<AmqpSymbol, object?>? annotations)
     {
         if (annotations is null)
         {
             return;
+        }
+
+        // Checked before anything is written. A received message keeps whatever value it carried.
+        if (descriptor == AmqpDescriptor.DeliveryAnnotations
+            && annotations.TryGetValue(_rejectedKey, out object? rejected)
+            && rejected is not AmqpError)
+        {
+            throw new ArgumentException(
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.RejectedAnnotationInvalid, rejected?.GetType().ToString() ?? "null"),
+                "message");
         }
 
         AmqpEncoder.WriteDescriptor(writer, descriptor);

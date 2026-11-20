@@ -145,6 +145,18 @@ public class AmqpEncodingTests
         };
     }
 
+    public static TheoryData<object> MapsWithNullKey()
+    {
+        // A default symbol encodes as null wherever it is written, so each map shape meets it as a key.
+        return new TheoryData<object>
+        {
+            new Dictionary<AmqpSymbol, object?> { [default] = 1 },
+            new Dictionary<object, object?> { [default(AmqpSymbol)] = 1 },
+            new Hashtable { [default(AmqpSymbol)] = 1 },
+            new List<object?> { new Dictionary<AmqpSymbol, object?> { ["a"] = 1, [default] = 2 } }
+        };
+    }
+
     public static TheoryData<string, string> MalformedEncodings()
     {
         return new TheoryData<string, string>
@@ -640,31 +652,92 @@ public class AmqpEncodingTests
         exception.Message.ShouldStartWith(ErrorMessages.ValueNestingTooDeep);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - ReadSymbolMap: Should skip the numeric keys annotations reserve")]
-    public void ReadSymbolMap_WithNumericKey_ShouldSkipIt()
+    [Theory(DisplayName = "Cohesion Test [Amqp.Connections] - ReadFields: Should refuse a key that is not a symbol")]
+    [InlineData("c10904530540a301615401")]
+    [InlineData("c10602a101615401")]
+    [InlineData("c10804405401a3016140")]
+    public void ReadFields_WithKeyNotSymbol_ShouldThrowDecodeError(string hex)
     {
-        // Arrange
+        // Arrange: a fields map keyed by the ulong 5, the string "a", or null (AMQP 1.0 Part 2, section 2.8.3).
+        byte[] encoded = Convert.FromHexString(hex);
+
+        // Act
+        AmqpException exception = Should.Throw<AmqpException>(() => ReadFields(encoded));
+
+        // Assert
+        exception.Error.ShouldNotBeNull().Condition.ShouldBe(AmqpErrorCondition.DecodeError);
+        exception.Message.ShouldBe(ErrorMessages.MapKeyNotSymbol);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - ReadAnnotations: Should refuse an unsigned long key, which annotations reserve, with not-implemented")]
+    public void ReadAnnotations_WithULongKey_ShouldThrowNotImplemented()
+    {
+        // Arrange: annotations whose first key is the ulong 5 (AMQP 1.0 Part 3, section 3.2.10).
         byte[] encoded = Convert.FromHexString("c10904530540a301615401");
 
         // Act
-        Dictionary<AmqpSymbol, object?>? map = ReadSymbolMap(encoded);
+        AmqpException exception = Should.Throw<AmqpException>(() => ReadAnnotations(encoded));
 
         // Assert
-        map.ShouldNotBeNull().Count.ShouldBe(1);
-        map[new AmqpSymbol("a")].ShouldBe(1);
+        exception.ErrorCode.ShouldBe(AmqpErrorCode.ProtocolViolation);
+        exception.Error.ShouldNotBeNull().Condition.ShouldBe(AmqpErrorCondition.NotImplemented);
+        exception.Message.ShouldBe(string.Format(CultureInfo.CurrentCulture, ErrorMessages.AnnotationKeyReserved, 5));
     }
 
-    [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - ReadSymbolMap: Should refuse a string key where a symbol belongs")]
-    public void ReadSymbolMap_WithStringKey_ShouldThrowDecodeError()
+    [Theory(DisplayName = "Cohesion Test [Amqp.Connections] - ReadAnnotations: Should refuse a key that is neither a symbol nor an unsigned long")]
+    [InlineData("c10602a101615401")]
+    [InlineData("c10804405401a3016140")]
+    [InlineData("c10402540140")]
+    public void ReadAnnotations_WithKeyOfAnotherType_ShouldThrowDecodeError(string hex)
     {
-        // Arrange
-        byte[] encoded = Convert.FromHexString("c10602a101615401");
+        // Arrange: annotations keyed by the string "a", by null, or by the int 1.
+        byte[] encoded = Convert.FromHexString(hex);
 
         // Act
-        AmqpException exception = Should.Throw<AmqpException>(() => ReadSymbolMap(encoded));
+        AmqpException exception = Should.Throw<AmqpException>(() => ReadAnnotations(encoded));
 
         // Assert
-        exception.Message.ShouldBe(ErrorMessages.MapKeyNotSymbol);
+        exception.Error.ShouldNotBeNull().Condition.ShouldBe(AmqpErrorCondition.DecodeError);
+        exception.Message.ShouldBe(ErrorMessages.AnnotationKeyInvalid);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - ReadAnnotations: Should keep every symbolic key, reserved or not, for the application to judge")]
+    public void ReadAnnotations_WithSymbolKeys_ShouldKeepThemAll()
+    {
+        // Arrange: the reserved key "a", the extension key "x-b" and the optional key "x-opt-c".
+        byte[] encoded = Convert.FromHexString("c11506a3016140a303782d6240a307782d6f70742d6340");
+
+        // Act
+        Dictionary<AmqpSymbol, object?>? map = ReadAnnotations(encoded);
+
+        // Assert
+        map.ShouldNotBeNull().Keys.Select(key => key.Value).ShouldBe(["a", "x-b", "x-opt-c"], ignoreOrder: true);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Amqp.Connections] - WriteValue: Should refuse a map key that encodes as null")]
+    [MemberData(nameof(MapsWithNullKey))]
+    public void WriteValue_WithNullMapKey_ShouldThrowArgumentException(object map)
+    {
+        // Act
+        ArgumentException exception = Should.Throw<ArgumentException>(() => Encode(map));
+
+        // Assert
+        exception.ParamName.ShouldBe("value");
+        exception.Message.ShouldStartWith(ErrorMessages.MapKeyMissing, Case.Sensitive);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - WriteApplicationProperties: Should refuse a null key")]
+    public void WriteApplicationProperties_WithNullKey_ShouldThrowArgumentException()
+    {
+        // Arrange
+        using AmqpBufferWriter writer = new();
+
+        // Act
+        ArgumentException exception = Should.Throw<ArgumentException>(
+            () => AmqpEncoder.WriteApplicationProperties(writer, new TestNullKeyDictionary()));
+
+        // Assert
+        exception.Message.ShouldStartWith(ErrorMessages.MapKeyMissing, Case.Sensitive);
     }
 
     [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - ReadStringMap: Should refuse a symbol key where a string belongs")]
@@ -748,11 +821,22 @@ public class AmqpEncodingTests
         return value;
     }
 
-    private static Dictionary<AmqpSymbol, object?>? ReadSymbolMap(byte[] encoded)
+    private static Dictionary<AmqpSymbol, object?>? ReadFields(byte[] encoded)
     {
         AmqpReader reader = new(encoded);
+        Dictionary<AmqpSymbol, object?>? map = reader.ReadFields();
 
-        return reader.ReadSymbolMap();
+        reader.IsEnd.ShouldBeTrue();
+        return map;
+    }
+
+    private static Dictionary<AmqpSymbol, object?>? ReadAnnotations(byte[] encoded)
+    {
+        AmqpReader reader = new(encoded);
+        Dictionary<AmqpSymbol, object?>? map = reader.ReadAnnotations();
+
+        reader.IsEnd.ShouldBeTrue();
+        return map;
     }
 
     private static Dictionary<string, object?>? ReadStringMap(byte[] encoded)

@@ -54,7 +54,7 @@ public class AmqpMessageFormatComplianceTests
 
         AmqpException refusal = exception.ShouldBeOfType<AmqpException>($"{entry.Rule}: {name}");
         refusal.ErrorCode.ShouldBe(AmqpErrorCode.ProtocolViolation);
-        refusal.Error.ShouldNotBeNull().Condition.ShouldBe(AmqpErrorCondition.DecodeError);
+        refusal.Error.ShouldNotBeNull().Condition.ShouldBe(entry.Condition ?? AmqpErrorCondition.DecodeError);
         refusal.Message.ShouldBe(entry.Refusal);
     }
 

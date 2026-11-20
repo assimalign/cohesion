@@ -385,6 +385,82 @@ public class AmqpMessageCodecTests
         decoded.ApplicationProperties.ShouldNotBeNull()["tags"].ShouldBeOfType<List<object?>>().ShouldBeEmpty();
     }
 
+    [Theory(DisplayName = "Cohesion Test [Amqp.Connections] - Encode: Should refuse a 'rejected' delivery annotation that does not hold an error")]
+    [InlineData("rejected for size")]
+    [InlineData(null)]
+    public void Encode_WithRejectedAnnotationNotAnError_ShouldThrowArgumentException(string? value)
+    {
+        // Arrange: AMQP reserves the key for an error (Part 3, section 3.2.2).
+        AmqpMessage message = new()
+        {
+            DeliveryAnnotations = new Dictionary<AmqpSymbol, object?> { ["rejected"] = value }
+        };
+
+        // Act
+        ArgumentException exception = Should.Throw<ArgumentException>(() => AmqpMessageCodec.Encode(message));
+
+        // Assert
+        exception.Message.ShouldStartWith(
+            string.Format(CultureInfo.CurrentCulture, ErrorMessages.RejectedAnnotationInvalid, value is null ? "null" : typeof(string).ToString()),
+            Case.Sensitive);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - Encode: Should round-trip a 'rejected' delivery annotation that holds an error")]
+    public void Encode_WithRejectedAnnotationError_ShouldRoundTrip()
+    {
+        // Arrange
+        AmqpMessage message = new()
+        {
+            DeliveryAnnotations = new Dictionary<AmqpSymbol, object?>
+            {
+                ["rejected"] = new AmqpError(AmqpErrorCondition.ResourceLimitExceeded, "queue full")
+            }
+        };
+
+        // Act
+        AmqpMessage decoded = AmqpMessageCodec.Decode(AmqpMessageCodec.Encode(message));
+
+        // Assert
+        AmqpError error = decoded.DeliveryAnnotations.ShouldNotBeNull()["rejected"].ShouldBeOfType<AmqpError>();
+        error.Condition.ShouldBe(AmqpErrorCondition.ResourceLimitExceeded);
+        error.Description.ShouldBe("queue full");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - Decode: Should keep a 'rejected' delivery annotation that does not hold an error")]
+    public void Decode_WithRejectedAnnotationNotAnError_ShouldKeepIt()
+    {
+        // Arrange: delivery annotations mapping "rejected" to the string "x"; the receiver judges the value.
+        byte[] payload = Convert.FromHexString("005371c10e02a30872656a6563746564a10178");
+
+        // Act
+        AmqpMessage decoded = AmqpMessageCodec.Decode(payload);
+
+        // Assert
+        decoded.DeliveryAnnotations.ShouldNotBeNull()["rejected"].ShouldBe("x");
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Amqp.Connections] - Encode: Should refuse an annotation keyed by a default symbol")]
+    [InlineData("delivery-annotations")]
+    [InlineData("message-annotations")]
+    [InlineData("footer")]
+    public void Encode_WithDefaultSymbolAnnotationKey_ShouldThrowArgumentException(string section)
+    {
+        // Arrange: a default symbol would encode as a null key, which annotations cannot hold.
+        Dictionary<AmqpSymbol, object?> annotations = new() { [default] = 1 };
+        AmqpMessage message = section switch
+        {
+            "delivery-annotations" => new AmqpMessage { DeliveryAnnotations = annotations },
+            "message-annotations" => new AmqpMessage { MessageAnnotations = annotations },
+            _ => new AmqpMessage { Footer = annotations }
+        };
+
+        // Act
+        ArgumentException exception = Should.Throw<ArgumentException>(() => AmqpMessageCodec.Encode(message));
+
+        // Assert
+        exception.Message.ShouldStartWith(ErrorMessages.MapKeyMissing, Case.Sensitive);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - GetBareMessage: Should return the properties, application properties and body as encoded")]
     public void GetBareMessage_WithAnnotatedMessage_ShouldReturnBareSections()
     {

@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 
+using Assimalign.Cohesion.Amqp;
 using Assimalign.Cohesion.Amqp.Connections.Internal;
 
 namespace Assimalign.Cohesion.Amqp.Connections.Tests;
@@ -36,10 +37,12 @@ internal static class AmqpMessageFormatCorpus
         new("MF1", "Sections follow the order header, delivery-annotations, message-annotations, properties, application-properties, body, footer.", "Part 3, section 3.2", true),
         new("MF2", "Each section other than the body appears at most once.", "Part 3, section 3.2", true),
         new("MF3", "The body is one or more data sections, one or more amqp-sequence sections, or one amqp-value section, never a mix.", "Part 3, section 3.2", true),
-        new("MF4", "The footer, when present, is the last section.", "Part 3, sections 3.2 and 3.2.10", true),
+        new("MF4", "The footer, when present, is the last section.", "Part 3, sections 3.2 and 3.2.9", true),
         new("MF5", "Each section is a described value whose descriptor, numeric or symbolic, names a message section.", "Part 3, section 3.2; Part 1, section 1.5", true),
         new("MF6", "A data section holds binary and an amqp-sequence section holds a list.", "Part 3, sections 3.2.6 and 3.2.7", false),
-        new("MF7", "A message-id or correlation-id is a ulong, uuid, binary or string.", "Part 3, sections 3.2.4 and 3.2.11 to 3.2.15", false)
+        new("MF7", "A message-id or correlation-id is a ulong, uuid, binary or string.", "Part 3, sections 3.2.4 and 3.2.11 to 3.2.14", false),
+        new("MF8", "Annotation keys are symbols or unsigned longs, and every unsigned long key is reserved, so a receiver that understands none refuses it with not-implemented.", "Part 3, sections 3.2.2, 3.2.3, 3.2.9 and 3.2.10", false),
+        new("MF9", "Application-properties keys are strings; the codec keeps a received value whatever its type.", "Part 3, section 3.2.5", false)
     ];
 
     /// <summary>
@@ -101,7 +104,21 @@ internal static class AmqpMessageFormatCorpus
         new("a binary message-id", "MF7", "005373c00501a0020102", null),
         new("a string message-id", "MF7", "005373c00401a10161", null),
         new("an int message-id", "MF7", "005373c003015405", ErrorMessages.MessageIdInvalid),
-        new("a list correlation-id", "MF7", "005373c00706404040404045", ErrorMessages.MessageIdInvalid)
+        new("a list correlation-id", "MF7", "005373c00706404040404045", ErrorMessages.MessageIdInvalid),
+
+        // MF8: annotation keys.
+        new("reserved, extension and optional symbolic annotation keys", "MF8", "005372c11506a3016140a303782d6240a307782d6f70742d6340", null),
+        new("an unsigned long message-annotations key", "MF8", "005372c10904530540a301615401",
+            string.Format(CultureInfo.CurrentCulture, ErrorMessages.AnnotationKeyReserved, 5), AmqpErrorCondition.NotImplemented),
+        new("an unsigned long footer key", "MF8", value + "005378c103024440",
+            string.Format(CultureInfo.CurrentCulture, ErrorMessages.AnnotationKeyReserved, 0), AmqpErrorCondition.NotImplemented),
+        new("a string delivery-annotations key", "MF8", "005371c10602a101615401", ErrorMessages.AnnotationKeyInvalid),
+
+        // MF9: application-properties keys.
+        new("a string application-properties key", "MF9", "005374c10602a101615401", null),
+        new("an application property holding a list, as other libraries send", "MF9", "005374c10802a1047461677345", null),
+        new("a symbol application-properties key", "MF9", "005374c10602a301615401", ErrorMessages.MapKeyNotString),
+        new("a null application-properties key", "MF9", "005374c10402405401", ErrorMessages.MapKeyNotString)
     ];
 
     /// <summary>

@@ -297,7 +297,7 @@ internal static class AmqpEncoder
 
         foreach (KeyValuePair<string, object?> property in properties)
         {
-            WriteString(writer, property.Key);
+            WriteString(writer, property.Key ?? throw MapKeyMissing());
 
             int value = writer.Length;
 
@@ -577,6 +577,12 @@ internal static class AmqpEncoder
 
         foreach (KeyValuePair<AmqpSymbol, object?> entry in map)
         {
+            // A default symbol would encode as null, and annotations and fields hold no null key.
+            if (entry.Key.Value is null)
+            {
+                throw MapKeyMissing();
+            }
+
             WriteSymbol(writer, entry.Key);
             WriteValue(writer, entry.Value, depth + 1);
         }
@@ -592,7 +598,7 @@ internal static class AmqpEncoder
 
         foreach (KeyValuePair<string, object?> entry in map)
         {
-            WriteString(writer, entry.Key);
+            WriteString(writer, entry.Key ?? throw MapKeyMissing());
             WriteValue(writer, entry.Value, depth + 1);
         }
 
@@ -607,7 +613,7 @@ internal static class AmqpEncoder
 
         foreach (KeyValuePair<object, object?> entry in map)
         {
-            WriteValue(writer, entry.Key, depth + 1);
+            WriteMapKey(writer, entry.Key, depth + 1);
             WriteValue(writer, entry.Value, depth + 1);
         }
 
@@ -624,7 +630,7 @@ internal static class AmqpEncoder
 
         while (entries.MoveNext())
         {
-            WriteValue(writer, entries.Key, depth + 1);
+            WriteMapKey(writer, entries.Key, depth + 1);
             WriteValue(writer, entries.Value, depth + 1);
             count += 2;
         }
@@ -924,6 +930,27 @@ internal static class AmqpEncoder
         };
 
         return new DateTimeOffset(utc);
+    }
+
+    /// <summary>
+    /// Writes a key of a map whose keys may be of any type, refusing one that encodes as null, such as a
+    /// default symbol: the reader refuses a map with a null key, so the encoder never writes one.
+    /// </summary>
+    private static void WriteMapKey(AmqpBufferWriter writer, object? key, int depth)
+    {
+        int start = writer.Length;
+
+        WriteValue(writer, key, depth);
+
+        if (writer.WrittenSpan[start] == AmqpFormatCode.Null)
+        {
+            throw MapKeyMissing();
+        }
+    }
+
+    private static ArgumentException MapKeyMissing()
+    {
+        return new ArgumentException(ErrorMessages.MapKeyMissing, "value");
     }
 
     private static ArgumentException ArrayElementNull(int index)

@@ -71,7 +71,7 @@ internal sealed class AmqpOpenPerformative : AmqpPerformative
             IncomingLocales = count > 6 ? fields.ReadSymbolMultiple() : null,
             OfferedCapabilities = count > 7 ? fields.ReadSymbolMultiple() : null,
             DesiredCapabilities = count > 8 ? fields.ReadSymbolMultiple() : null,
-            Properties = count > 9 ? fields.ReadSymbolMap() : null
+            Properties = count > 9 ? fields.ReadFields() : null
         };
     }
 }

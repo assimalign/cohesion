@@ -13,8 +13,13 @@ namespace Assimalign.Cohesion.Amqp;
 /// and footer; each appears at most once.
 /// </para>
 /// <para>
-/// Annotation keys are symbols. AMQP also reserves unsigned-long annotation keys for future use; the codec
-/// refuses them, since no current specification assigns one.
+/// Annotation keys are symbols (Part 3, section 3.2.10). AMQP also reserves unsigned-long keys, which no
+/// specification assigns yet; the codec understands none, so a received message that carries one fails
+/// to decode with <c>amqp:not-implemented</c>, the condition a receiver detaches the link with when it
+/// meets a key it does not understand. Symbolic keys that do not begin with <c>x-</c> are reserved too,
+/// but the codec keeps them in both directions: an intermediary forwards what it received, and only the
+/// application knows which keys it understands. A receiving application must detach the link with
+/// <c>amqp:not-implemented</c> on a key it does not understand unless the key begins with <c>x-opt</c>.
 /// </para>
 /// </remarks>
 public sealed class AmqpMessage
@@ -28,6 +33,11 @@ public sealed class AmqpMessage
     /// Gets or sets the delivery annotations: properties meant for the next hop only, or
     /// <see langword="null"/> to omit them.
     /// </summary>
+    /// <remarks>
+    /// AMQP reserves the key <c>rejected</c> for an <see cref="AmqpError"/> that tells why a message was
+    /// rejected (Part 3, section 3.2.2): a message whose <c>rejected</c> annotation holds anything else is
+    /// refused when it is encoded, and kept as it arrives when it is decoded.
+    /// </remarks>
     public IReadOnlyDictionary<AmqpSymbol, object?>? DeliveryAnnotations { get; set; }
 
     /// <summary>

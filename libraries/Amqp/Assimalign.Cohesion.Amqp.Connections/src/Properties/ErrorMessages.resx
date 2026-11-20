@@ -106,6 +106,18 @@
   <data name="MapKeyDuplicate" xml:space="preserve">
     <value>An encoded AMQP map repeats a key.</value>
   </data>
+  <data name="MapKeyMissing" xml:space="preserve">
+    <value>A key of the map is null or a default symbol, and the codec neither writes nor reads a map with a null key.</value>
+  </data>
+  <data name="AnnotationKeyReserved" xml:space="preserve">
+    <value>The annotation key {0} is an unsigned long, which AMQP reserves for future use and the codec does not understand (Part 3, section 3.2.10).</value>
+  </data>
+  <data name="AnnotationKeyInvalid" xml:space="preserve">
+    <value>An encoded annotations map has a key that is neither a symbol nor an unsigned long.</value>
+  </data>
+  <data name="RejectedAnnotationInvalid" xml:space="preserve">
+    <value>The delivery annotation 'rejected' holds {0}, but AMQP reserves the key for an error (Part 3, section 3.2.2).</value>
+  </data>
   <data name="MapKeyNotSymbol" xml:space="preserve">
     <value>An encoded AMQP map that must be keyed by symbols has a key of another type.</value>
   </data>

@@ -71,7 +71,7 @@ internal static class AmqpTypeCodec
 
         AmqpSymbol? condition = count > 0 ? fields.ReadSymbol() : null;
         string? description = count > 1 ? fields.ReadString() : null;
-        Dictionary<AmqpSymbol, object?>? info = count > 2 ? fields.ReadSymbolMap() : null;
+        Dictionary<AmqpSymbol, object?>? info = count > 2 ? fields.ReadFields() : null;
 
         if (condition is not AmqpSymbol value)
         {
@@ -221,7 +221,7 @@ internal static class AmqpTypeCodec
             {
                 bool deliveryFailed = count > 0 && fields.ReadBoolean(false);
                 bool undeliverableHere = count > 1 && fields.ReadBoolean(false);
-                Dictionary<AmqpSymbol, object?>? annotations = count > 2 ? fields.ReadSymbolMap() : null;
+                Dictionary<AmqpSymbol, object?>? annotations = count > 2 ? fields.ReadFields() : null;
 
                 return new AmqpModified(deliveryFailed, undeliverableHere, annotations);
             }
@@ -320,7 +320,7 @@ internal static class AmqpTypeCodec
         source.ExpiryPolicy = ReadExpiryPolicy(ref fields, count > 2);
         source.Timeout = (count > 3 ? fields.ReadNullableUInt() : null) ?? 0u;
         source.Dynamic = count > 4 && fields.ReadBoolean(false);
-        source.DynamicNodeProperties = count > 5 ? fields.ReadSymbolMap() : null;
+        source.DynamicNodeProperties = count > 5 ? fields.ReadFields() : null;
         source.DistributionMode = count > 6 ? fields.ReadSymbol() : null;
         source.Filter = count > 7 ? fields.ReadFilterSet() : null;
         source.DefaultOutcome = count > 8 ? ReadOutcome(ref fields) : null;
@@ -412,7 +412,7 @@ internal static class AmqpTypeCodec
         target.ExpiryPolicy = ReadExpiryPolicy(ref fields, count > 2);
         target.Timeout = (count > 3 ? fields.ReadNullableUInt() : null) ?? 0u;
         target.Dynamic = count > 4 && fields.ReadBoolean(false);
-        target.DynamicNodeProperties = count > 5 ? fields.ReadSymbolMap() : null;
+        target.DynamicNodeProperties = count > 5 ? fields.ReadFields() : null;
         target.Capabilities = count > 6 ? fields.ReadSymbolMultiple() : null;
 
         return target;

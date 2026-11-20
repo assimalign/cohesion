@@ -71,7 +71,7 @@ internal sealed class AmqpFlowPerformative : AmqpPerformative
             Available = count > 7 ? fields.ReadNullableUInt() : null,
             Drain = count > 8 && fields.ReadBoolean(false),
             Echo = count > 9 && fields.ReadBoolean(false),
-            Properties = count > 10 ? fields.ReadSymbolMap() : null
+            Properties = count > 10 ? fields.ReadFields() : null
         };
     }
 }
