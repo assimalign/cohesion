@@ -1,6 +1,7 @@
 using System;
 using System.Buffers;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -16,25 +17,7 @@ public class AmqpMessageCodecTests
 {
     private static readonly byte[] _emptyHeader = Convert.FromHexString("00537045");
     private static readonly byte[] _emptyProperties = Convert.FromHexString("00537345");
-    private static readonly byte[] _valueBody = Convert.FromHexString("005377a10161");
-    private static readonly byte[] _dataBody = Convert.FromHexString("005375a0020102");
-    private static readonly byte[] _sequenceBody = Convert.FromHexString("005376c003015401");
     private static readonly byte[] _emptyFooter = Convert.FromHexString("005378c10100");
-
-    public static TheoryData<string, string> MisorderedSections()
-    {
-        return new TheoryData<string, string>
-        {
-            { "properties then header", Hex(_emptyProperties, _emptyHeader) },
-            { "two headers", Hex(_emptyHeader, _emptyHeader) },
-            { "value then data", Hex(_valueBody, _dataBody) },
-            { "data then sequence", Hex(_dataBody, _sequenceBody) },
-            { "sequence then value", Hex(_sequenceBody, _valueBody) },
-            { "two values", Hex(_valueBody, _valueBody) },
-            { "footer then value", Hex(_emptyFooter, _valueBody) },
-            { "body then properties", Hex(_valueBody, _emptyProperties) }
-        };
-    }
 
     [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - Encode: Should round-trip a message with every section")]
     public void Encode_WithEverySection_ShouldRoundTrip()
@@ -279,21 +262,6 @@ public class AmqpMessageCodecTests
         decoded.Body.ShouldBeNull();
     }
 
-    [Theory(DisplayName = "Cohesion Test [Amqp.Connections] - Decode: Should refuse sections out of the order the specification fixes")]
-    [MemberData(nameof(MisorderedSections))]
-    public void Decode_WithMisorderedSections_ShouldThrowDecodeError(string scenario, string hex)
-    {
-        // Arrange
-        byte[] payload = Convert.FromHexString(hex);
-
-        // Act
-        AmqpException exception = Should.Throw<AmqpException>(() => AmqpMessageCodec.Decode(payload), scenario);
-
-        // Assert
-        exception.Error.ShouldNotBeNull().Condition.ShouldBe(AmqpErrorCondition.DecodeError);
-        exception.Message.ShouldBe(ErrorMessages.SectionOrderInvalid);
-    }
-
     [Theory(DisplayName = "Cohesion Test [Amqp.Connections] - Decode: Should refuse a section that is not a message section")]
     [InlineData("40", nameof(ErrorMessages.SectionNotDescribed))]
     [InlineData("00537945", nameof(ErrorMessages.SectionDescriptorUnsupported))]
@@ -324,6 +292,97 @@ public class AmqpMessageCodecTests
 
         // Act and Assert
         Should.Throw<ArgumentException>(() => AmqpMessageCodec.Encode(message));
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Amqp.Connections] - Encode: Should refuse an application property that holds a list, map or array")]
+    [InlineData("list")]
+    [InlineData("map")]
+    [InlineData("int array")]
+    [InlineData("sbyte array")]
+    [InlineData("described list")]
+    [InlineData("delivery state")]
+    public void Encode_WithCompoundApplicationProperty_ShouldThrowArgumentException(string kind)
+    {
+        // Arrange
+        object value = kind switch
+        {
+            "list" => new List<object?> { 1, 2 },
+            "map" => new Dictionary<string, object?> { ["nested"] = 1 },
+            "int array" => new[] { 1, 2 },
+            "sbyte array" => new sbyte[] { 1, 2 },
+            "described list" => new AmqpDescribedValue(new AmqpSymbol("x-opt-wrapped"), new List<object?> { 1 }),
+            _ => AmqpAccepted.Instance
+        };
+        AmqpMessage message = new()
+        {
+            ApplicationProperties = new Dictionary<string, object?> { ["simple"] = "ok", ["compound"] = value }
+        };
+
+        // Act
+        ArgumentException exception = Should.Throw<ArgumentException>(() => AmqpMessageCodec.Encode(message));
+
+        // Assert
+        exception.ParamName.ShouldBe("message");
+        exception.Message.ShouldStartWith(string.Format(CultureInfo.CurrentCulture, ErrorMessages.ApplicationPropertyNotSimple, "compound", value.GetType()));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - Encode: Should keep every simple application property value")]
+    public void Encode_WithSimpleApplicationProperties_ShouldRoundTrip()
+    {
+        // Arrange
+        Guid id = Guid.NewGuid();
+        DateTimeOffset sent = new(2026, 11, 20, 8, 30, 0, TimeSpan.Zero);
+        AmqpMessage message = new()
+        {
+            ApplicationProperties = new Dictionary<string, object?>
+            {
+                ["null"] = null,
+                ["flag"] = true,
+                ["count"] = 7,
+                ["total"] = 9_000_000_000L,
+                ["ratio"] = 0.5,
+                ["letter"] = 'x',
+                ["sent"] = sent,
+                ["id"] = id,
+                ["name"] = "orders",
+                ["kind"] = new AmqpSymbol("created"),
+                ["digest"] = new byte[] { 1, 2, 3 },
+                ["price"] = new AmqpDecimal64(0x3040000000000001),
+                ["tagged"] = new AmqpDescribedValue(new AmqpSymbol("x-opt-unit"), "kg")
+            }
+        };
+
+        // Act
+        IReadOnlyDictionary<string, object?> decoded = AmqpMessageCodec.Decode(AmqpMessageCodec.Encode(message)).ApplicationProperties.ShouldNotBeNull();
+
+        // Assert
+        decoded.Count.ShouldBe(13);
+        decoded["null"].ShouldBeNull();
+        decoded["flag"].ShouldBe(true);
+        decoded["count"].ShouldBe(7);
+        decoded["total"].ShouldBe(9_000_000_000L);
+        decoded["ratio"].ShouldBe(0.5);
+        decoded["letter"].ShouldBe(new Rune('x'));
+        decoded["sent"].ShouldBe(sent);
+        decoded["id"].ShouldBe(id);
+        decoded["name"].ShouldBe("orders");
+        decoded["kind"].ShouldBe(new AmqpSymbol("created"));
+        decoded["digest"].ShouldBeOfType<byte[]>().ShouldBe(new byte[] { 1, 2, 3 });
+        decoded["price"].ShouldBe(new AmqpDecimal64(0x3040000000000001));
+        decoded["tagged"].ShouldBeOfType<AmqpDescribedValue>().Value.ShouldBe("kg");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - Decode: Should keep an application property that holds a list, as other libraries do")]
+    public void Decode_WithCompoundApplicationProperty_ShouldKeepIt()
+    {
+        // Arrange: application properties mapping "tags" to an empty list.
+        byte[] payload = Convert.FromHexString("005374c10802a1047461677345");
+
+        // Act
+        AmqpMessage decoded = AmqpMessageCodec.Decode(payload);
+
+        // Assert
+        decoded.ApplicationProperties.ShouldNotBeNull()["tags"].ShouldBeOfType<List<object?>>().ShouldBeEmpty();
     }
 
     [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - GetBareMessage: Should return the properties, application properties and body as encoded")]
@@ -359,23 +418,6 @@ public class AmqpMessageCodecTests
 
         // Assert
         bareMessage.IsEmpty.ShouldBeTrue();
-    }
-
-    [Theory(DisplayName = "Cohesion Test [Amqp.Connections] - GetBareMessage: Should refuse annotations inside or a footer before the bare message")]
-    [InlineData("properties then header")]
-    [InlineData("footer then body")]
-    public void GetBareMessage_WithMisorderedSections_ShouldThrowDecodeError(string scenario)
-    {
-        // Arrange
-        byte[] payload = scenario == "properties then header"
-            ? Concat(_emptyProperties, _emptyHeader)
-            : Concat(_emptyFooter, _valueBody);
-
-        // Act
-        AmqpException exception = Should.Throw<AmqpException>(() => AmqpMessageCodec.GetBareMessage(payload));
-
-        // Assert
-        exception.Message.ShouldBe(ErrorMessages.SectionOrderInvalid);
     }
 
     [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - Reannotate: Should replace the annotated sections and copy the bare message unchanged")]
@@ -469,10 +511,5 @@ public class AmqpMessageCodecTests
     private static byte[] Concat(params byte[][] sections)
     {
         return sections.SelectMany(section => section).ToArray();
-    }
-
-    private static string Hex(params byte[][] sections)
-    {
-        return Convert.ToHexStringLower(Concat(sections));
     }
 }

@@ -155,6 +155,37 @@ public class AmqpConnectionTests
         }
     }
 
+    [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - SendAsync: Should refuse a message the codec refuses without sending anything")]
+    public async Task SendAsync_WithUnencodableMessage_ShouldThrowWithoutSending()
+    {
+        // Arrange
+        using CancellationTokenSource timeout = new(_testTimeout);
+        await using AmqpTestHost host = await AmqpTestHost.StartAsync(cancellationToken: timeout.Token);
+        (IAmqpSession clientSession, IAmqpSession serverSession) = await host.BeginSessionAsync(cancellationToken: timeout.Token);
+        (IAmqpSender sender, IAmqpReceiver receiver) = await AmqpTestHost.AttachAsync(clientSession, serverSession, cancellationToken: timeout.Token);
+        await sender.WaitForCreditAsync(timeout.Token);
+        uint credit = sender.Credit;
+        AmqpMessage refused = new()
+        {
+            ApplicationProperties = new System.Collections.Generic.Dictionary<string, object?> { ["tags"] = new[] { "a", "b" } },
+            Body = new AmqpValueBody("refused")
+        };
+
+        // Act
+        await Should.ThrowAsync<ArgumentException>(async () => await sender.SendAsync(refused, cancellationToken: timeout.Token));
+        uint creditAfterRefusal = sender.Credit;
+        Task<AmqpDeliveryState?> send = sender.SendAsync(new AmqpMessage { Body = new AmqpValueBody("sent") }, cancellationToken: timeout.Token).AsTask();
+        IAmqpDelivery delivery = await receiver.ReceiveAsync(timeout.Token);
+        AmqpMessage received = delivery.GetMessage();
+        await delivery.AcceptAsync(timeout.Token);
+        await send;
+
+        // Assert
+        creditAfterRefusal.ShouldBe(credit);
+        received.Body.ShouldBeOfType<AmqpValueBody>().Value.ShouldBe("sent");
+        host.Client.State.ShouldBe(ConnectionState.Open);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - SendAsync: Should complete at once on a link that sends settled")]
     public async Task SendAsync_OnSettledLink_ShouldCompleteWithoutOutcome()
     {

@@ -294,17 +294,32 @@ internal static class AmqpEncoder
     }
 
     /// <summary>
-    /// Writes a map keyed by strings, such as <c>application-properties</c>, or <c>null</c>.
+    /// Writes the map of an <c>application-properties</c> section, whose values are simple: no list, map or
+    /// array (AMQP 1.0 Part 3, section 3.2.5), whether bare or as the value of a described type. Each value
+    /// is checked as written, so the rule holds for whatever the encoder makes of it.
     /// </summary>
-    public static void WriteStringMap(AmqpBufferWriter writer, IReadOnlyDictionary<string, object?>? map)
+    /// <exception cref="ArgumentException">Thrown when a value is a list, map or array, or has no AMQP representation.</exception>
+    public static void WriteApplicationProperties(AmqpBufferWriter writer, IReadOnlyDictionary<string, object?> properties)
     {
-        if (map is null)
+        int start = BeginCompound(writer, AmqpFormatCode.Map32);
+
+        foreach (KeyValuePair<string, object?> property in properties)
         {
-            WriteNull(writer);
-            return;
+            WriteString(writer, property.Key);
+
+            int value = writer.Length;
+
+            WriteValue(writer, property.Value, 1);
+
+            if (IsCompound(writer.WrittenSpan[value..]))
+            {
+                throw new ArgumentException(
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.ApplicationPropertyNotSimple, property.Key, property.Value!.GetType()),
+                    "message");
+            }
         }
 
-        WriteStringMap(writer, map, 0);
+        EndCompound(writer, start, properties.Count * 2, AmqpFormatCode.Map8);
     }
 
     /// <summary>
@@ -818,6 +833,27 @@ internal static class AmqpEncoder
             span[0] = constructor32;
             BinaryPrimitives.WriteUInt32BigEndian(span.Slice(1), (uint)length);
         }
+    }
+
+    /// <summary>
+    /// Reads past the descriptors of described values to the value they describe, and reports whether it
+    /// is a list, map or array.
+    /// </summary>
+    private static bool IsCompound(ReadOnlySpan<byte> encoded)
+    {
+        AmqpReader reader = new(encoded);
+
+        while (reader.TryReadDescriptor(out _, out _))
+        {
+        }
+
+        return reader.PeekFormatCode() is AmqpFormatCode.List0
+            or AmqpFormatCode.List8
+            or AmqpFormatCode.List32
+            or AmqpFormatCode.Map8
+            or AmqpFormatCode.Map32
+            or AmqpFormatCode.Array8
+            or AmqpFormatCode.Array32;
     }
 
     internal static void ThrowIfTooDeep(int depth)

@@ -46,7 +46,8 @@ public sealed class AmqpMessage
     /// </summary>
     /// <remarks>
     /// Keys are strings, and AMQP restricts values to simple types: a value cannot be a list, a map or an
-    /// array.
+    /// array, bare or described (Part 3, section 3.2.5). A message whose properties break the rule is
+    /// refused when it is encoded; one received with such a value keeps it, as other libraries do.
     /// </remarks>
     public IReadOnlyDictionary<string, object?>? ApplicationProperties { get; set; }
 

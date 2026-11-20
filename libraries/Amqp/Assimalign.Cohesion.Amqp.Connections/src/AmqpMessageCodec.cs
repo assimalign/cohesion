@@ -22,7 +22,9 @@ namespace Assimalign.Cohesion.Amqp.Connections;
 /// <para>
 /// Decoding validates the payload as <see cref="IAmqpDelivery.GetMessage"/> does: malformed sections fail
 /// with an <see cref="AmqpException"/> whose <see cref="AmqpException.ErrorCode"/> is
-/// <see cref="AmqpErrorCode.ProtocolViolation"/>.
+/// <see cref="AmqpErrorCode.ProtocolViolation"/>. Finding the bare message, including for
+/// <see cref="Reannotate"/>, holds the sections to the same order and multiplicity, so a payload that
+/// passes through an intermediary is one a receiver can decode.
 /// </para>
 /// </remarks>
 public static class AmqpMessageCodec
@@ -33,7 +35,7 @@ public static class AmqpMessageCodec
     /// <param name="message">The message to encode.</param>
     /// <returns>The encoded message.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="message"/> is <see langword="null"/>.</exception>
-    /// <exception cref="ArgumentException">Thrown when a value in the message has no AMQP representation, or nests too deeply.</exception>
+    /// <exception cref="ArgumentException">Thrown when a value in the message has no AMQP representation or nests too deeply, or an application property holds a list, map or array.</exception>
     public static byte[] Encode(AmqpMessage message)
     {
         ArgumentNullException.ThrowIfNull(message);
@@ -50,7 +52,7 @@ public static class AmqpMessageCodec
     /// <param name="message">The message to encode.</param>
     /// <param name="destination">The writer that receives the encoded message.</param>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="message"/> or <paramref name="destination"/> is <see langword="null"/>.</exception>
-    /// <exception cref="ArgumentException">Thrown when a value in the message has no AMQP representation, or nests too deeply.</exception>
+    /// <exception cref="ArgumentException">Thrown when a value in the message has no AMQP representation or nests too deeply, or an application property holds a list, map or array.</exception>
     public static void Encode(AmqpMessage message, IBufferWriter<byte> destination)
     {
         ArgumentNullException.ThrowIfNull(message);

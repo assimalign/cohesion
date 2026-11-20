@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 
 using Assimalign.Cohesion.Amqp;
 
@@ -9,21 +10,21 @@ namespace Assimalign.Cohesion.Amqp.Connections.Internal;
 /// Encodes and decodes the sections of an AMQP 1.0 message (Part 3, section 3.2).
 /// </summary>
 /// <remarks>
+/// <para>
 /// Sections are decoded in the order the specification fixes: header, delivery annotations, message
 /// annotations, properties, application properties, body, footer. Each appears at most once, except that
-/// the body may be several <c>data</c> or several <c>amqp-sequence</c> sections. A message without a body
-/// section decodes with a <see langword="null"/> <see cref="AmqpMessage.Body"/>.
+/// the body may be several <c>data</c> or several <c>amqp-sequence</c> sections, never a mix. Finding the
+/// bare message applies the same rules, so a payload an intermediary forwards is one it could decode.
+/// </para>
+/// <para>
+/// A message without a body section, which Part 3 does not allow but widely used libraries send, decodes
+/// with a <see langword="null"/> <see cref="AmqpMessage.Body"/>, and a message whose body is
+/// <see langword="null"/> encodes without one. Application properties are held to simple values when
+/// they are encoded (section 3.2.5) and kept as they arrive when they are decoded, as other libraries do.
+/// </para>
 /// </remarks>
 internal static class AmqpMessageEncoding
 {
-    private const int stageHeader = 1;
-    private const int stageDeliveryAnnotations = 2;
-    private const int stageMessageAnnotations = 3;
-    private const int stageProperties = 4;
-    private const int stageApplicationProperties = 5;
-    private const int stageBody = 6;
-    private const int stageFooter = 7;
-
     public static void Encode(AmqpBufferWriter writer, AmqpMessage message)
     {
         if (message.Header is AmqpHeader header)
@@ -42,7 +43,7 @@ internal static class AmqpMessageEncoding
         if (message.ApplicationProperties is not null)
         {
             AmqpEncoder.WriteDescriptor(writer, AmqpDescriptor.ApplicationProperties);
-            AmqpEncoder.WriteStringMap(writer, message.ApplicationProperties);
+            AmqpEncoder.WriteApplicationProperties(writer, message.ApplicationProperties);
         }
 
         switch (message.Body)
@@ -80,48 +81,35 @@ internal static class AmqpMessageEncoding
     {
         AmqpReader reader = new(payload.Span);
         AmqpMessage message = new();
-        int stage = 0;
+        SectionLayout layout = default;
         List<ReadOnlyMemory<byte>>? data = null;
         List<IReadOnlyList<object?>>? sequences = null;
         AmqpValueBody? value = null;
 
         while (!reader.IsEnd)
         {
-            if (!reader.TryReadDescriptor(out ulong? code, out _))
-            {
-                throw AmqpException.DecodeError(ErrorMessages.SectionNotDescribed);
-            }
+            ulong section = ReadSectionDescriptor(ref reader);
 
-            switch (code)
+            layout.Advance(section);
+
+            switch (section)
             {
                 case AmqpDescriptor.Header:
-                    Advance(ref stage, stageHeader);
                     message.Header = ReadHeaderBody(ref reader);
                     break;
                 case AmqpDescriptor.DeliveryAnnotations:
-                    Advance(ref stage, stageDeliveryAnnotations);
                     message.DeliveryAnnotations = reader.ReadSymbolMap();
                     break;
                 case AmqpDescriptor.MessageAnnotations:
-                    Advance(ref stage, stageMessageAnnotations);
                     message.MessageAnnotations = reader.ReadSymbolMap();
                     break;
                 case AmqpDescriptor.Properties:
-                    Advance(ref stage, stageProperties);
                     message.Properties = ReadPropertiesBody(ref reader, payload);
                     break;
                 case AmqpDescriptor.ApplicationProperties:
-                    Advance(ref stage, stageApplicationProperties);
                     message.ApplicationProperties = reader.ReadStringMap();
                     break;
                 case AmqpDescriptor.Data:
-                    if (sequences is not null || value is not null || (stage > stageBody) || (stage == stageBody && data is null))
-                    {
-                        throw AmqpException.DecodeError(ErrorMessages.SectionOrderInvalid);
-                    }
-
-                    stage = stageBody;
-
                     if (!reader.ReadBinaryRange(out int offset, out int length))
                     {
                         throw AmqpException.DecodeError(ErrorMessages.ValueNotBinary);
@@ -130,13 +118,6 @@ internal static class AmqpMessageEncoding
                     (data ??= new List<ReadOnlyMemory<byte>>()).Add(payload.Slice(offset, length));
                     break;
                 case AmqpDescriptor.AmqpSequence:
-                    if (data is not null || value is not null || (stage > stageBody) || (stage == stageBody && sequences is null))
-                    {
-                        throw AmqpException.DecodeError(ErrorMessages.SectionOrderInvalid);
-                    }
-
-                    stage = stageBody;
-
                     if (reader.ReadValue() is not List<object?> sequence)
                     {
                         throw AmqpException.DecodeError(ErrorMessages.ValueNotList);
@@ -145,15 +126,11 @@ internal static class AmqpMessageEncoding
                     (sequences ??= new List<IReadOnlyList<object?>>()).Add(sequence);
                     break;
                 case AmqpDescriptor.AmqpValue:
-                    Advance(ref stage, stageBody);
                     value = new AmqpValueBody(reader.ReadValue());
                     break;
                 case AmqpDescriptor.Footer:
-                    Advance(ref stage, stageFooter);
                     message.Footer = reader.ReadSymbolMap();
                     break;
-                default:
-                    throw AmqpException.DecodeError(ErrorMessages.SectionDescriptorUnsupported);
             }
         }
 
@@ -181,52 +158,26 @@ internal static class AmqpMessageEncoding
     public static (int Offset, int Length) FindBareMessage(ReadOnlySpan<byte> payload)
     {
         AmqpReader reader = new(payload);
+        SectionLayout layout = default;
         int start = -1;
         int end = -1;
 
         while (!reader.IsEnd)
         {
             int sectionStart = reader.Position;
+            ulong section = ReadSectionDescriptor(ref reader);
 
-            if (!reader.TryReadDescriptor(out ulong? code, out _))
-            {
-                throw AmqpException.DecodeError(ErrorMessages.SectionNotDescribed);
-            }
-
+            layout.Advance(section);
             reader.Skip();
 
-            switch (code)
+            if (section is >= AmqpDescriptor.Properties and <= AmqpDescriptor.AmqpValue)
             {
-                case AmqpDescriptor.Header:
-                case AmqpDescriptor.DeliveryAnnotations:
-                case AmqpDescriptor.MessageAnnotations:
-                    if (start >= 0)
-                    {
-                        throw AmqpException.DecodeError(ErrorMessages.SectionOrderInvalid);
-                    }
+                if (start < 0)
+                {
+                    start = sectionStart;
+                }
 
-                    break;
-                case AmqpDescriptor.Properties:
-                case AmqpDescriptor.ApplicationProperties:
-                case AmqpDescriptor.Data:
-                case AmqpDescriptor.AmqpSequence:
-                case AmqpDescriptor.AmqpValue:
-                    if (start < 0)
-                    {
-                        start = sectionStart;
-                    }
-
-                    end = reader.Position;
-                    break;
-                case AmqpDescriptor.Footer:
-                    if (!reader.IsEnd)
-                    {
-                        throw AmqpException.DecodeError(ErrorMessages.SectionOrderInvalid);
-                    }
-
-                    break;
-                default:
-                    throw AmqpException.DecodeError(ErrorMessages.SectionDescriptorUnsupported);
+                end = reader.Position;
             }
         }
 
@@ -340,13 +291,91 @@ internal static class AmqpMessageEncoding
         return id;
     }
 
-    private static void Advance(ref int stage, int next)
+    /// <summary>
+    /// Reads a section's descriptor, which must name one of the message sections.
+    /// </summary>
+    private static ulong ReadSectionDescriptor(ref AmqpReader reader)
     {
-        if (next <= stage)
+        if (!reader.TryReadDescriptor(out ulong? code, out _))
         {
-            throw AmqpException.DecodeError(ErrorMessages.SectionOrderInvalid);
+            throw AmqpException.DecodeError(ErrorMessages.SectionNotDescribed);
         }
 
-        stage = next;
+        if (code is not ulong section || section is < AmqpDescriptor.Header or > AmqpDescriptor.Footer)
+        {
+            throw AmqpException.DecodeError(ErrorMessages.SectionDescriptorUnsupported);
+        }
+
+        return section;
+    }
+
+    /// <summary>
+    /// Follows a message's sections through the order and multiplicity AMQP 1.0 fixes (Part 3,
+    /// section 3.2): header, delivery annotations, message annotations, properties, application
+    /// properties, body and footer, each at most once, where the body is one or more <c>data</c> sections,
+    /// one or more <c>amqp-sequence</c> sections, or one <c>amqp-value</c> section.
+    /// </summary>
+    private struct SectionLayout
+    {
+        private ulong _last;
+
+        /// <summary>
+        /// Takes the next section, refusing it when it breaks the layout.
+        /// </summary>
+        /// <exception cref="AmqpException">Thrown with <c>amqp:decode-error</c> when the section repeats, mixes body kinds or is out of order.</exception>
+        public void Advance(ulong section)
+        {
+            if (_last != 0)
+            {
+                if (section == _last)
+                {
+                    // Only data and amqp-sequence sections repeat, as one body.
+                    if (section is not (AmqpDescriptor.Data or AmqpDescriptor.AmqpSequence))
+                    {
+                        throw AmqpException.DecodeError(
+                            string.Format(CultureInfo.CurrentCulture, ErrorMessages.SectionRepeated, GetName(section)));
+                    }
+                }
+                else if (GetPlace(section) == GetPlace(_last))
+                {
+                    throw AmqpException.DecodeError(
+                        string.Format(CultureInfo.CurrentCulture, ErrorMessages.BodyMixed, GetName(_last), GetName(section)));
+                }
+                else if (GetPlace(section) < GetPlace(_last))
+                {
+                    throw AmqpException.DecodeError(
+                        string.Format(CultureInfo.CurrentCulture, ErrorMessages.SectionOrderInvalid, GetName(section), GetName(_last)));
+                }
+            }
+
+            _last = section;
+        }
+
+        // The three body kinds share one place in the order.
+        private static int GetPlace(ulong section)
+        {
+            return section switch
+            {
+                AmqpDescriptor.Data or AmqpDescriptor.AmqpSequence or AmqpDescriptor.AmqpValue => (int)AmqpDescriptor.Data,
+                AmqpDescriptor.Footer => (int)AmqpDescriptor.Footer,
+                _ => (int)section
+            };
+        }
+
+        private static string GetName(ulong section)
+        {
+            return section switch
+            {
+                AmqpDescriptor.Header => "header",
+                AmqpDescriptor.DeliveryAnnotations => "delivery-annotations",
+                AmqpDescriptor.MessageAnnotations => "message-annotations",
+                AmqpDescriptor.Properties => "properties",
+                AmqpDescriptor.ApplicationProperties => "application-properties",
+                AmqpDescriptor.Data => "data",
+                AmqpDescriptor.AmqpSequence => "amqp-sequence",
+                AmqpDescriptor.AmqpValue => "amqp-value",
+                _ => "footer"
+            };
+        }
     }
 }

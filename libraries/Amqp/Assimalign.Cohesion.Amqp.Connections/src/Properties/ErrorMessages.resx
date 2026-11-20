@@ -137,7 +137,16 @@
     <value>An AMQP message section has a descriptor that is not a message section.</value>
   </data>
   <data name="SectionOrderInvalid" xml:space="preserve">
-    <value>The AMQP message sections are out of order, repeated, or mix body types.</value>
+    <value>The AMQP message's {0} section follows its {1} section, which AMQP 1.0 orders after it.</value>
+  </data>
+  <data name="SectionRepeated" xml:space="preserve">
+    <value>The AMQP message carries a second {0} section.</value>
+  </data>
+  <data name="BodyMixed" xml:space="preserve">
+    <value>The AMQP message body mixes {0} and {1} sections; a body is data sections, amqp-sequence sections or one amqp-value section.</value>
+  </data>
+  <data name="ApplicationPropertyNotSimple" xml:space="preserve">
+    <value>The application property '{0}' holds a {1}; application properties hold only simple values, not lists, maps or arrays.</value>
   </data>
   <data name="MessageIdInvalid" xml:space="preserve">
     <value>An AMQP message id or correlation id is not an unsigned long, UUID, binary or string.</value>

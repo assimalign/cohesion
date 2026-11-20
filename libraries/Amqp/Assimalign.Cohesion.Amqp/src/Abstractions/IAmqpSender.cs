@@ -61,6 +61,7 @@ public interface IAmqpSender : IAmqpLink
     /// settled or settled by the receiver without one.
     /// </returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="message"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">Thrown when a value in the message has no AMQP representation or nests too deeply, or an application property holds a list, map or array. Nothing is sent.</exception>
     /// <exception cref="AmqpException">Thrown with <see cref="AmqpErrorCode.MessageSizeExceeded"/> when the encoded message exceeds <see cref="IAmqpLink.RemoteMaxMessageSize"/>, or with <see cref="AmqpErrorCode.LinkDetached"/> when the link detaches first.</exception>
     /// <exception cref="OperationCanceledException">Thrown when the send is canceled.</exception>
     ValueTask<AmqpDeliveryState?> SendAsync(AmqpMessage message, AmqpDeliveryOptions? options = null, CancellationToken cancellationToken = default);
