@@ -36,13 +36,13 @@ internal static class AmqpMessageFormatCorpus
     [
         new("MF1", "Sections follow the order header, delivery-annotations, message-annotations, properties, application-properties, body, footer.", "Part 3, section 3.2", true),
         new("MF2", "Each section other than the body appears at most once.", "Part 3, section 3.2", true),
-        new("MF3", "The body is one or more data sections, one or more amqp-sequence sections, or one amqp-value section, never a mix.", "Part 3, section 3.2", true),
+        new("MF3", "The body is one or more data sections, one or more amqp-sequence sections, or one amqp-value section, never a mix; a message with no body section, which widely used libraries send, decodes.", "Part 3, section 3.2", true, Leniency: true),
         new("MF4", "The footer, when present, is the last section.", "Part 3, sections 3.2 and 3.2.9", true),
         new("MF5", "Each section is a described value whose descriptor, numeric or symbolic, names a message section.", "Part 3, section 3.2; Part 1, section 1.5", true),
         new("MF6", "A data section holds binary and an amqp-sequence section holds a list.", "Part 3, sections 3.2.6 and 3.2.7", false),
         new("MF7", "A message-id or correlation-id is a ulong, uuid, binary or string.", "Part 3, sections 3.2.4 and 3.2.11 to 3.2.14", false),
         new("MF8", "Annotation keys are symbols or unsigned longs, and every unsigned long key is reserved, so a receiver that understands none refuses it with not-implemented.", "Part 3, sections 3.2.2, 3.2.3, 3.2.9 and 3.2.10", false),
-        new("MF9", "Application-properties keys are strings; the codec keeps a received value whatever its type.", "Part 3, section 3.2.5", false)
+        new("MF9", "Application-properties keys are strings; the codec keeps a received value whatever its type.", "Part 3, section 3.2.5", false, Leniency: true)
     ];
 
     /// <summary>

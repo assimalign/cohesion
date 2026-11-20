@@ -29,9 +29,10 @@ public sealed class AmqpSessionOptions
     /// Defaults to 2,048.
     /// </summary>
     /// <remarks>
-    /// The session restores the window as it takes transfers in, so the value bounds the frames in flight,
-    /// not the frames in total. A peer that exceeds it ends the session with
-    /// <see cref="AmqpErrorCondition.WindowViolation"/>.
+    /// The session restores the window once half of it is used, as transfers arrive and whether or not the
+    /// application has taken them, so the value bounds the frames in flight between two of the session's
+    /// <c>flow</c> frames, not the frames in total, and not what the session holds: link credit and each
+    /// receiver's <see cref="AmqpLinkOptions.MaxMessageSize"/> bound that.
     /// </remarks>
     /// <exception cref="ArgumentOutOfRangeException">Thrown when the assigned value is zero.</exception>
     public uint IncomingWindow

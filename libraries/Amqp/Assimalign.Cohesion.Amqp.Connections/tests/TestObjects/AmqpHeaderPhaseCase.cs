@@ -18,7 +18,14 @@ internal sealed record AmqpHeaderPhaseCase(
     AmqpHeaderPhaseRole Role,
     AmqpHeaderPhaseSasl Sasl,
     IReadOnlyList<AmqpHeaderPhaseStep> Script,
-    AmqpHeaderPhaseOutcome Outcome);
+    AmqpHeaderPhaseOutcome Outcome)
+{
+    /// <summary>
+    /// Gets whether the engine refuses the case: establishment fails, or the engine ends the script by closing the
+    /// connection it opened.
+    /// </summary>
+    public bool Refuses => !Outcome.Opened || Script[^1].Kind == AmqpHeaderPhaseStepKind.ExpectClose;
+}
 
 /// <summary>
 /// The engine a header-phase case drives.

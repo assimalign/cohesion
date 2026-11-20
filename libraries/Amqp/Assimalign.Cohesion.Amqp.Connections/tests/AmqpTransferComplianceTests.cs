@@ -31,119 +31,115 @@ public class AmqpTransferComplianceTests
     /// <summary>
     /// Gets the Part 2 rules for moving a delivery that the engine holds, each with the tests that pin it.
     /// </summary>
-    internal static IReadOnlyList<AmqpTransferRule> Rules { get; } =
+    internal static IReadOnlyList<AmqpComplianceRule> Rules { get; } =
     [
-        new("F1", "A delivery too large for one frame is split: every frame but the last sets more, only the first names the delivery-id, delivery-tag, message format and settlement, and no frame exceeds the frame size.", "Part 2, sections 2.6.14 and 2.7.5", Forbids: false,
-        [
-            nameof(SendAsync_OnDeliveryLargerThanFrame_ShouldSplitIt),
-            nameof(AmqpConnectionTests.SendAsync_OnMessageLargerThanFrame_ShouldReassembleDelivery)
-        ]),
-        new("F2", "A receiver joins a delivery's frames in the order they arrive, and the last frame may carry no payload.", "Part 2, section 2.6.14", Forbids: false,
-        [
-            nameof(OnTransfer_OnSplitDelivery_ShouldJoinFramesInOrder),
-            nameof(OnTransfer_OnEmptyLastFrame_ShouldCompleteDelivery)
-        ]),
-        new("F3", "The first frame of a delivery names its delivery-id and delivery-tag: a receiver detaches a link whose first frame omits either with amqp:invalid-field.", "Part 2, section 2.7.5", Forbids: true,
-        [
-            nameof(OnTransfer_OnFirstFrameNotNamingDelivery_ShouldDetachWithInvalidField)
-        ]),
-        new("F4", "A later frame may repeat the delivery-id, delivery-tag and message format, and must not change any of them: a receiver detaches a link whose later frame does with amqp:invalid-field.", "Part 2, section 2.7.5", Forbids: true,
-        [
-            nameof(OnTransfer_OnContinuationRepeatingDelivery_ShouldAcceptIt),
-            nameof(OnTransfer_OnContinuationChangingDelivery_ShouldDetachWithInvalidField)
-        ]),
-        new("F5", "Deliveries on one link are not interleaved: a receiver detaches a link whose sender starts a delivery before the last frame of the one in progress with amqp:invalid-field.", "Part 2, section 2.6.14", Forbids: true,
-        [
-            nameof(OnTransfer_OnDeliveryInterleavedWithAnother_ShouldDetachWithInvalidField)
-        ]),
-        new("F6", "Each delivery takes one unit of link credit, with its first frame: a receiver detaches a link whose sender starts a delivery without credit with amqp:transfer-limit-exceeded.", "Part 2, section 2.6.7", Forbids: true,
-        [
-            nameof(OnTransfer_OnSplitDelivery_ShouldTakeOneUnitOfCredit),
-            nameof(AmqpEngineViolationTests.OnTransfer_WithoutCredit_ShouldDetachWithTransferLimitExceeded)
-        ]),
-        new("F7", "A receiver measures a delivery across its frames against its max-message-size, and detaches the link with amqp:message-size-exceeded once the delivery grows past it.", "Part 2, section 2.7.3", Forbids: true,
-        [
-            nameof(OnTransfer_OnSplitDeliveryAboveMaxMessageSize_ShouldDetachWithMessageSizeExceeded),
-            nameof(AmqpEngineViolationTests.OnTransfer_AboveMaxMessageSize_ShouldDetachWithMessageSizeExceeded)
-        ]),
-        new("F8", "An aborted delivery is discarded and settled implicitly: the aborting frame's payload is ignored, nothing reaches the application or stays buffered, the delivery's credit stays spent, and the link keeps receiving.", "Part 2, sections 2.6.14 and 2.7.5", Forbids: false,
-        [
-            nameof(OnTransfer_OnAbortedDelivery_ShouldDiscardItAndKeepReceiving),
-            nameof(OnTransfer_OnAbortedFirstFrame_ShouldDiscardIt)
-        ]),
-        new("F9", "The aborted flag takes precedence over more: a receiver ignores more on an aborting frame.", "Part 2, section 2.7.5", Forbids: false,
-        [
-            nameof(OnTransfer_OnAbortedFrameWithMore_ShouldDiscardDelivery)
-        ]),
-        new("F10", "A sender that stops a delivery after its first frame aborts it with one frame that sets aborted and not more.", "Part 2, sections 2.6.14 and 2.7.5", Forbids: false,
-        [
-            nameof(SendAsync_OnCancelAfterFirstFrame_ShouldAbortDelivery),
-            nameof(AmqpTransactionComplianceTests.SendAsync_OnCanceledTransactionalDelivery_ShouldNameTransactionOnAbort)
-        ]),
-        new("F11", "Settlement on a frame holds for the rest of the delivery: a later frame that leaves settled unset keeps a settled delivery settled, and a later frame may settle a delivery its first frame left unsettled.", "Part 2, section 2.7.5", Forbids: false,
-        [
-            nameof(OnTransfer_OnContinuationLeavingSettledUnset_ShouldKeepDeliverySettled),
-            nameof(OnTransfer_OnLastFrameSettled_ShouldSettleDelivery)
-        ]),
-        new("F12", "A later frame that clears settled leaves a settled delivery settled: a delivery cannot become unsettled again, so the engine ignores the flag.", "Part 2, section 2.7.5", Forbids: false,
-        [
-            nameof(OnTransfer_OnContinuationClearingSettled_ShouldKeepDeliverySettled)
-        ], Leniency: true),
-        new("F13", "A first frame without a message format is read as format 0, the AMQP message format, although the first frame of a split delivery must name it: the meaning is clear.", "Part 2, section 2.7.5", Forbids: false,
-        [
-            nameof(OnTransfer_OnFirstFrameWithoutMessageFormat_ShouldReadFormatZero)
-        ], Leniency: true),
-        new("F14", "A transfer cannot ask for receiver settle mode second on a link whose receiver settles first, which a receiver refuses with amqp:invalid-field, and one that asks for first on a link that settles second is settled first.", "Part 2, section 2.7.5", Forbids: true,
-        [
-            nameof(OnTransfer_OnSecondSettleModeOnFirstModeLink_ShouldDetachWithInvalidField),
-            nameof(OnTransfer_OnFirstSettleModeOnSecondModeLink_ShouldSettleFirst)
-        ]),
-        new("F15", "A delivery-id names one unsettled delivery of its session: a session whose peer starts a delivery under the id of an unsettled one ends with amqp:illegal-state.", "Part 2, section 2.6", Forbids: true,
-        [
-            nameof(OnTransfer_OnDeliveryIdOfUnsettledDelivery_ShouldEndSessionWithIllegalState)
-        ]),
-        new("F16", "A terminal outcome the sender stated for a delivery does not change: a receiver detaches a link whose sender states another outcome on a later frame or disposition with amqp:illegal-state. Outcomes compare by kind.", "Part 2, section 2.7.5", Forbids: true,
-        [
-            nameof(OnTransfer_OnContinuationChangingOutcome_ShouldDetachWithIllegalState),
-            nameof(OnTransfer_OnContinuationRestatingOutcome_ShouldDeliverIt),
-            nameof(OnDisposition_OnSenderChangingOutcome_ShouldDetachWithIllegalState),
-            nameof(OnDisposition_OnSenderRestatingOutcome_ShouldSettleDelivery),
-            nameof(OnDisposition_OnSenderSettlingWithoutState_ShouldKeepOutcome),
-            nameof(OnDisposition_OnChangeAfterDispositionWithoutState_ShouldDetachWithIllegalState)
-        ]),
-        new("F17", "A receiver does not check that a new delivery's tag differs from those of its unsettled deliveries: deliveries settle by delivery-id, so a repeated tag puts nothing at risk until the link is resumed, and the application builds the unsettled map it resumes with.", "Part 2, section 2.6.12", Forbids: false,
-        [
-            nameof(OnTransfer_OnTagOfUnsettledDelivery_ShouldAcceptIt)
-        ], Leniency: true),
-        new("F18", "A sender that drains uses up the credit it cannot use: it advances its delivery-count by that credit, sets its link-credit to zero, and sends a flow whose drain field keeps the receiver's last value, since only the receiver changes it.", "Part 2, sections 2.6.7 and 2.7.4", Forbids: false,
-        [
-            nameof(OnFlow_OnDrainWithNothingToSend_ShouldAdvanceDeliveryCountAndKeepDrain),
-            nameof(AmqpConnectionTests.DrainAsync_OnIdleSender_ShouldReturnCredit)
-        ]),
-        new("F19", "A receiver's drain ends once the sender's delivery-count reaches the delivery limit: a flow that reports no credit without advancing the delivery-count does not end it, because a flow the sender wrote before it read the drain reads the same way.", "Part 2, section 2.6.7", Forbids: false,
-        [
-            nameof(DrainAsync_OnSenderReportingNoCreditWithoutAdvancing_ShouldKeepDraining),
-            nameof(AmqpConnectionTests.DrainAsync_OnIdleSender_ShouldReturnCredit)
-        ]),
-        new("F20", "A receiver ignores the drain field of the sender's flow, which should repeat the receiver's own: some libraries clear it in the flow that ends a drain, and the delivery-count already says the drain ended.", "Part 2, sections 2.6.7 and 2.7.4", Forbids: false,
-        [
-            nameof(DrainAsync_OnSenderUsingUpCreditWithDrainCleared_ShouldEnd)
-        ], Leniency: true)
+        new("F1", "A delivery too large for one frame is split: every frame but the last sets more, only the first names the delivery-id, delivery-tag, message format and settlement, and no frame exceeds the frame size.", "Part 2, sections 2.6.14 and 2.7.5",
+            Tests:
+            [
+                nameof(SendAsync_OnDeliveryLargerThanFrame_ShouldSplitIt),
+                nameof(AmqpConnectionTests.SendAsync_OnMessageLargerThanFrame_ShouldReassembleDelivery)
+            ],
+            Refusals: []),
+        new("F2", "A receiver joins a delivery's frames in the order they arrive, and the last frame may carry no payload.", "Part 2, section 2.6.14",
+            Tests:
+            [
+                nameof(OnTransfer_OnSplitDelivery_ShouldJoinFramesInOrder),
+                nameof(OnTransfer_OnEmptyLastFrame_ShouldCompleteDelivery)
+            ],
+            Refusals: []),
+        new("F3", "The first frame of a delivery names its delivery-id and delivery-tag: a receiver detaches a link whose first frame omits either with amqp:invalid-field.", "Part 2, section 2.7.5",
+            Tests: [nameof(OnTransfer_OnSplitDelivery_ShouldJoinFramesInOrder)],
+            Refusals: [nameof(OnTransfer_OnFirstFrameNotNamingDelivery_ShouldDetachWithInvalidField)]),
+        new("F4", "A later frame may repeat the delivery-id, delivery-tag and message format, and must not change any of them: a receiver detaches a link whose later frame does with amqp:invalid-field.", "Part 2, section 2.7.5",
+            Tests: [nameof(OnTransfer_OnContinuationRepeatingDelivery_ShouldAcceptIt)],
+            Refusals: [nameof(OnTransfer_OnContinuationChangingDelivery_ShouldDetachWithInvalidField)]),
+        new("F5", "Deliveries on one link are not interleaved: a receiver detaches a link whose sender starts a delivery before the last frame of the one in progress with amqp:invalid-field.", "Part 2, section 2.6.14",
+            Tests: [nameof(AmqpConnectionTests.SendAsync_OnManyMessages_ShouldDeliverInOrder)],
+            Refusals: [nameof(OnTransfer_OnDeliveryInterleavedWithAnother_ShouldDetachWithInvalidField)]),
+        new("F6", "Each delivery takes one unit of link credit, with its first frame: a receiver detaches a link whose sender starts a delivery without credit with amqp:transfer-limit-exceeded.", "Part 2, section 2.6.7",
+            Tests: [nameof(OnTransfer_OnSplitDelivery_ShouldTakeOneUnitOfCredit)],
+            Refusals: [nameof(AmqpEngineViolationTests.OnTransfer_WithoutCredit_ShouldDetachWithTransferLimitExceeded)]),
+        new("F7", "A receiver measures a delivery across its frames against its max-message-size, and detaches the link with amqp:message-size-exceeded once the delivery grows past it.", "Part 2, section 2.7.3",
+            Tests: [nameof(OnTransfer_OnSplitDeliveryAtMaxMessageSize_ShouldDeliverIt)],
+            Refusals:
+            [
+                nameof(OnTransfer_OnSplitDeliveryAboveMaxMessageSize_ShouldDetachWithMessageSizeExceeded),
+                nameof(AmqpEngineViolationTests.OnTransfer_AboveMaxMessageSize_ShouldDetachWithMessageSizeExceeded)
+            ]),
+        new("F8", "An aborted delivery is discarded and settled implicitly: the aborting frame's payload is ignored, nothing reaches the application or stays buffered, the delivery's credit stays spent, and the link keeps receiving.", "Part 2, sections 2.6.14 and 2.7.5",
+            Tests:
+            [
+                nameof(OnTransfer_OnAbortedDelivery_ShouldDiscardItAndKeepReceiving),
+                nameof(OnTransfer_OnAbortedFirstFrame_ShouldDiscardIt)
+            ],
+            Refusals: []),
+        new("F9", "The aborted flag takes precedence over more: a receiver ignores more on an aborting frame.", "Part 2, section 2.7.5",
+            Tests: [nameof(OnTransfer_OnAbortedFrameWithMore_ShouldDiscardDelivery)],
+            Refusals: []),
+        new("F10", "A sender that stops a delivery after its first frame aborts it with one frame that sets aborted and not more.", "Part 2, sections 2.6.14 and 2.7.5",
+            Tests:
+            [
+                nameof(SendAsync_OnCancelAfterFirstFrame_ShouldAbortDelivery),
+                nameof(AmqpTransactionComplianceTests.SendAsync_OnCanceledTransactionalDelivery_ShouldNameTransactionOnAbort)
+            ],
+            Refusals: []),
+        new("F11", "Settlement on a frame holds for the rest of the delivery: a later frame that leaves settled unset keeps a settled delivery settled, and a later frame may settle a delivery its first frame left unsettled.", "Part 2, section 2.7.5",
+            Tests:
+            [
+                nameof(OnTransfer_OnContinuationLeavingSettledUnset_ShouldKeepDeliverySettled),
+                nameof(OnTransfer_OnLastFrameSettled_ShouldSettleDelivery)
+            ],
+            Refusals: []),
+        new("F12", "A later frame that clears settled leaves a settled delivery settled: a delivery cannot become unsettled again, so the engine ignores the flag.", "Part 2, section 2.7.5",
+            Tests: [nameof(OnTransfer_OnContinuationClearingSettled_ShouldKeepDeliverySettled)],
+            Refusals: [],
+            Leniency: true),
+        new("F13", "A first frame without a message format is read as format 0, the AMQP message format, although the first frame of a split delivery must name it: the meaning is clear.", "Part 2, section 2.7.5",
+            Tests: [nameof(OnTransfer_OnFirstFrameWithoutMessageFormat_ShouldReadFormatZero)],
+            Refusals: [],
+            Leniency: true),
+        new("F14", "A transfer cannot ask for receiver settle mode second on a link whose receiver settles first, which a receiver refuses with amqp:invalid-field, and one that asks for first on a link that settles second is settled first.", "Part 2, section 2.7.5",
+            Tests: [nameof(OnTransfer_OnFirstSettleModeOnSecondModeLink_ShouldSettleFirst)],
+            Refusals: [nameof(OnTransfer_OnSecondSettleModeOnFirstModeLink_ShouldDetachWithInvalidField)]),
+        new("F15", "A delivery-id names one unsettled delivery of its session: a session whose peer starts a delivery under the id of an unsettled one ends with amqp:illegal-state.", "Part 2, section 2.6",
+            Tests: [nameof(OnTransfer_OnTagOfUnsettledDelivery_ShouldAcceptIt)],
+            Refusals: [nameof(OnTransfer_OnDeliveryIdOfUnsettledDelivery_ShouldEndSessionWithIllegalState)]),
+        new("F16", "A terminal outcome the sender stated for a delivery does not change: a receiver detaches a link whose sender states another outcome on a later frame or disposition with amqp:illegal-state. Outcomes compare by kind.", "Part 2, section 2.7.5",
+            Tests:
+            [
+                nameof(OnTransfer_OnContinuationRestatingOutcome_ShouldDeliverIt),
+                nameof(OnDisposition_OnSenderRestatingOutcome_ShouldSettleDelivery),
+                nameof(OnDisposition_OnSenderSettlingWithoutState_ShouldKeepOutcome)
+            ],
+            Refusals:
+            [
+                nameof(OnTransfer_OnContinuationChangingOutcome_ShouldDetachWithIllegalState),
+                nameof(OnDisposition_OnSenderChangingOutcome_ShouldDetachWithIllegalState),
+                nameof(OnDisposition_OnChangeAfterDispositionWithoutState_ShouldDetachWithIllegalState)
+            ]),
+        new("F17", "A receiver does not check that a new delivery's tag differs from those of its unsettled deliveries: deliveries settle by delivery-id, so a repeated tag puts nothing at risk until the link is resumed, and the application builds the unsettled map it resumes with.", "Part 2, section 2.6.12",
+            Tests: [nameof(OnTransfer_OnTagOfUnsettledDelivery_ShouldAcceptIt)],
+            Refusals: [],
+            Leniency: true),
+        new("F18", "A sender that drains uses up the credit it cannot use: it advances its delivery-count by that credit, sets its link-credit to zero, and sends a flow whose drain field keeps the receiver's last value, since only the receiver changes it.", "Part 2, sections 2.6.7 and 2.7.4",
+            Tests:
+            [
+                nameof(OnFlow_OnDrainWithNothingToSend_ShouldAdvanceDeliveryCountAndKeepDrain),
+                nameof(AmqpConnectionTests.DrainAsync_OnIdleSender_ShouldReturnCredit)
+            ],
+            Refusals: []),
+        new("F19", "A receiver's drain ends once the sender's delivery-count reaches the delivery limit: a flow that reports no credit without advancing the delivery-count does not end it, because a flow the sender wrote before it read the drain reads the same way.", "Part 2, section 2.6.7",
+            Tests:
+            [
+                nameof(DrainAsync_OnSenderReportingNoCreditWithoutAdvancing_ShouldKeepDraining),
+                nameof(AmqpConnectionTests.DrainAsync_OnIdleSender_ShouldReturnCredit)
+            ],
+            Refusals: []),
+        new("F20", "A receiver ignores the drain field of the sender's flow, which should repeat the receiver's own: some libraries clear it in the flow that ends a drain, and the delivery-count already says the drain ended.", "Part 2, sections 2.6.7 and 2.7.4",
+            Tests: [nameof(DrainAsync_OnSenderUsingUpCreditWithDrainCleared_ShouldEnd)],
+            Refusals: [],
+            Leniency: true)
     ];
-
-    [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - Rules: Should name at least one test for every Part 2 transfer rule, with unique identifiers")]
-    public void Rules_OnTransferMap_ShouldNameTestsForEveryRule()
-    {
-        // Arrange
-        IReadOnlyList<AmqpTransferRule> rules = Rules;
-
-        // Act
-        string[] identifiers = [.. rules.Select(rule => rule.Id)];
-
-        // Assert
-        identifiers.Distinct().Count().ShouldBe(identifiers.Length);
-        rules.ShouldAllBe(rule => rule.Tests.Count > 0 && rule.Reference.StartsWith("Part 2", StringComparison.Ordinal));
-    }
 
     [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - SendAsync: Should split a delivery larger than a frame, naming it on the first frame only")]
     public async Task SendAsync_OnDeliveryLargerThanFrame_ShouldSplitIt()
@@ -340,6 +336,25 @@ public class AmqpTransferComplianceTests
         // Assert
         delivery.Payload.ToArray().ShouldBe(new byte[] { 1, 2, 3 });
         detach.Error.ShouldNotBeNull().Condition.ShouldBe(AmqpErrorCondition.TransferLimitExceeded);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - OnTransfer: Should deliver a split delivery that reaches max-message-size exactly")]
+    public async Task OnTransfer_OnSplitDeliveryAtMaxMessageSize_ShouldDeliverIt()
+    {
+        // Arrange
+        using CancellationTokenSource timeout = new(_testTimeout);
+        await using AmqpScriptedHost host = await AmqpScriptedHost.AcceptAsync(cancellationToken: timeout.Token);
+        AmqpTestPeer peer = host.Peer;
+        IAmqpReceiver receiver = await AttachReceiverAsync(host, new AmqpReceiverOptions { MaxMessageSize = 16 }, timeout.Token);
+        await peer.WriteFrameAsync(0, First(CreateTransfer(deliveryId: 0)), timeout.Token, payload: new byte[10]);
+
+        // Act
+        await peer.WriteFrameAsync(0, Continuation(), timeout.Token, payload: new byte[6]);
+        IAmqpDelivery delivery = await receiver.ReceiveAsync(timeout.Token);
+
+        // Assert
+        delivery.Payload.Length.ShouldBe(16);
+        receiver.LinkDetached.IsCancellationRequested.ShouldBeFalse();
     }
 
     [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - OnTransfer: Should detach a link whose split delivery grows past max-message-size with amqp:message-size-exceeded")]

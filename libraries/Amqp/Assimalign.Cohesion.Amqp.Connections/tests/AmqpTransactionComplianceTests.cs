@@ -28,109 +28,106 @@ public class AmqpTransactionComplianceTests
     /// <summary>
     /// Gets the Part 4 rules the engine and its transaction helpers hold, each with the tests that pin it.
     /// </summary>
-    internal static IReadOnlyList<AmqpTransactionRule> Rules { get; } =
+    internal static IReadOnlyList<AmqpComplianceRule> Rules { get; } =
     [
-        new("T1", "A declare or discharge is never sent settled: the controller refuses to, and a coordinator detaches a link that does with amqp:illegal-state.", "Part 4, sections 4.2 and 4.3", Forbids: true,
-        [
-            nameof(OnTransfer_OnControlLinkSettled_ShouldDetachWithIllegalState),
-            nameof(SendAsync_OnControlLink_ShouldRefuseSettledAndTransactionalDeliveries),
-            nameof(AttachSenderAsync_ToCoordinatorSendingSettled_ShouldRefuse),
-            nameof(AmqpTransactionCoordinatorTests.AttachAsync_OnSession_ShouldAttachUnsettledFromSourceSupportingRejected)
-        ]),
-        new("T2", "No transactional work is allowed on the control link: no transactional state on its transfers, on either end's dispositions, or on what the coordinator answers, and no transactional acquisition.", "Part 4, section 4.1", Forbids: true,
-        [
-            nameof(OnTransfer_OnControlLinkTransactional_ShouldDetachWithNotAllowed),
-            nameof(OnDisposition_OnControlLinkTransactional_ShouldDetachWithNotAllowed),
-            nameof(OnDisposition_OnTransactionalAnswerFromCoordinator_ShouldDetachWithNotAllowed),
-            nameof(SendAsync_OnControlLink_ShouldRefuseSettledAndTransactionalDeliveries),
-            nameof(SettleAsync_OnControlLinkWithTransactionalState_ShouldRefuse),
-            nameof(SetAcquisitionTransaction_OnControlLink_ShouldRefuse)
-        ]),
-        new("T3", "A link to the coordinator cannot be resumed.", "Part 4, section 4.2", Forbids: true,
-        [
-            nameof(AttachSenderAsync_ToCoordinatorResuming_ShouldRefuse)
-        ]),
-        new("T4", "Every frame of a split delivery belongs to the same transaction: the sender names it on each frame, an aborting one included, and a receiver detaches a link whose frames or later dispositions move a delivery into, out of, or between transactions with amqp:invalid-field.", "Part 4, section 4.4.1", Forbids: true,
-        [
-            nameof(SendAsync_OnSplitTransactionalDelivery_ShouldNameTransactionOnEveryFrame),
-            nameof(SendAsync_OnCanceledTransactionalDelivery_ShouldNameTransactionOnAbort),
-            nameof(OnTransfer_OnContinuationInAnotherTransaction_ShouldDetachWithInvalidField),
-            nameof(OnTransfer_OnContinuationOutOfTransaction_ShouldDetachWithInvalidField),
-            nameof(OnTransfer_OnContinuationIntoTransaction_ShouldDetachWithInvalidField),
-            nameof(OnDisposition_OnSenderMovingDelivery_ShouldDetachWithInvalidField)
-        ]),
-        new("T5", "A later frame without a state leaves the delivery in its transaction: the meaning is clear, so the engine accepts it.", "Part 4, section 4.4.1", Forbids: false,
-        [
-            nameof(OnTransfer_OnContinuationWithoutState_ShouldKeepTransaction)
-        ], Leniency: true),
-        new("T6", "A resource can tell which transaction a partly posted delivery belongs to, so it can refuse a discharge against it.", "Part 4, section 4.4.1", Forbids: false,
-        [
-            nameof(OnTransfer_OnContinuationWithoutState_ShouldKeepTransaction)
-        ]),
-        new("T7", "A sender that does not support transactional acquisition terminates the link with amqp:not-implemented when a flow names a transaction, also when the flow arrives before the application answers the attach.", "Part 4, section 4.4.3", Forbids: true,
-        [
-            nameof(OnFlow_WithTransactionIdWithoutSupport_ShouldDetachWithNotImplemented),
-            nameof(OnFlow_WithTransactionIdBeforeAnswer_ShouldDetachWhenAnswered),
-            nameof(AmqpTransactionCoordinatorTests.SetAcquisitionTransaction_OnSenderWithoutSupport_ShouldDetachWithNotImplemented)
-        ]),
-        new("T8", "A sender that supports it takes the transaction from the txn-id flow property, which is binary, and keeps it until the discharge clears it.", "Part 4, sections 4.4.3 and 4.5.4", Forbids: true,
-        [
-            nameof(OnFlow_WithTransactionId_ShouldKeepItUntilCleared),
-            nameof(OnFlow_WithTransactionIdNotBinary_ShouldDetachWithInvalidField),
-            nameof(AmqpTransactionCoordinatorTests.TransactionalAcquisition_OnSupportingSender_ShouldCarryTransactionToCommit)
-        ]),
-        new("T9", "A controller names the transaction it acquires under in the txn-id property of its flows.", "Part 4, section 4.4.3", Forbids: false,
-        [
-            nameof(SetAcquisitionTransaction_OnReceiver_ShouldNameTransactionInEveryFlow)
-        ]),
-        new("T10", "The coordinator answers a declare with declared and a discharge with accepted; it refuses one it cannot perform with a rejected outcome carrying the error when the controller's source supports rejected, and otherwise detaches the link with the error.", "Part 4, sections 4.2, 4.3 and 4.5.5", Forbids: false,
-        [
-            nameof(AmqpTransactionCoordinatorTests.DeclareAsync_OnCoordinator_ShouldReturnDeclaredIdentifiers),
-            nameof(AmqpTransactionCoordinatorTests.DischargeAsync_OnCommit_ShouldCommitAndEndTransaction),
-            nameof(AmqpTransactionCoordinatorTests.DischargeAsync_OnRollback_ShouldRollBackAndEndTransaction),
-            nameof(AmqpTransactionCoordinatorTests.DeclareAsync_OnHandlerRefusal_ShouldThrowWithTransactionError),
-            nameof(AmqpTransactionCoordinatorTests.DischargeAsync_OnCommitRefusal_ShouldThrowAndEndTransaction),
-            nameof(AmqpTransactionCoordinatorTests.DischargeAsync_OnUnknownTransaction_ShouldRefuseWithUnknownId),
-            nameof(AmqpTransactionCoordinatorTests.RunAsync_OnSourceWithoutRejected_ShouldDetachWithError),
-            nameof(AmqpTransactionCoordinatorTests.RunAsync_OnMessageThatIsNotControl_ShouldRejectWithNotImplemented),
-            nameof(AmqpTransactionCoordinatorTests.RunAsync_OnUndecodablePayload_ShouldRejectWithDecodeError)
-        ]),
-        new("T11", "When the control link ends, every transaction it declared and did not discharge rolls back, also when one of the rollbacks fails.", "Part 4, section 4.1", Forbids: false,
-        [
-            nameof(AmqpTransactionCoordinatorTests.DisposeAsync_OnControllerWithLiveTransactions_ShouldRollThemBack),
-            nameof(AmqpTransactionCoordinatorTests.RunAsync_OnCancellation_ShouldCloseLinkAndRollBack),
-            nameof(AmqpTransactionCoordinatorTests.RunAsync_OnHandlerFault_ShouldCloseWithInternalErrorAndRollBack),
-            nameof(AmqpTransactionCoordinatorTests.RunAsync_OnFailedRollback_ShouldRollBackTheOthersAndThrow)
-        ]),
-        new("T12", "A transaction identifier is at most 32 octets and names one live transaction: the coordinator issues no longer one, and no second live one, and fails its run rather than answer with it.", "Part 4, section 4.5.4", Forbids: true,
-        [
-            nameof(AmqpTransactionCoordinatorTests.RunAsync_OnIdentifierLongerThan32Bytes_ShouldFailAndRollBack),
-            nameof(AmqpTransactionCoordinatorTests.RunAsync_OnDuplicateIdentifier_ShouldFailAndRollBack)
-        ]),
-        new("T13", "The coordinator announces its capabilities and the controller checks they cover what it asked for; a coordinator that announces none is taken to support them.", "Part 4, sections 4.5.1 and 4.5.7", Forbids: true,
-        [
-            nameof(AmqpTransactionCoordinatorTests.AttachAsync_OnMissingCapability_ShouldThrowTransactionFailed),
-            nameof(AmqpTransactionCoordinatorTests.AttachAsync_OnCoordinatorWithoutCapabilities_ShouldAttach)
-        ], Leniency: true),
-        new("T14", "Transactional posting carries the transaction on the transfer and the resource's provisional outcome on its disposition.", "Part 4, section 4.4.1", Forbids: false,
-        [
-            nameof(AmqpTransactionCoordinatorTests.TransactionalPosting_OnSplitDelivery_ShouldCarryProvisionalOutcome)
-        ])
+        new("T1", "A declare or discharge is never sent settled: the controller refuses to, and a coordinator detaches a link that does with amqp:illegal-state.", "Part 4, sections 4.2 and 4.3",
+            Tests: [nameof(AmqpTransactionCoordinatorTests.AttachAsync_OnSession_ShouldAttachUnsettledFromSourceSupportingRejected)],
+            Refusals:
+            [
+                nameof(OnTransfer_OnControlLinkSettled_ShouldDetachWithIllegalState),
+                nameof(SendAsync_OnControlLink_ShouldRefuseSettledAndTransactionalDeliveries),
+                nameof(AttachSenderAsync_ToCoordinatorSendingSettled_ShouldRefuse)
+            ]),
+        new("T2", "No transactional work is allowed on the control link: no transactional state on its transfers, on either end's dispositions, or on what the coordinator answers, and no transactional acquisition.", "Part 4, section 4.1",
+            Tests: [nameof(AmqpTransactionCoordinatorTests.DeclareAsync_OnCoordinator_ShouldReturnDeclaredIdentifiers)],
+            Refusals:
+            [
+                nameof(OnTransfer_OnControlLinkTransactional_ShouldDetachWithNotAllowed),
+                nameof(OnDisposition_OnControlLinkTransactional_ShouldDetachWithNotAllowed),
+                nameof(OnDisposition_OnTransactionalAnswerFromCoordinator_ShouldDetachWithNotAllowed),
+                nameof(SendAsync_OnControlLink_ShouldRefuseSettledAndTransactionalDeliveries),
+                nameof(SettleAsync_OnControlLinkWithTransactionalState_ShouldRefuse),
+                nameof(SetAcquisitionTransaction_OnControlLink_ShouldRefuse)
+            ]),
+        new("T3", "A link to the coordinator cannot be resumed.", "Part 4, section 4.2",
+            Tests: [nameof(AmqpTransactionCoordinatorTests.AttachAsync_OnSession_ShouldAttachUnsettledFromSourceSupportingRejected)],
+            Refusals: [nameof(AttachSenderAsync_ToCoordinatorResuming_ShouldRefuse)]),
+        new("T4", "Every frame of a split delivery belongs to the same transaction: the sender names it on each frame, an aborting one included, and a receiver detaches a link whose frames or later dispositions move a delivery into, out of, or between transactions with amqp:invalid-field.", "Part 4, section 4.4.1",
+            Tests:
+            [
+                nameof(SendAsync_OnSplitTransactionalDelivery_ShouldNameTransactionOnEveryFrame),
+                nameof(SendAsync_OnCanceledTransactionalDelivery_ShouldNameTransactionOnAbort)
+            ],
+            Refusals:
+            [
+                nameof(OnTransfer_OnContinuationInAnotherTransaction_ShouldDetachWithInvalidField),
+                nameof(OnTransfer_OnContinuationOutOfTransaction_ShouldDetachWithInvalidField),
+                nameof(OnTransfer_OnContinuationIntoTransaction_ShouldDetachWithInvalidField),
+                nameof(OnDisposition_OnSenderMovingDelivery_ShouldDetachWithInvalidField)
+            ]),
+        new("T5", "A later frame without a state leaves the delivery in its transaction: the meaning is clear, so the engine accepts it.", "Part 4, section 4.4.1",
+            Tests: [nameof(OnTransfer_OnContinuationWithoutState_ShouldKeepTransaction)],
+            Refusals: [],
+            Leniency: true),
+        new("T6", "A resource can tell which transaction a partly posted delivery belongs to, so it can refuse a discharge against it.", "Part 4, section 4.4.1",
+            Tests: [nameof(OnTransfer_OnContinuationWithoutState_ShouldKeepTransaction)],
+            Refusals: []),
+        new("T7", "A sender that does not support transactional acquisition terminates the link with amqp:not-implemented when a flow names a transaction, also when the flow arrives before the application answers the attach.", "Part 4, section 4.4.3",
+            Tests: [nameof(AmqpTransactionCoordinatorTests.TransactionalAcquisition_OnSupportingSender_ShouldCarryTransactionToCommit)],
+            Refusals:
+            [
+                nameof(OnFlow_WithTransactionIdWithoutSupport_ShouldDetachWithNotImplemented),
+                nameof(OnFlow_WithTransactionIdBeforeAnswer_ShouldDetachWhenAnswered),
+                nameof(AmqpTransactionCoordinatorTests.SetAcquisitionTransaction_OnSenderWithoutSupport_ShouldDetachWithNotImplemented)
+            ]),
+        new("T8", "A sender that supports it takes the transaction from the txn-id flow property, which is binary, and keeps it until the discharge clears it.", "Part 4, sections 4.4.3 and 4.5.4",
+            Tests:
+            [
+                nameof(OnFlow_WithTransactionId_ShouldKeepItUntilCleared),
+                nameof(AmqpTransactionCoordinatorTests.TransactionalAcquisition_OnSupportingSender_ShouldCarryTransactionToCommit)
+            ],
+            Refusals: [nameof(OnFlow_WithTransactionIdNotBinary_ShouldDetachWithInvalidField)]),
+        new("T9", "A controller names the transaction it acquires under in the txn-id property of its flows.", "Part 4, section 4.4.3",
+            Tests: [nameof(SetAcquisitionTransaction_OnReceiver_ShouldNameTransactionInEveryFlow)],
+            Refusals: []),
+        new("T10", "The coordinator answers a declare with declared and a discharge with accepted; it refuses one it cannot perform with a rejected outcome carrying the error when the controller's source supports rejected, and otherwise detaches the link with the error.", "Part 4, sections 4.2, 4.3 and 4.5.5",
+            Tests:
+            [
+                nameof(AmqpTransactionCoordinatorTests.DeclareAsync_OnCoordinator_ShouldReturnDeclaredIdentifiers),
+                nameof(AmqpTransactionCoordinatorTests.DischargeAsync_OnCommit_ShouldCommitAndEndTransaction),
+                nameof(AmqpTransactionCoordinatorTests.DischargeAsync_OnRollback_ShouldRollBackAndEndTransaction),
+                nameof(AmqpTransactionCoordinatorTests.DeclareAsync_OnHandlerRefusal_ShouldThrowWithTransactionError),
+                nameof(AmqpTransactionCoordinatorTests.DischargeAsync_OnCommitRefusal_ShouldThrowAndEndTransaction),
+                nameof(AmqpTransactionCoordinatorTests.DischargeAsync_OnUnknownTransaction_ShouldRefuseWithUnknownId),
+                nameof(AmqpTransactionCoordinatorTests.RunAsync_OnSourceWithoutRejected_ShouldDetachWithError),
+                nameof(AmqpTransactionCoordinatorTests.RunAsync_OnMessageThatIsNotControl_ShouldRejectWithNotImplemented),
+                nameof(AmqpTransactionCoordinatorTests.RunAsync_OnUndecodablePayload_ShouldRejectWithDecodeError)
+            ],
+            Refusals: []),
+        new("T11", "When the control link ends, every transaction it declared and did not discharge rolls back, also when one of the rollbacks fails.", "Part 4, section 4.1",
+            Tests:
+            [
+                nameof(AmqpTransactionCoordinatorTests.DisposeAsync_OnControllerWithLiveTransactions_ShouldRollThemBack),
+                nameof(AmqpTransactionCoordinatorTests.RunAsync_OnCancellation_ShouldCloseLinkAndRollBack),
+                nameof(AmqpTransactionCoordinatorTests.RunAsync_OnHandlerFault_ShouldCloseWithInternalErrorAndRollBack),
+                nameof(AmqpTransactionCoordinatorTests.RunAsync_OnFailedRollback_ShouldRollBackTheOthersAndThrow)
+            ],
+            Refusals: []),
+        new("T12", "A transaction identifier is at most 32 octets and names one live transaction: the coordinator issues no longer one, and no second live one, and fails its run rather than answer with it.", "Part 4, section 4.5.4",
+            Tests: [nameof(AmqpTransactionCoordinatorTests.DeclareAsync_OnCoordinator_ShouldReturnDeclaredIdentifiers)],
+            Refusals:
+            [
+                nameof(AmqpTransactionCoordinatorTests.RunAsync_OnIdentifierLongerThan32Bytes_ShouldFailAndRollBack),
+                nameof(AmqpTransactionCoordinatorTests.RunAsync_OnDuplicateIdentifier_ShouldFailAndRollBack)
+            ]),
+        new("T13", "The coordinator announces its capabilities and the controller checks they cover what it asked for; a coordinator that announces none is taken to support them.", "Part 4, sections 4.5.1 and 4.5.7",
+            Tests: [nameof(AmqpTransactionCoordinatorTests.AttachAsync_OnCoordinatorWithoutCapabilities_ShouldAttach)],
+            Refusals: [nameof(AmqpTransactionCoordinatorTests.AttachAsync_OnMissingCapability_ShouldThrowTransactionFailed)],
+            Leniency: true),
+        new("T14", "Transactional posting carries the transaction on the transfer and the resource's provisional outcome on its disposition.", "Part 4, section 4.4.1",
+            Tests: [nameof(AmqpTransactionCoordinatorTests.TransactionalPosting_OnSplitDelivery_ShouldCarryProvisionalOutcome)],
+            Refusals: [])
     ];
-
-    [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - Rules: Should name at least one test for every Part 4 rule, with unique identifiers")]
-    public void Rules_OnPart4Map_ShouldNameTestsForEveryRule()
-    {
-        // Arrange
-        IReadOnlyList<AmqpTransactionRule> rules = Rules;
-
-        // Act
-        string[] identifiers = [.. rules.Select(rule => rule.Id)];
-
-        // Assert
-        identifiers.Distinct().Count().ShouldBe(identifiers.Length);
-        rules.ShouldAllBe(rule => rule.Tests.Count > 0 && rule.Reference.StartsWith("Part 4", StringComparison.Ordinal));
-    }
 
     [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - OnTransfer: Should detach a control link that carries a settled declare with amqp:illegal-state")]
     public async Task OnTransfer_OnControlLinkSettled_ShouldDetachWithIllegalState()

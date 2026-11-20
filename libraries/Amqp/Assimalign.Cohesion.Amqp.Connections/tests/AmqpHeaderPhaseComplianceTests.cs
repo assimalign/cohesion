@@ -118,7 +118,7 @@ public class AmqpHeaderPhaseComplianceTests
         {
             // Act
             AmqpHeaderPhaseCase[] cases = AmqpHeaderPhaseCorpus.Cases.Where(entry => entry.Rule == rule.Id).ToArray();
-            int refused = cases.Count(IsRefusal);
+            int refused = cases.Count(entry => entry.Refuses);
             int accepted = cases.Length - refused;
             int listener = cases.Count(entry => entry.Role == AmqpHeaderPhaseRole.Listener);
             int factory = cases.Length - listener;
@@ -140,15 +140,6 @@ public class AmqpHeaderPhaseComplianceTests
         AmqpHeaderPhaseCorpus.Cases.ShouldAllBe(entry => entry.Outcome.Opened || entry.Outcome.Message != null);
         AmqpHeaderPhaseCorpus.Cases.Count(entry => entry.Role == AmqpHeaderPhaseRole.Listener).ShouldBeGreaterThan(0);
         AmqpHeaderPhaseCorpus.Cases.Count(entry => entry.Role == AmqpHeaderPhaseRole.Factory).ShouldBeGreaterThan(0);
-    }
-
-    /// <summary>
-    /// A case is refused when establishment fails, or when the engine ends its script by closing the
-    /// connection it opened.
-    /// </summary>
-    private static bool IsRefusal(AmqpHeaderPhaseCase entry)
-    {
-        return !entry.Outcome.Opened || entry.Script[^1].Kind == AmqpHeaderPhaseStepKind.ExpectClose;
     }
 
     private static (AmqpTestPeer Peer, AmqpConnectionListener? Listener, Task<IAmqpConnection> Establish) Start(

@@ -46,83 +46,83 @@ public class AmqpResumeComplianceTests
     /// <summary>
     /// Gets the rules for resuming deliveries that the engine holds, each with the tests that pin it.
     /// </summary>
-    internal static IReadOnlyList<AmqpTransferRule> Rules { get; } =
+    internal static IReadOnlyList<AmqpComplianceRule> Rules { get; } =
     [
-        new("R1", "Each end compares the two unsettled maps of the attach frames alike: the sender's map is the source's and the receiver's the target's, whichever end attaches first, and both ends report which map was incomplete.", "Part 2, section 2.6.13", Forbids: false,
-        [
-            nameof(AttachAsync_WithUnsettledMaps_ShouldCompareThemAlikeAtBothEnds),
-            nameof(AttachAsync_WithIncompleteMap_ShouldReportItAtBothEnds)
-        ]),
-        new("R2", "A sender resumes or aborts only a delivery the comparison leaves resumable, once per attachment, and refuses any other before sending it. The specification lets a sender that has not seen the receiver's map yet pipeline a resume of a delivery only the source lists, which the receiver ignores; the engine sends only once it holds that map, so such a resume could only be ignored and its delivery would never settle.", "Part 2, sections 2.6.13 and 2.7.5", Forbids: true,
-        [
-            nameof(SendAsync_OnResumeOfDeliveryNotResumable_ShouldRefuse),
-            nameof(AbortDeliveryAsync_OnDeliveryNotResumable_ShouldRefuse),
-            nameof(SendAsync_OnSecondResumeOfDelivery_ShouldRefuse)
-        ]),
-        new("R3", "A receiver ignores a resumed delivery its comparison does not leave resumable, or that a transfer already resumed on this attachment: nothing reaches the application, nothing is settled and no partial state shows, but the delivery takes a unit of credit, as the sender counted it, and is measured against max-message-size.", "Part 2, sections 2.6.13 and 2.7.5", Forbids: false,
-        [
-            nameof(OnTransfer_OnResumeOfDeliveryNotHeld_ShouldIgnoreIt),
-            nameof(OnTransfer_OnSplitResumeOfDeliveryNotHeld_ShouldIgnoreEveryFrame),
-            nameof(OnTransfer_OnResumeOfDeliveryAlreadyResumed_ShouldIgnoreIt),
-            nameof(OnTransfer_OnIgnoredResumeAboveMaxMessageSize_ShouldDetachWithMessageSizeExceeded)
-        ]),
-        new("R4", "Each delivery of the resumption example goes as its two map entries require: sent again as a new delivery when the receiver has no record of it, resumed from the receiver's position with the rest of its payload, resumed whole, resumed without payload to convey the sender's outcome or settlement, which the receiver echoes when the two outcomes differ, or aborted when it cannot be resumed to completion.", "Part 2, section 2.6.13, and Part 3, section 3.4.6", Forbids: false,
-        [
-            nameof(SendAsync_OnPart3Example_ShouldResumeEachDeliveryAsItsMapsRequire)
-        ]),
-        new("R5", "A sender aborts a delivery it cannot resume to completion with one resuming frame that sets aborted and carries no payload, which takes a unit of credit. The receiver hands the aborted delivery to the application, settled and empty, since only the application holds what it kept of the delivery.", "Part 3, section 3.4.6, and Part 2, section 2.6.14", Forbids: false,
-        [
-            nameof(AbortDeliveryAsync_OnResumableDelivery_ShouldSendOneAbortingResume),
-            nameof(OnTransfer_OnAbortedResume_ShouldDeliverItAborted)
-        ]),
-        new("R6", "A resumed delivery split into frames sets resume on its first frame, and its later frames may repeat it.", "Part 2, section 2.7.5", Forbids: false,
-        [
-            nameof(SendAsync_OnSplitResumedDelivery_ShouldSetResumeOnFirstFrame),
-            nameof(OnTransfer_OnSplitResumeRepeatingFlag_ShouldJoinFrames)
-        ]),
-        new("R7", "Only the first frame of a resumed delivery carries the received state: a sender refuses it on a delivery it does not resume, and a receiver detaches a link whose sender puts it on a delivery that is not resumed, on a later frame or on a disposition, with amqp:invalid-field.", "Part 3, section 3.4.1", Forbids: true,
-        [
-            nameof(SendAsync_OnReceivedStateWithoutResume_ShouldRefuse),
-            nameof(OnTransfer_OnReceivedStateWithoutResume_ShouldDetachWithInvalidField),
-            nameof(OnTransfer_OnReceivedStateOnContinuation_ShouldDetachWithInvalidField),
-            nameof(OnDisposition_OnReceivedStateFromSender_ShouldDetachWithInvalidField)
-        ]),
-        new("R8", "New deliveries wait until both maps are complete: while either is incomplete, a sender refuses a new delivery and still resumes, and a receiver delivers a resume but detaches a link whose sender starts a new delivery with amqp:illegal-state.", "Part 2, sections 2.6.13 and 2.7.3", Forbids: true,
-        [
-            nameof(SendAsync_OnNewDeliveryWhileMapIncomplete_ShouldRefuseItAndKeepResuming),
-            nameof(OnTransfer_OnNewDeliveryWhileMapIncomplete_ShouldDetachWithIllegalState),
-            nameof(OnTransfer_OnResumeWhileMapIncomplete_ShouldDeliverIt)
-        ]),
-        new("R9", "A delivery the comparison leaves resumable keeps its tag until it is resumed: a sender refuses a new delivery under it, and a receiver detaches a link whose sender starts one with amqp:illegal-state. A generated tag skips every tag either map listed.", "Part 2, sections 2.6.12 and 2.6.13", Forbids: true,
-        [
-            nameof(SendAsync_OnNewDeliveryUnderAwaitedTag_ShouldRefuse),
-            nameof(OnTransfer_OnNewDeliveryUnderAwaitedTag_ShouldDetachWithIllegalState),
-            nameof(SendAsync_WithGeneratedTags_ShouldSkipCarriedOverTags)
-        ]),
-        new("R10", "An unsettled map is keyed by delivery tags, binaries of at most 32 bytes, with no null key and no tag twice, as a map's keys are distinct: a decoder refuses any other with amqp:decode-error.", "Part 2, sections 2.7.3 and 2.8.7, and Part 1, section 1.6.23", Forbids: true,
-        [
-            nameof(Decode_OnMalformedUnsettledMap_ShouldThrowDecodeError)
-        ]),
-        new("R11", "A later frame of a delivery that is not resumed may set resume: a receiver reads the flag on a delivery's first frame alone, since that frame decides whether the delivery is resumed and a later one cannot reassociate it.", "Part 2, section 2.7.5", Forbids: false,
-        [
-            nameof(OnTransfer_OnResumeFlagOnContinuationOfNewDelivery_ShouldIgnoreIt)
-        ], Leniency: true)
+        new("R1", "Each end compares the two unsettled maps of the attach frames alike: the sender's map is the source's and the receiver's the target's, whichever end attaches first, and both ends report which map was incomplete.", "Part 2, section 2.6.13",
+            Tests:
+            [
+                nameof(AttachAsync_WithUnsettledMaps_ShouldCompareThemAlikeAtBothEnds),
+                nameof(AttachAsync_WithIncompleteMap_ShouldReportItAtBothEnds)
+            ],
+            Refusals: []),
+        new("R2", "A sender resumes or aborts only a delivery the comparison leaves resumable, once per attachment, and refuses any other before sending it. The specification lets a sender that has not seen the receiver's map yet pipeline a resume of a delivery only the source lists, which the receiver ignores; the engine sends only once it holds that map, so such a resume could only be ignored and its delivery would never settle.", "Part 2, sections 2.6.13 and 2.7.5",
+            Tests:
+            [
+                nameof(AbortDeliveryAsync_OnResumableDelivery_ShouldSendOneAbortingResume),
+                nameof(SendAsync_OnPart3Example_ShouldResumeEachDeliveryAsItsMapsRequire)
+            ],
+            Refusals:
+            [
+                nameof(SendAsync_OnResumeOfDeliveryNotResumable_ShouldRefuse),
+                nameof(AbortDeliveryAsync_OnDeliveryNotResumable_ShouldRefuse),
+                nameof(SendAsync_OnSecondResumeOfDelivery_ShouldRefuse)
+            ]),
+        new("R3", "A receiver ignores a resumed delivery its comparison does not leave resumable, or that a transfer already resumed on this attachment: nothing reaches the application, nothing is settled and no partial state shows, but the delivery takes a unit of credit, as the sender counted it, and is measured against max-message-size.", "Part 2, sections 2.6.13 and 2.7.5",
+            Tests:
+            [
+                nameof(OnTransfer_OnResumeOfDeliveryNotHeld_ShouldIgnoreIt),
+                nameof(OnTransfer_OnSplitResumeOfDeliveryNotHeld_ShouldIgnoreEveryFrame),
+                nameof(OnTransfer_OnResumeOfDeliveryAlreadyResumed_ShouldIgnoreIt)
+            ],
+            Refusals: [nameof(OnTransfer_OnIgnoredResumeAboveMaxMessageSize_ShouldDetachWithMessageSizeExceeded)]),
+        new("R4", "Each delivery of the resumption example goes as its two map entries require: sent again as a new delivery when the receiver has no record of it, resumed from the receiver's position with the rest of its payload, resumed whole, resumed without payload to convey the sender's outcome or settlement, which the receiver echoes when the two outcomes differ, or aborted when it cannot be resumed to completion.", "Part 2, section 2.6.13, and Part 3, section 3.4.6",
+            Tests: [nameof(SendAsync_OnPart3Example_ShouldResumeEachDeliveryAsItsMapsRequire)],
+            Refusals: []),
+        new("R5", "A sender aborts a delivery it cannot resume to completion with one resuming frame that sets aborted and carries no payload, which takes a unit of credit. The receiver hands the aborted delivery to the application, settled and empty, since only the application holds what it kept of the delivery.", "Part 3, section 3.4.6, and Part 2, section 2.6.14",
+            Tests:
+            [
+                nameof(AbortDeliveryAsync_OnResumableDelivery_ShouldSendOneAbortingResume),
+                nameof(OnTransfer_OnAbortedResume_ShouldDeliverItAborted)
+            ],
+            Refusals: []),
+        new("R6", "A resumed delivery split into frames sets resume on its first frame, and its later frames may repeat it.", "Part 2, section 2.7.5",
+            Tests:
+            [
+                nameof(SendAsync_OnSplitResumedDelivery_ShouldSetResumeOnFirstFrame),
+                nameof(OnTransfer_OnSplitResumeRepeatingFlag_ShouldJoinFrames)
+            ],
+            Refusals: []),
+        new("R7", "Only the first frame of a resumed delivery carries the received state: a sender refuses it on a delivery it does not resume, and a receiver detaches a link whose sender puts it on a delivery that is not resumed, on a later frame or on a disposition, with amqp:invalid-field.", "Part 3, section 3.4.1",
+            Tests: [nameof(SendAsync_OnPart3Example_ShouldResumeEachDeliveryAsItsMapsRequire)],
+            Refusals:
+            [
+                nameof(SendAsync_OnReceivedStateWithoutResume_ShouldRefuse),
+                nameof(OnTransfer_OnReceivedStateWithoutResume_ShouldDetachWithInvalidField),
+                nameof(OnTransfer_OnReceivedStateOnContinuation_ShouldDetachWithInvalidField),
+                nameof(OnDisposition_OnReceivedStateFromSender_ShouldDetachWithInvalidField)
+            ]),
+        new("R8", "New deliveries wait until both maps are complete: while either is incomplete, a sender refuses a new delivery and still resumes, and a receiver delivers a resume but detaches a link whose sender starts a new delivery with amqp:illegal-state.", "Part 2, sections 2.6.13 and 2.7.3",
+            Tests: [nameof(OnTransfer_OnResumeWhileMapIncomplete_ShouldDeliverIt)],
+            Refusals:
+            [
+                nameof(SendAsync_OnNewDeliveryWhileMapIncomplete_ShouldRefuseItAndKeepResuming),
+                nameof(OnTransfer_OnNewDeliveryWhileMapIncomplete_ShouldDetachWithIllegalState)
+            ]),
+        new("R9", "A delivery the comparison leaves resumable keeps its tag until it is resumed: a sender refuses a new delivery under it, and a receiver detaches a link whose sender starts one with amqp:illegal-state. A generated tag skips every tag either map listed.", "Part 2, sections 2.6.12 and 2.6.13",
+            Tests: [nameof(SendAsync_WithGeneratedTags_ShouldSkipCarriedOverTags)],
+            Refusals:
+            [
+                nameof(SendAsync_OnNewDeliveryUnderAwaitedTag_ShouldRefuse),
+                nameof(OnTransfer_OnNewDeliveryUnderAwaitedTag_ShouldDetachWithIllegalState)
+            ]),
+        new("R10", "An unsettled map is keyed by delivery tags, binaries of at most 32 bytes, with no null key and no tag twice, as a map's keys are distinct: a decoder refuses any other with amqp:decode-error.", "Part 2, sections 2.7.3 and 2.8.7, and Part 1, section 1.6.23",
+            Tests: [nameof(AttachAsync_WithUnsettledMaps_ShouldCompareThemAlikeAtBothEnds)],
+            Refusals: [nameof(Decode_OnMalformedUnsettledMap_ShouldThrowDecodeError)]),
+        new("R11", "A later frame of a delivery that is not resumed may set resume: a receiver reads the flag on a delivery's first frame alone, since that frame decides whether the delivery is resumed and a later one cannot reassociate it.", "Part 2, section 2.7.5",
+            Tests: [nameof(OnTransfer_OnResumeFlagOnContinuationOfNewDelivery_ShouldIgnoreIt)],
+            Refusals: [],
+            Leniency: true)
     ];
-
-    [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - Rules: Should name at least one test for every resumption rule, with unique identifiers")]
-    public void Rules_OnResumeMap_ShouldNameTestsForEveryRule()
-    {
-        // Arrange
-        IReadOnlyList<AmqpTransferRule> rules = Rules;
-
-        // Act
-        string[] identifiers = [.. rules.Select(rule => rule.Id)];
-
-        // Assert
-        identifiers.Distinct().Count().ShouldBe(identifiers.Length);
-        rules.ShouldAllBe(rule => rule.Tests.Count > 0
-            && (rule.Reference.StartsWith("Part 2", StringComparison.Ordinal) || rule.Reference.StartsWith("Part 3", StringComparison.Ordinal)));
-    }
 
     [Theory(DisplayName = "Cohesion Test [Amqp.Connections] - AttachAsync: Should compare the unsettled maps alike at both ends, whichever end attaches first")]
     [InlineData(true)]

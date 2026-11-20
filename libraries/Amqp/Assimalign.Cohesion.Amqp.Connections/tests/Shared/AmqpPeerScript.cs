@@ -203,6 +203,20 @@ internal static class AmqpPeerScript
     }
 
     /// <summary>
+    /// Writes a session <c>flow</c> that asks for an echo and returns the next frame the engine writes. The engine
+    /// answers the flow only once it reaches it, so an echo returned here shows it wrote nothing in between.
+    /// </summary>
+    /// <remarks>
+    /// The flow names no next-incoming-id, as in <see cref="SyncAsync"/>: use it where the engine sends no transfers.
+    /// </remarks>
+    public static async Task<AmqpPerformative> ReadNextAfterEchoAsync(AmqpTestPeer peer, CancellationToken cancellationToken)
+    {
+        await peer.WriteFrameAsync(0, new AmqpFlowPerformative { IncomingWindow = 100, NextOutgoingId = 1, OutgoingWindow = 100, Echo = true }, cancellationToken);
+
+        return (await peer.ReadNonEmptyFrameAsync(cancellationToken)).Performative!;
+    }
+
+    /// <summary>
     /// Reads the frames of the next delivery the engine sends, through its last frame.
     /// </summary>
     public static async Task<List<AmqpTestFrame>> ReadDeliveryFramesAsync(AmqpTestPeer peer, CancellationToken cancellationToken)

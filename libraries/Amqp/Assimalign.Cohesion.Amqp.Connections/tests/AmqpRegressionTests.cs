@@ -62,8 +62,8 @@ public class AmqpRegressionTests
             entry.Origin.ShouldStartWith("#", Case.Sensitive, entry.Id);
             (entry.Tests.Count + entry.Cases.Count).ShouldBeGreaterThan(0, entry.Id);
             entry.Tests.Distinct().Count().ShouldBe(entry.Tests.Count, entry.Id);
-            HasRule(entry).ShouldBeTrue(entry.Id);
-            entry.Cases.ShouldAllBe(name => HasCase(entry.Map, name), entry.Id);
+            AmqpComplianceMatrix.HasRule(entry.Map, entry.Rule).ShouldBeTrue(entry.Id);
+            entry.Cases.ShouldAllBe(name => AmqpComplianceMatrix.HasCase(entry.Map, name), entry.Id);
         }
     }
 
@@ -153,40 +153,5 @@ public class AmqpRegressionTests
         error.ShouldBeNull();
         peer.Carrier.IsDisposed.ShouldBeTrue();
         connection.State.ShouldBe(ConnectionState.Closed);
-    }
-
-    /// <summary>
-    /// Whether the entry's rule is one its compliance map holds, or, for an entry outside every map, absent.
-    /// </summary>
-    private static bool HasRule(AmqpRegression entry)
-    {
-        return entry.Map switch
-        {
-            AmqpComplianceMap.None => entry.Rule is null,
-            AmqpComplianceMap.HeaderPhase => AmqpHeaderPhaseCorpus.Rules.Any(rule => rule.Id == entry.Rule),
-            AmqpComplianceMap.TypeSystem => AmqpTypeSystemCorpus.Types.Any(type => type.Name == entry.Rule),
-            AmqpComplianceMap.MessageFormat => AmqpMessageFormatCorpus.Rules.Any(rule => rule.Id == entry.Rule),
-            AmqpComplianceMap.Terminus => AmqpTerminusCorpus.Rules.Any(rule => rule.Id == entry.Rule),
-            AmqpComplianceMap.Transfer => AmqpTransferComplianceTests.Rules.Any(rule => rule.Id == entry.Rule),
-            AmqpComplianceMap.Transaction => AmqpTransactionComplianceTests.Rules.Any(rule => rule.Id == entry.Rule),
-            AmqpComplianceMap.Resume => AmqpResumeComplianceTests.Rules.Any(rule => rule.Id == entry.Rule),
-            _ => false
-        };
-    }
-
-    /// <summary>
-    /// Whether the map's corpus holds a case with the name. The transfer, transaction and resume maps name tests,
-    /// not corpus cases, so they hold none.
-    /// </summary>
-    private static bool HasCase(AmqpComplianceMap map, string name)
-    {
-        return map switch
-        {
-            AmqpComplianceMap.HeaderPhase => AmqpHeaderPhaseCorpus.Cases.Any(item => item.Name == name),
-            AmqpComplianceMap.TypeSystem => AmqpTypeSystemCorpus.Cases.Any(item => item.Name == name),
-            AmqpComplianceMap.MessageFormat => AmqpMessageFormatCorpus.Cases.Any(item => item.Name == name),
-            AmqpComplianceMap.Terminus => AmqpTerminusCorpus.Cases.Any(item => item.Name == name),
-            _ => false
-        };
     }
 }

@@ -10,4 +10,8 @@ namespace Assimalign.Cohesion.Amqp.Connections.Tests;
 /// <see langword="true"/> when the rule governs the order and multiplicity of sections, which finding the
 /// bare message also enforces; <see langword="false"/> when it governs the values inside a section.
 /// </param>
-internal sealed record AmqpMessageFormatRule(string Id, string Statement, string Reference, bool Layout);
+/// <param name="Leniency">
+/// <see langword="true"/> when the rule records where the codec accepts what a peer should not send, because
+/// widely used libraries send it and the meaning is clear; its accepted cases pin that tolerance.
+/// </param>
+internal sealed record AmqpMessageFormatRule(string Id, string Statement, string Reference, bool Layout, bool Leniency = false);

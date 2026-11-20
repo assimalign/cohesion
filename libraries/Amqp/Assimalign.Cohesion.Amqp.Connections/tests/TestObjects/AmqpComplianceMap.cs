@@ -44,5 +44,31 @@ internal enum AmqpComplianceMap
     /// <summary>
     /// The resume rules <c>R1</c> to <c>R11</c> in <see cref="AmqpResumeComplianceTests"/>.
     /// </summary>
-    Resume
+    Resume,
+
+    /// <summary>
+    /// The performative rules <c>P1</c> to <c>P8</c> in <see cref="AmqpPerformativeTests"/>: how a composite
+    /// type is encoded, and the definitions every performative's fields hold to.
+    /// </summary>
+    Performative,
+
+    /// <summary>
+    /// The connection rules <c>C1</c> to <c>C8</c> in <see cref="AmqpConnectionComplianceTests"/>.
+    /// </summary>
+    Connection,
+
+    /// <summary>
+    /// The session rules <c>S1</c> to <c>S11</c> in <see cref="AmqpSessionComplianceTests"/>.
+    /// </summary>
+    Session,
+
+    /// <summary>
+    /// The link rules <c>L1</c> to <c>L11</c> in <see cref="AmqpLinkComplianceTests"/>.
+    /// </summary>
+    Link,
+
+    /// <summary>
+    /// The settlement rules <c>DS1</c> to <c>DS6</c> in <see cref="AmqpSettlementComplianceTests"/>.
+    /// </summary>
+    Settlement
 }

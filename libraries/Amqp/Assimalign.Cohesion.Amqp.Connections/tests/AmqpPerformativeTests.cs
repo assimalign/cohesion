@@ -12,8 +12,71 @@ using Assimalign.Cohesion.Amqp.Connections.Internal;
 
 namespace Assimalign.Cohesion.Amqp.Connections.Tests;
 
+/// <summary>
+/// Encodes and decodes every performative against the rules of AMQP 1.0 for a composite type and for the fields
+/// the performatives define. Each rule in <see cref="Rules"/> names the tests that pin it.
+/// </summary>
 public class AmqpPerformativeTests
 {
+    /// <summary>
+    /// Gets the rules for how a performative is encoded and what its fields may hold, each with the tests that
+    /// pin it.
+    /// </summary>
+    internal static IReadOnlyList<AmqpComplianceRule> Rules { get; } =
+    [
+        new("P1", "A performative is a described list whose elements follow the field order of its definition: the engine omits trailing fields that hold their defaults, reads an absent or null field as its default, and refuses a body that is not a described list with amqp:decode-error.", "Part 1, section 1.4",
+            Tests:
+            [
+                nameof(Encode_WithDefaultFields_ShouldTrimTrailingFields),
+                nameof(Decode_WithMinimalOpen_ShouldApplyDefaults),
+                nameof(Decode_WithFullOpen_ShouldRoundTrip),
+                nameof(Decode_WithFullBegin_ShouldRoundTrip),
+                nameof(Decode_WithFullAttach_ShouldRoundTrip),
+                nameof(Decode_WithFullFlow_ShouldRoundTrip),
+                nameof(Decode_WithSaslPerformatives_ShouldRoundTrip)
+            ],
+            Refusals: [nameof(Decode_WithUndescribedBody_ShouldThrowDecodeError)]),
+        new("P2", "A mandatory field is never null: the engine writes every mandatory field, an empty one included, and refuses a performative that leaves one out with amqp:decode-error.", "Part 1, section 1.4",
+            Tests: [nameof(Encode_WithEmptySaslFields_ShouldWriteMandatoryFields)],
+            Refusals: [nameof(Decode_WithMissingMandatoryField_ShouldThrowDecodeError)]),
+        new("P3", "A performative is named by its descriptor, the numeric code or the symbolic name: the engine reads either and names each performative as the specification does, and a descriptor it does not know is refused with amqp:not-implemented, which closes the connection.", "Part 1, section 1.5; Part 2, sections 2.3.2 and 2.7",
+            Tests:
+            [
+                nameof(Decode_WithSymbolicDescriptor_ShouldDecodePerformative),
+                nameof(PerformativeName_OnEachPerformative_ShouldMatchSpecification)
+            ],
+            Refusals:
+            [
+                nameof(Decode_WithUnknownDescriptor_ShouldThrowNotImplemented),
+                nameof(AmqpEngineViolationTests.ProcessFrame_OnUnknownPerformative_ShouldCloseWithNotImplemented)
+            ]),
+        new("P4", "A restricted type takes only the choices its definition lists: the engine refuses an undefined sender or receiver settle mode, terminus durability, expiry policy or SASL code with amqp:invalid-field.", "Part 1, section 1.1.4; Part 2, sections 2.8.2 and 2.8.3; Part 3, sections 3.5.5 and 3.5.6; Part 5, section 5.3.3.6",
+            Tests: [],
+            Refusals:
+            [
+                nameof(Decode_WithUndefinedSettleMode_ShouldThrowInvalidField),
+                nameof(Decode_WithUndefinedTerminusDurability_ShouldThrowInvalidField),
+                nameof(Decode_WithUndefinedExpiryPolicy_ShouldThrowInvalidField),
+                nameof(Decode_WithUndefinedSaslCode_ShouldThrowInvalidField)
+            ]),
+        new("P5", "A field that allows multiple values holds null, one value, or an array of values of its type: the engine reads each form and refuses any other type with amqp:decode-error.", "Part 1, section 1.4",
+            Tests: [nameof(AmqpEncodingTests.ReadSymbolMultiple_WithAcceptedForms_ShouldDecode)],
+            Refusals: [nameof(AmqpEncodingTests.ReadSymbolMultiple_WithOtherTypes_ShouldThrowDecodeError)]),
+        new("P6", "A delivery tag is at most 32 bytes: the engine reads a transfer's tag and refuses a longer one with amqp:invalid-field.", "Part 2, section 2.8.7",
+            Tests: [nameof(Decode_WithFullTransfer_ShouldRoundTripAndLeavePayload)],
+            Refusals: [nameof(Decode_WithLongDeliveryTag_ShouldThrowInvalidField)]),
+        new("P7", "An error names its condition: the engine refuses to write an error without one, and refuses one that arrives without it with amqp:decode-error.", "Part 2, section 2.8.14",
+            Tests: [nameof(Decode_WithErrors_ShouldRoundTrip)],
+            Refusals:
+            [
+                nameof(Encode_WithErrorWithoutCondition_ShouldThrowArgumentException),
+                nameof(Decode_WithErrorWithoutCondition_ShouldThrowDecodeError)
+            ]),
+        new("P8", "A max-message-size of zero, like an absent one, sets no limit on the messages a link takes.", "Part 2, section 2.7.3",
+            Tests: [nameof(Decode_WithZeroMaxMessageSize_ShouldReadNoLimit)],
+            Refusals: [])
+    ];
+
     public static TheoryData<string, string, string> MissingMandatoryFields()
     {
         return new TheoryData<string, string, string>

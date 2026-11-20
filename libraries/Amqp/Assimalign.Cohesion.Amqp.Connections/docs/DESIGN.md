@@ -294,8 +294,11 @@ sequenceDiagram
   `AcceptSessionAsync`. It stops carrying links as soon as either peer sends `end`, and has ended
   once both have.
 - **The incoming window is refilled at half.** The engine declares `AmqpSessionOptions.IncomingWindow`
-  (2,048 by default) and sends a `flow` that restores it once half is used, before the peer runs
-  out. A peer that sends past the window ends the session with `amqp:session:window-violation`.
+  (2,048 by default) and sends a `flow` that restores it once half is used, as transfers arrive and
+  whether or not the application has taken them. The window paces the peer between two `flow`
+  frames; it does not bound what the session holds, which link credit and each receiver's
+  `MaxMessageSize` do. Because the engine restores it before it runs out, it never refuses a peer
+  with `amqp:session:window-violation` (gap G5, #1934).
 - **The engine never limits itself by an outgoing window.** It declares `int.MaxValue`, the largest
   value peers that read the field as signed still accept, and sends within the peer's incoming
   window.
@@ -354,19 +357,31 @@ it. Both run on one timer per connection, whose period follows the shorter of th
 ## Compliance maps
 
 Each part of the specification the engine enforces has a map in the tests: a list of rules, each
-with its statement, its section, whether it forbids something, and the tests that pin it. The first
-test of each map checks that every rule names tests that exist, so a rule cannot lose its coverage
-silently. Rules that record a leniency say so.
+with its statement, the sections it cites, whether it forbids something, and the evidence that pins
+it. A rule keeps its evidence in two lists: what shows the engine doing what the rule requires or
+allows, and what shows it refusing what the rule forbids, whether the engine would have sent it or
+it arrived from the peer. Four maps hold a corpus of encoded cases, each with a test that checks
+every rule holds the cases it needs. The other eight name tests with `nameof`, so renaming or
+deleting one breaks the build. Rules that record a leniency say so.
 
-| Map | Tests | Rules | Covers |
+| Map | Evidence | Rules | Covers |
 |---|---|---|---|
 | Header phase | `AmqpHeaderPhaseComplianceTests` over `AmqpHeaderPhaseCorpus` | H1 to H20 | protocol headers, the SASL exchange and its frames, the `open` exchange, idle timeouts, channels and frame layout |
-| Type system | `AmqpTypeSystemComplianceTests` over `AmqpTypeSystemCorpus` | one case per constructor, CLR type and refusal | the Part 1 type surface (see "The type surface") |
+| Type system | `AmqpTypeSystemComplianceTests` over `AmqpTypeSystemCorpus` | one per type, with a case per constructor, CLR type and refusal | the Part 1 type surface (see "The type surface") |
 | Message format | `AmqpMessageFormatComplianceTests` over `AmqpMessageFormatCorpus` | MF1 to MF9 | section order, repetition and body kinds, descriptors, message ids, annotation and property keys |
 | Termini | `AmqpTerminusComplianceTests` over `AmqpTerminusCorpus` | T1 to T10 | terminus defaults, dynamic nodes and their owner, node properties, filters, durability, expiry, default outcomes |
-| Transactions | `AmqpTransactionComplianceTests` | T1 to T14 | declare and discharge, transactional work on transfers and dispositions, acquisition, identifiers, capabilities |
+| Performatives | `AmqpPerformativeTests` | P1 to P8 | field order and defaults, mandatory fields, descriptors, restricted values, multiple-valued fields, delivery tags, errors, a zero `max-message-size` |
+| Connection | `AmqpConnectionComplianceTests` | C1 to C8 | the negotiated frame size and channels, a frame too large to write, what may follow `open`, closing and crossed closes, a carrier that ends first, idle timeouts |
+| Session | `AmqpSessionComplianceTests` | S1 to S11 | beginning on a channel, channel and handle limits, handles in use and unattached, the incoming window, ending, crossed ends, ending with an error |
+| Link | `AmqpLinkComplianceTests` | L1 to L11 | attaching with roles and handles, link names, contradictory attaches, refusing a link, closing and suspending, link errors, who may transfer, flow echoes |
 | Transfer | `AmqpTransferComplianceTests` | F1 to F20 | splitting and reassembly, settlement on frames, aborts, malformed fragmentation, terminal outcomes, credit and drains |
+| Settlement | `AmqpSettlementComplianceTests` | DS1 to DS6 | terminal outcomes, sender and receiver settle modes, disposition ranges and the deliveries they cover |
 | Resume | `AmqpResumeComplianceTests` | R1 to R11 | unsettled-map comparison at both ends, resuming and aborting, the `received` state, new deliveries while maps are incomplete, the Part 3 §3.4.6 example end to end |
+| Transactions | `AmqpTransactionComplianceTests` | T1 to T14 | declare and discharge, transactional work on transfers and dispositions, acquisition, identifiers, capabilities |
+
+The class a map lives in holds its rules, not necessarily all their tests: a rule names the test that
+shows it best wherever it sits, such as `AmqpConnectionTests` for a send end to end or
+`AmqpEngineViolationTests` for a violation.
 
 The leniencies, each accepted because the meaning is clear and nothing is at risk:
 
@@ -389,6 +404,58 @@ The leniencies, each accepted because the meaning is clear and nothing is at ris
   receiver's own: the delivery-count already says whether a drain ended.
 - **R11:** a later frame of a delivery that is not resumed may set `resume`; only the first frame
   decides.
+- **L8:** input the peer sent for a link before it read the engine's error detach is discarded
+  until the peer's `detach`, not answered by ending the session with `amqp:session:errant-link`:
+  frames in flight cannot be told from errant ones, and ending the session would end every other
+  link on it.
+- **L11:** a session `flow` that carries link fields, which only a link `flow` may, is read as the
+  session's: no handle says which link the fields would belong to.
+- **DS6:** a peer's transfer is settled or unsettled by its own `settled` flag, even where that
+  contradicts the sender settle mode the peer declared: the flag states what the sender did, and
+  refusing it would strand the delivery.
+
+### The matrix (#431)
+
+`AmqpComplianceMatrix` in the tests reads every map into one list, 153 rules in 12 maps, and keeps
+the gaps beside them (below). `AmqpComplianceMatrixTests` checks the list:
+
+- **Each rule cites its Parts.** A reference reads `Part N, section X`, `Part N, sections X and Y`
+  or `Part N, sections X to Y`, and citations of several Parts are joined by `; ` or `, and `. A
+  reference in any other form, or one that names a section outside the Part it cites, fails.
+- **Each rule names its evidence.** A rule that forbids something names refused evidence, a
+  leniency names accepted evidence, no rule names the same evidence twice, and every map holds both
+  kinds. Identifiers are unique in their map.
+- **Each Part has rules.** The run writes each Part's rules, maps, evidence, leniencies and gaps to
+  the test output. A rule that cites several Parts counts under each, so the Parts' totals add up to
+  more than the number of rules.
+
+The report on 2026-11-20:
+
+| Part | Rules | Maps | Leniencies | Gaps |
+|---|---|---|---|---|
+| 1, Types | 32 | 4 | 0 | 0 |
+| 2, Transport | 86 | 8 | 10 | 5 |
+| 3, Messaging | 24 | 5 | 2 | 0 |
+| 4, Transactions | 14 | 1 | 2 | 0 |
+| 5, Security | 10 | 2 | 0 | 1 |
+
+A new map adds its rules once, in `AmqpComplianceMatrix.CreateEntries`. The checks, the report and
+the regression register's lookup of the rule each defect broke then cover it.
+
+### Gaps
+
+`AmqpComplianceMatrix.Gaps` lists what the specification requires and the engine does not do yet,
+each with the sections it cites and the work item that tracks it. A gap names no evidence: once the
+engine holds the rule, the rule moves into a map with its tests.
+
+| Gap | The specification | The engine | Work item |
+|---|---|---|---|
+| G1 | A second attach of a link may steal it, closing the first with `amqp:link:stolen` (Part 2 §2.6.1). | Keeps no registry beyond the session, and refuses a second attach of a name it holds on the session with `amqp:not-allowed` (L2). A host that lets a reconnecting client take over its link closes the old link with `amqp:link:stolen` itself. | #1930 |
+| G2 | An attach of a link detached with an error must resume it with an unsettled map, and a pipelined re-attach without one ends the session with `amqp:session:errant-link` (Part 2 §2.6.5 and §2.8.17). | Accepts it as a new attach. | #1931 |
+| G3 | When one end closes a link while the other suspends it, the end that suspended reattaches the link and then closes it (Part 2 §2.6.6). | Takes either crossing `detach` as the answer to its own: it does not reattach to close a link it suspended, and a peer that reattaches to close a link the engine closed reaches the application as a new link request. | #1932 |
+| G4 | A peer may open TLS in band, with the AMQP TLS header (protocol id 2) and the TLS handshake after it (Part 5 §5.2 and §5.2.1). | Answers that header with the one it supports and closes (H3). TLS comes from the carrier instead, the alternative establishment §5.2.1 allows. | #1935 |
+| G5 | A peer that sends past the incoming window breaks the session with `amqp:session:window-violation` (Part 2 §2.5.6 and §2.8.17). | Widens its window at half use as transfers arrive (S8), so it never sees the window run out. What it buffers is bounded by link credit and a receiver's `MaxMessageSize`, which has no default. | #1934 |
+| G6 | A delivery on a link detached without closing and without an error stays live, and a disposition that names it applies (Part 2 §2.7.6). | Fails a suspended link's deliveries when the link detaches and passes over a later disposition for them. Resuming the link reconciles their state through the unsettled maps instead. | #1933 |
 
 ## Regression register (#433)
 
@@ -645,7 +712,7 @@ requires. A peer's `open` that declares less is taken as 512 (H20), the size eve
 - **On the wire, violations are error conditions.** The engine ends the smallest scope the
   violation touches with the condition the specification names (`amqp:decode-error`,
   `amqp:invalid-field`, `amqp:illegal-state`, `amqp:connection:framing-error`,
-  `amqp:session:window-violation`, ...). The local operations waiting on that scope fail with the
+  `amqp:session:unattached-handle`, ...). The local operations waiting on that scope fail with the
   matching code.
 - **Composition errors are argument exceptions**, from `Create` or an options setter:
   `ArgumentNullException` for a missing carrier, `ArgumentException` for a capability mismatch, and
@@ -670,9 +737,9 @@ counter, and `current-upgrades` counts establishments in flight. A timed-out est
 `System.TimeoutException`. The carrier is reported by the driver that carries it, under the same
 `connectionId`. Events of the engine's own (connections opened and closed, sessions, links, and the
 violations that end them, with their conditions) and their counters are planned as an
-`Assimalign.Cohesion.Amqp.Connections` source following `.claude/rules/event-source.md`; until it
-ships, an application observes them through `ConnectionClosed`, `SessionEnded`, `LinkDetached` and
-the exceptions they carry.
+`Assimalign.Cohesion.Amqp.Connections` source following `.claude/rules/event-source.md` (#1938);
+until it ships, an application observes them through `ConnectionClosed`, `SessionEnded`,
+`LinkDetached` and the exceptions they carry.
 
 ## AOT posture
 
@@ -700,10 +767,12 @@ any IL warning, a non-zero exit, or a summary line that does not report every ch
   unsettled map, so it refuses the one resume the specification allows before then (see the root
   design, "Resuming a link").
 - **No claims-based security (CBS) and no management draft.** Both are message exchanges over
-  ordinary links, so they build on the model without changes here.
+  ordinary links, so they build on the model without changes here. CBS, which MessageHub needs for
+  the Azure clients, is tracked outside the engine by #1936.
 - **No TLS inside this package.** Security is a connection layer composed below AMQP, with
   `UseTls` from `Assimalign.Cohesion.Connections.Security`; the AMQP header's TLS protocol id (2) is
-  never sent.
+  never sent. Accepting that header in band is a gap, not a non-goal (G4, #1935), and even then the
+  TLS session would come from the connection layer, not from this package.
 - **No AMQP 0-9-1 (RabbitMQ classic) compatibility.** This is AMQP 1.0 only.
 - **No sharing of one multiplexed carrier between AMQP connections.**
 
