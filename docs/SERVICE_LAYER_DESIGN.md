@@ -195,7 +195,8 @@ Current state:
 
 Root abstractions:
 - Reuse `IIdentityHub`, `IIdentityClient`, `IIdentityProvider`, `IIdentityContext`, `IIdentityResult`, and related client abstractions.
-- Add `ITokenService`, `IKeyStore`, `IDirectoryStore`, `ISessionStore`, `IFederationProvider`, `IAuditStore`, and `IProvisioningService`.
+- Add `ITokenService`, `IFederationProvider`, and `IProvisioningService`.
+- Persistence is one seam, `IIdentityHubStore`: a versioned record store whose payload layouts belong to feature-owned codecs. It replaces the earlier plan of one typed store per entity (`IKeyStore`, `IDirectoryStore`, `ISessionStore`, `IAuditStore`). The contract and the reasoning are in `resources/IdentityHub/Assimalign.Cohesion.IdentityHub/docs/DESIGN.md`.
 
 Project plan:
 - Keep `Assimalign.Cohesion.IdentityHub` as the root service library.
@@ -205,7 +206,7 @@ Project plan:
 - Add `Assimalign.Cohesion.IdentityHub.Federation` for OAuth, OIDC, SAML, and external identity provider integration.
 - Add `Assimalign.Cohesion.IdentityHub.Sessions` for refresh tokens, device sessions, and revocation.
 - Add `Assimalign.Cohesion.IdentityHub.Provisioning` for SCIM if provisioning remains in scope.
-- Add `Assimalign.Cohesion.IdentityHub.Storage` if persistence moves beyond a simple directory module.
+- Add one store package per medium that implements `IIdentityHubStore`. The contract and an in-memory store ship in the root, so no `IdentityHub.Storage` package of typed stores is planned.
 
 Specifications:
 - JWS: <https://datatracker.ietf.org/doc/html/rfc7515>

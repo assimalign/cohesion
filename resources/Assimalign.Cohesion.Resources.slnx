@@ -518,9 +518,13 @@
 	<Folder Name="/resources/IdentityHub/Assimalign.Cohesion.IdentityHub/" />
 	<Folder Name="/resources/IdentityHub/Assimalign.Cohesion.IdentityHub/docs/">
 		<File Path="IdentityHub/Assimalign.Cohesion.IdentityHub/docs/DESIGN.md" />
+		<File Path="IdentityHub/Assimalign.Cohesion.IdentityHub/docs/OVERVIEW.md" />
 	</Folder>
 	<Folder Name="/resources/IdentityHub/Assimalign.Cohesion.IdentityHub/src/">
 		<Project Path="IdentityHub/Assimalign.Cohesion.IdentityHub/src/Assimalign.Cohesion.IdentityHub.csproj" />
+	</Folder>
+	<Folder Name="/resources/IdentityHub/Assimalign.Cohesion.IdentityHub/tests/">
+		<Project Path="IdentityHub/Assimalign.Cohesion.IdentityHub/tests/Assimalign.Cohesion.IdentityHub.Tests.csproj" />
 	</Folder>
 	<Folder Name="/resources/IdentityHub/Assimalign.Cohesion.IdentityHub.Hosting/" />
 	<Folder Name="/resources/IdentityHub/Assimalign.Cohesion.IdentityHub.Hosting/docs/">

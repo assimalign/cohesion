@@ -7,4 +7,35 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.IdentityModel" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.IdentityHub.Models" />
 	</ItemGroup>
+	<ItemGroup>
+		<!-- The store seam's address vocabulary. Each rule lives once, in the type's IsValid. -->
+		<CohesionValueType Include="ValueObjects\IdentityHubRecordSetName.cs"
+						   ObjectRuntimeType="String"
+						   ObjectNamespace="Assimalign.Cohesion.IdentityHub"
+						   ObjectAccessModifier="public"
+						   ObjectHasImplicitOperators="true"
+						   ObjectHasIsValidMethod="true"
+						   ObjectComparison="Ordinal" />
+		<CohesionValueType Include="ValueObjects\IdentityHubRecordIndexName.cs"
+						   ObjectRuntimeType="String"
+						   ObjectNamespace="Assimalign.Cohesion.IdentityHub"
+						   ObjectAccessModifier="public"
+						   ObjectHasImplicitOperators="true"
+						   ObjectHasIsValidMethod="true"
+						   ObjectComparison="Ordinal" />
+		<CohesionValueType Include="ValueObjects\IdentityHubRecordKey.cs"
+						   ObjectRuntimeType="String"
+						   ObjectNamespace="Assimalign.Cohesion.IdentityHub"
+						   ObjectAccessModifier="public"
+						   ObjectHasImplicitOperators="true"
+						   ObjectHasIsValidMethod="true"
+						   ObjectComparison="Ordinal" />
+		<CohesionValueType Include="ValueObjects\IdentityHubRecordVersion.cs"
+						   ObjectRuntimeType="String"
+						   ObjectNamespace="Assimalign.Cohesion.IdentityHub"
+						   ObjectAccessModifier="public"
+						   ObjectHasImplicitOperators="true"
+						   ObjectHasIsValidMethod="true"
+						   ObjectComparison="Ordinal" />
+	</ItemGroup>
 </Project>

@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <resheader name="resmimetype">
+    <value>text/microsoft-resx</value>
+  </resheader>
+  <resheader name="version">
+    <value>2.0</value>
+  </resheader>
+  <resheader name="reader">
+    <value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <resheader name="writer">
+    <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <data name="RecordSetNameInvalid" xml:space="preserve">
+    <value>A record set name is 1 to 64 characters: lowercase ASCII letters and digits in segments separated by '.' or '-', starting with a letter.</value>
+  </data>
+  <data name="RecordSetNameRequired" xml:space="preserve">
+    <value>A record set name is required.</value>
+  </data>
+  <data name="RecordIndexNameInvalid" xml:space="preserve">
+    <value>A record index name is 1 to 64 characters: lowercase ASCII letters and digits in segments separated by '.' or '-', starting with a letter.</value>
+  </data>
+  <data name="RecordIndexNameRequired" xml:space="preserve">
+    <value>A record index name is required.</value>
+  </data>
+  <data name="RecordIndexValueRequired" xml:space="preserve">
+    <value>A record index value is required.</value>
+  </data>
+  <data name="RecordKeyInvalid" xml:space="preserve">
+    <value>A record key is 1 to 512 characters with no control character and no unpaired surrogate.</value>
+  </data>
+  <data name="RecordKeyRequired" xml:space="preserve">
+    <value>A record key is required.</value>
+  </data>
+  <data name="RecordVersionInvalid" xml:space="preserve">
+    <value>A record version is 1 to 128 visible ASCII characters.</value>
+  </data>
+  <data name="RecordVersionRequired" xml:space="preserve">
+    <value>A record version is required.</value>
+  </data>
+  <data name="RecordPayloadTooLarge" xml:space="preserve">
+    <value>A record payload is at most {0} bytes.</value>
+  </data>
+  <data name="RecordIndexCountExceeded" xml:space="preserve">
+    <value>A record carries at most {0} index entries.</value>
+  </data>
+  <data name="RecordIndexDuplicate" xml:space="preserve">
+    <value>A record lists index '{0}' twice with the same value.</value>
+  </data>
+  <data name="RecordIndexUniquenessMixed" xml:space="preserve">
+    <value>A record lists index '{0}' as both unique and not unique.</value>
+  </data>
+  <data name="PageContinuationEmpty" xml:space="preserve">
+    <value>A continuation token is null or a non-empty string.</value>
+  </data>
+  <data name="PageRecordRequired" xml:space="preserve">
+    <value>A page holds no null record.</value>
+  </data>
+  <data name="ContinuationInvalid" xml:space="preserve">
+    <value>The continuation token was not issued by this store for this query.</value>
+  </data>
+  <data name="StoreRecordCorrupt" xml:space="preserve">
+    <value>Record '{1}' in set '{0}' could not be decoded.</value>
+  </data>
+  <data name="StoreResultRequired" xml:space="preserve">
+    <value>The store returned no result for set '{0}'.</value>
+  </data>
+  <data name="CodecSetRequired" xml:space="preserve">
+    <value>A record codec names the record set it reads and writes.</value>
+  </data>
+  <data name="CodecRecordRequired" xml:space="preserve">
+    <value>The codec of record set '{0}' encoded a value to no record.</value>
+  </data>
+  <data name="IndexNotUnique" xml:space="preserve">
+    <value>Index '{1}' of record set '{0}' holds more than one record for the value.</value>
+  </data>
+</root>
