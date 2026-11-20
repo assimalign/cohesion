@@ -390,6 +390,62 @@ The leniencies, each accepted because the meaning is clear and nothing is at ris
 - **R11:** a later frame of a delivery that is not resumed may set `resume`; only the first frame
   decides.
 
+## Regression register (#433)
+
+`AmqpRegressionRegister` in the tests lists every defect the engine is known to have had: what it
+did wrong, the work item that found or fixed it, the section of AMQP 1.0 it broke, the compliance-map
+rule it falls under, and the tests and corpus cases that fail if it returns. A defect is wrong
+behavior in code that existed: a stall or a hang, data lost or changed, a valid input refused, or
+invalid output written. Accepting what a peer should not send is a leniency, which the compliance
+maps record instead (above).
+
+| Category | Entries | Exposed by |
+|---|---|---|
+| Malformed frame | D1 to D4 | a frame too large, written only in part, or read under the wrong limit |
+| Malformed message | D5 to D17 | a value or message the type system or message format refuses, or one the codec changed |
+| Invalid state | D18, D19 | an operation in a state where it behaved wrongly: a failed answer to an attach, a disposal |
+| Invalid negotiation | D20 to D26 | a protocol header, SASL exchange or `open` negotiated wrongly or stalled on |
+
+`AmqpRegressionTests` checks the register: every category holds an entry, every entry cites a
+section of the specification and a work item and names at least one test or corpus case, and every
+rule and case it names exists in its map. Tests are named with `nameof`, so renaming or deleting one
+breaks the build. A corpus case names the rules the defect broke: a returning defect fails more
+cases than it lists, such as every case that pipelines its frames. The same test class holds the
+tests for the defects nothing else pinned: an encoder failure that left part of a frame behind (D1,
+D2) and a disposal held up by a peer that never answers `close` (D19).
+
+**Verified on 2026-11-20.** Each entry's defect was put back into the engine on its own, by an exact
+edit of the code that fixed it, and the tests and cases the entry names were run: all 26 entries
+failed as named. Two were put back in their original form rather than by removing the fix: D8
+counts each compound twice, and D13 restores the old check that only annotations come first and
+the footer last.
+
+Two past defects have no entry:
+
+- An array whose count claims more elements than its bytes carry was refused before its fix as
+  well, only with another message, so it never behaved wrongly.
+- #426: a stopping link could fail a waiting receive before it canceled `LinkDetached`, so the
+  receive's continuation, which runs on another thread, could see the failure while the token was
+  still uncanceled. The window is a few instructions wide and no test can force it: with the defect
+  back, every test outside the interop collection still passed. The comment in
+  `AmqpLinkEndpoint.StopLocked` holds the order instead.
+
+Defects outside this project are pinned by their own project's tests, which the register cannot
+name: the root package's `AmqpOptionsTests` refuses settlement modes the specification does not
+define and its `AmqpPropertiesTests` refuses identifiers outside the four identifier types, and the
+TCP close race (#1086) is pinned by `TcpConnectionDisposeTests` and by the NativeAOT guard
+("AOT posture").
+
+**Adding an entry.** When a defect is fixed, write a test that fails without the fix, then add an
+entry under the category of the input or event that exposed it, citing the work item and the
+specification. A defect that breaks a rule in a compliance map names the rule and the map's cases
+that fail. Put the defect back once and see every test and case the entry names fail before
+committing.
+
+**CI.** `library-amqp.yml` runs the whole suite, the register included, on every push that touches
+`libraries/Amqp/**`, the Connections, InMemory or Tcp carriers, or the build, so a change that brings
+a registered defect back fails the build.
+
 ## Interoperability (#432)
 
 The engine is tested against an independent implementation, AMQPNetLite.Core 2.5.5, in both

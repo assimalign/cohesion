@@ -638,6 +638,17 @@ internal static class AmqpHeaderPhaseCorpus
                     ExpectAlive()
                 ],
                 AmqpHeaderPhaseOutcome.Open(AuthenticatedWith("ANONYMOUS"))),
+            Factory("a server that pipelines its AMQP header and open behind its sasl-outcome is answered in order", "H15", anonymous,
+                [
+                    ExpectHeader(SaslHeader),
+                    Write(SaslHeader, Frame(Mechanisms("ANONYMOUS"), type: sasl)),
+                    ExpectFrame("sasl-init"),
+                    Write(Frame(Outcome(AmqpSaslCode.Ok), type: sasl), AmqpHeader, Frame(Open())),
+                    ExpectHeader(AmqpHeader),
+                    ExpectFrame("open"),
+                    ExpectAlive()
+                ],
+                AmqpHeaderPhaseOutcome.Open(AuthenticatedWith("ANONYMOUS"))),
 
             // H16: idle timeouts declared and kept.
             Listener("the listener declares half its idle timeout in its open", "H16", none,
