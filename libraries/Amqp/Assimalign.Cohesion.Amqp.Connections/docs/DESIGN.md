@@ -568,6 +568,13 @@ What the suite does not cover, and why:
   more than the local `MaxFrameSize` closes the connection with `amqp:connection:framing-error` as
   soon as its size arrives, before its body is buffered (#1919). Before the `open` exchange the limit
   is 512 bytes, and every SASL frame is held to it.
+- **A frame must also fit the carrier's receive buffer.** The TCP and QUIC drivers pause their
+  receive pipe at `MaxReadBufferSize` (1 MiB by default), so a larger frame never completes. With
+  the defaults this cannot happen, since `MaxFrameSize` defaults to 256 KiB. A `MaxFrameSize` set
+  above the carrier's buffer lets a peer send a frame the carrier cannot deliver, and the idle
+  timeout then closes the connection as silent, or nothing does when the idle timeout is off.
+  Nothing checks the two against each other: the engine takes its carrier by capability and cannot
+  see a driver's options, so keep `MaxFrameSize` at or below the carrier's `MaxReadBufferSize`.
 - **The frame type follows the phase.** Once the connection is open only AMQP frames (type 0) travel;
   a SASL frame (type 1) then is a framing error.
 - **Channels are bounded.** A frame on a channel above the declared `ChannelMax` is a framing error,
