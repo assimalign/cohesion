@@ -23,14 +23,14 @@ public sealed class AmqpDescribedValue
     /// </param>
     /// <param name="value">The described value.</param>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="descriptor"/> is <see langword="null"/>.</exception>
-    /// <exception cref="ArgumentException">Thrown when <paramref name="descriptor"/> is neither a symbol nor an unsigned long.</exception>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="descriptor"/> is neither a symbol nor an unsigned long, or is a default symbol, which holds no name.</exception>
     public AmqpDescribedValue(object descriptor, object? value)
     {
         ArgumentNullException.ThrowIfNull(descriptor);
 
         Descriptor = descriptor switch
         {
-            AmqpSymbol symbol => symbol,
+            AmqpSymbol { Value: not null } symbol => symbol,
             ulong code => code,
             string name => new AmqpSymbol(name),
             _ => throw new ArgumentException(ErrorMessages.DescriptorTypeInvalid, nameof(descriptor))

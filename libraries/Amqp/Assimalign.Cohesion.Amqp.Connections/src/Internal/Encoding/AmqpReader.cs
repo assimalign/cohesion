@@ -713,6 +713,33 @@ internal ref struct AmqpReader
                 }
 
                 return ulongs;
+            case AmqpFormatCode.Short:
+                short[] shorts = new short[count];
+
+                for (int i = 0; i < shorts.Length; i++)
+                {
+                    shorts[i] = BinaryPrimitives.ReadInt16BigEndian(elements.ReadBytes(2));
+                }
+
+                return shorts;
+            case AmqpFormatCode.UShort:
+                ushort[] ushorts = new ushort[count];
+
+                for (int i = 0; i < ushorts.Length; i++)
+                {
+                    ushorts[i] = BinaryPrimitives.ReadUInt16BigEndian(elements.ReadBytes(2));
+                }
+
+                return ushorts;
+            case AmqpFormatCode.Byte:
+                sbyte[] sbytes = new sbyte[count];
+
+                for (int i = 0; i < sbytes.Length; i++)
+                {
+                    sbytes[i] = (sbyte)elements.ReadByte();
+                }
+
+                return sbytes;
             case AmqpFormatCode.Boolean:
                 bool[] booleans = new bool[count];
 
@@ -722,6 +749,15 @@ internal ref struct AmqpReader
                 }
 
                 return booleans;
+            case AmqpFormatCode.Float:
+                float[] singles = new float[count];
+
+                for (int i = 0; i < singles.Length; i++)
+                {
+                    singles[i] = BinaryPrimitives.ReadSingleBigEndian(elements.ReadBytes(4));
+                }
+
+                return singles;
             case AmqpFormatCode.Double:
                 double[] doubles = new double[count];
 

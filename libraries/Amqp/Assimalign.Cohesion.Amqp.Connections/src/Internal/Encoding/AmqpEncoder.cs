@@ -286,7 +286,7 @@ internal static class AmqpEncoder
     }
 
     /// <summary>
-    /// Writes a map keyed by symbols, such as <c>fields</c> or annotations, or <c>null</c>.
+    /// Writes a map keyed by symbols, such as annotations, or <c>null</c>, at the top level of a message section.
     /// </summary>
     public static void WriteSymbolMap(AmqpBufferWriter writer, IReadOnlyDictionary<AmqpSymbol, object?>? map)
     {
@@ -304,19 +304,11 @@ internal static class AmqpEncoder
             return;
         }
 
-        int start = BeginCompound(writer, AmqpFormatCode.Map32);
-
-        foreach (KeyValuePair<string, object?> entry in map)
-        {
-            WriteString(writer, entry.Key);
-            WriteValue(writer, entry.Value, 1);
-        }
-
-        EndCompound(writer, start, map.Count * 2, AmqpFormatCode.Map8);
+        WriteStringMap(writer, map, 0);
     }
 
     /// <summary>
-    /// Writes a list of values, or <c>null</c>.
+    /// Writes a list of values, or <c>null</c>, at the top level of a message section.
     /// </summary>
     public static void WriteList(AmqpBufferWriter writer, IReadOnlyList<object?>? list)
     {
@@ -341,6 +333,15 @@ internal static class AmqpEncoder
         WriteValue(writer, value, 0);
     }
 
+    /// <summary>
+    /// Writes any value the type system can represent.
+    /// </summary>
+    /// <param name="writer">The buffer.</param>
+    /// <param name="value">The value.</param>
+    /// <param name="depth">
+    /// The number of compound and described values that enclose <paramref name="value"/>, counted as
+    /// <see cref="AmqpReader"/> counts them, so that whatever the encoder writes the reader accepts.
+    /// </param>
     internal static void WriteValue(AmqpBufferWriter writer, object? value, int depth)
     {
         switch (value)
@@ -411,7 +412,8 @@ internal static class AmqpEncoder
             case AmqpSymbol symbol:
                 WriteSymbol(writer, symbol);
                 return;
-            case byte[] bytes:
+            // The runtime lets an sbyte[] pass for a byte[], so binary is matched by exact type.
+            case byte[] bytes when bytes.GetType() == typeof(byte[]):
                 WriteBinary(writer, bytes);
                 return;
             case ReadOnlyMemory<byte> readOnlyMemory:
@@ -430,91 +432,54 @@ internal static class AmqpEncoder
 
         ThrowIfTooDeep(depth);
 
+        if (value is Array array && TryWriteArray(writer, array))
+        {
+            return;
+        }
+
         switch (value)
         {
             case AmqpDescribedValue described:
-                WriteDescribed(writer, described, depth + 1);
+                WriteDescribed(writer, described, depth);
                 return;
             case AmqpError error:
-                AmqpTypeCodec.WriteError(writer, error, depth + 1);
+                AmqpTypeCodec.WriteError(writer, error, depth);
                 return;
             case AmqpDeliveryState state:
-                AmqpTypeCodec.WriteDeliveryState(writer, state, depth + 1);
+                AmqpTypeCodec.WriteDeliveryState(writer, state, depth);
                 return;
             case AmqpSource source:
-                AmqpTypeCodec.WriteSource(writer, source, depth + 1);
+                AmqpTypeCodec.WriteSource(writer, source, depth);
                 return;
             case AmqpTarget target:
-                AmqpTypeCodec.WriteTarget(writer, target, depth + 1);
+                AmqpTypeCodec.WriteTarget(writer, target, depth);
                 return;
             case AmqpCoordinator coordinator:
                 AmqpTypeCodec.WriteCoordinator(writer, coordinator);
                 return;
             case AmqpDeclare declare:
-                AmqpTypeCodec.WriteDeclare(writer, declare, depth + 1);
+                AmqpTypeCodec.WriteDeclare(writer, declare, depth);
                 return;
             case AmqpDischarge discharge:
                 AmqpTypeCodec.WriteDischarge(writer, discharge);
                 return;
-            case AmqpSymbol[] symbols:
-                WriteSymbolArray(writer, symbols);
-                return;
-            case string[] strings:
-                WriteStringArray(writer, strings);
-                return;
-            case int[] ints:
-                WriteFixedArray(writer, ints, AmqpFormatCode.Int, 4, static (span, item) => BinaryPrimitives.WriteInt32BigEndian(span, item));
-                return;
-            case uint[] uints:
-                WriteFixedArray(writer, uints, AmqpFormatCode.UInt, 4, static (span, item) => BinaryPrimitives.WriteUInt32BigEndian(span, item));
-                return;
-            case long[] longs:
-                WriteFixedArray(writer, longs, AmqpFormatCode.Long, 8, static (span, item) => BinaryPrimitives.WriteInt64BigEndian(span, item));
-                return;
-            case ulong[] ulongs:
-                WriteFixedArray(writer, ulongs, AmqpFormatCode.ULong, 8, static (span, item) => BinaryPrimitives.WriteUInt64BigEndian(span, item));
-                return;
-            case short[] shorts:
-                WriteFixedArray(writer, shorts, AmqpFormatCode.Short, 2, static (span, item) => BinaryPrimitives.WriteInt16BigEndian(span, item));
-                return;
-            case ushort[] ushorts:
-                WriteFixedArray(writer, ushorts, AmqpFormatCode.UShort, 2, static (span, item) => BinaryPrimitives.WriteUInt16BigEndian(span, item));
-                return;
-            case sbyte[] sbytes:
-                WriteFixedArray(writer, sbytes, AmqpFormatCode.Byte, 1, static (span, item) => span[0] = (byte)item);
-                return;
-            case bool[] booleans:
-                WriteFixedArray(writer, booleans, AmqpFormatCode.Boolean, 1, static (span, item) => span[0] = item ? (byte)1 : (byte)0);
-                return;
-            case float[] singles:
-                WriteFixedArray(writer, singles, AmqpFormatCode.Float, 4, static (span, item) => BinaryPrimitives.WriteSingleBigEndian(span, item));
-                return;
-            case double[] doubles:
-                WriteFixedArray(writer, doubles, AmqpFormatCode.Double, 8, static (span, item) => BinaryPrimitives.WriteDoubleBigEndian(span, item));
-                return;
-            case Guid[] uuids:
-                WriteFixedArray(writer, uuids, AmqpFormatCode.Uuid, 16, static (span, item) => item.TryWriteBytes(span, bigEndian: true, out _));
-                return;
-            case DateTimeOffset[] timestamps:
-                WriteFixedArray(writer, timestamps, AmqpFormatCode.Timestamp, 8, static (span, item) => BinaryPrimitives.WriteInt64BigEndian(span, item.ToUnixTimeMilliseconds()));
-                return;
             case IReadOnlyDictionary<AmqpSymbol, object?> symbolMap:
-                WriteSymbolMap(writer, symbolMap, depth + 1);
+                WriteSymbolMap(writer, symbolMap, depth);
                 return;
             case IReadOnlyDictionary<string, object?> stringMap:
-                WriteStringMap(writer, stringMap, depth + 1);
+                WriteStringMap(writer, stringMap, depth);
                 return;
             case IDictionary dictionary:
-                WriteDictionary(writer, dictionary, depth + 1);
+                WriteDictionary(writer, dictionary, depth);
                 return;
             case IReadOnlyDictionary<object, object?> objectMap:
-                WriteObjectMap(writer, objectMap, depth + 1);
+                WriteObjectMap(writer, objectMap, depth);
                 return;
             case IReadOnlyList<object?> list:
-                WriteList(writer, list, depth + 1);
+                WriteList(writer, list, depth);
                 return;
             case IList list:
-                WriteNonGenericList(writer, list, depth + 1);
+                WriteNonGenericList(writer, list, depth);
                 return;
         }
 
@@ -583,6 +548,12 @@ internal static class AmqpEncoder
         }
     }
 
+    /// <summary>
+    /// Writes a map keyed by symbols, or <c>null</c>.
+    /// </summary>
+    /// <param name="writer">The buffer.</param>
+    /// <param name="map">The map.</param>
+    /// <param name="depth">The number of compound and described values that enclose the map.</param>
     internal static void WriteSymbolMap(AmqpBufferWriter writer, IReadOnlyDictionary<AmqpSymbol, object?>? map, int depth)
     {
         if (map is null)
@@ -590,6 +561,8 @@ internal static class AmqpEncoder
             WriteNull(writer);
             return;
         }
+
+        ThrowIfTooDeep(depth);
 
         int start = BeginCompound(writer, AmqpFormatCode.Map32);
 
@@ -604,6 +577,8 @@ internal static class AmqpEncoder
 
     private static void WriteStringMap(AmqpBufferWriter writer, IReadOnlyDictionary<string, object?> map, int depth)
     {
+        ThrowIfTooDeep(depth);
+
         int start = BeginCompound(writer, AmqpFormatCode.Map32);
 
         foreach (KeyValuePair<string, object?> entry in map)
@@ -617,6 +592,8 @@ internal static class AmqpEncoder
 
     private static void WriteObjectMap(AmqpBufferWriter writer, IReadOnlyDictionary<object, object?> map, int depth)
     {
+        ThrowIfTooDeep(depth);
+
         int start = BeginCompound(writer, AmqpFormatCode.Map32);
 
         foreach (KeyValuePair<object, object?> entry in map)
@@ -630,6 +607,8 @@ internal static class AmqpEncoder
 
     private static void WriteDictionary(AmqpBufferWriter writer, IDictionary map, int depth)
     {
+        ThrowIfTooDeep(depth);
+
         int start = BeginCompound(writer, AmqpFormatCode.Map32);
         int count = 0;
         IDictionaryEnumerator entries = map.GetEnumerator();
@@ -652,6 +631,8 @@ internal static class AmqpEncoder
             return;
         }
 
+        ThrowIfTooDeep(depth);
+
         int start = BeginCompound(writer, AmqpFormatCode.List32);
 
         for (int i = 0; i < list.Count; i++)
@@ -664,6 +645,8 @@ internal static class AmqpEncoder
 
     private static void WriteNonGenericList(AmqpBufferWriter writer, IList list, int depth)
     {
+        ThrowIfTooDeep(depth);
+
         int start = BeginCompound(writer, AmqpFormatCode.List32);
 
         for (int i = 0; i < list.Count; i++)
@@ -676,6 +659,7 @@ internal static class AmqpEncoder
 
     private static void WriteDescribed(AmqpBufferWriter writer, AmqpDescribedValue described, int depth)
     {
+        ThrowIfTooDeep(depth);
         writer.WriteByte(AmqpFormatCode.Described);
 
         if (described.Descriptor is ulong code)
@@ -687,7 +671,85 @@ internal static class AmqpEncoder
             WriteSymbol(writer, (AmqpSymbol)described.Descriptor);
         }
 
-        WriteValue(writer, described.Value, depth);
+        // The reader counts a descriptor as a level of nesting, so the described value is one level deeper.
+        WriteValue(writer, described.Value, depth + 1);
+    }
+
+    /// <summary>
+    /// Writes an array whose element type has an AMQP array encoding.
+    /// </summary>
+    /// <remarks>
+    /// The runtime lets an array pass a type test for another array of the same element size and signedness
+    /// rules (a <see cref="uint"/>[] is an <see cref="int"/>[], an enum[] is its underlying type's array), so
+    /// the element type is matched exactly. Any other array is written as a list, or refused, by the caller.
+    /// </remarks>
+    /// <returns><see langword="true"/> when the array was written.</returns>
+    private static bool TryWriteArray(AmqpBufferWriter writer, Array array)
+    {
+        Type type = array.GetType();
+
+        if (type == typeof(AmqpSymbol[]))
+        {
+            WriteSymbolArray(writer, (AmqpSymbol[])array);
+        }
+        else if (type == typeof(string[]))
+        {
+            WriteStringArray(writer, (string[])array);
+        }
+        else if (type == typeof(int[]))
+        {
+            WriteFixedArray(writer, (int[])array, AmqpFormatCode.Int, 4, static (span, item) => BinaryPrimitives.WriteInt32BigEndian(span, item));
+        }
+        else if (type == typeof(uint[]))
+        {
+            WriteFixedArray(writer, (uint[])array, AmqpFormatCode.UInt, 4, static (span, item) => BinaryPrimitives.WriteUInt32BigEndian(span, item));
+        }
+        else if (type == typeof(long[]))
+        {
+            WriteFixedArray(writer, (long[])array, AmqpFormatCode.Long, 8, static (span, item) => BinaryPrimitives.WriteInt64BigEndian(span, item));
+        }
+        else if (type == typeof(ulong[]))
+        {
+            WriteFixedArray(writer, (ulong[])array, AmqpFormatCode.ULong, 8, static (span, item) => BinaryPrimitives.WriteUInt64BigEndian(span, item));
+        }
+        else if (type == typeof(short[]))
+        {
+            WriteFixedArray(writer, (short[])array, AmqpFormatCode.Short, 2, static (span, item) => BinaryPrimitives.WriteInt16BigEndian(span, item));
+        }
+        else if (type == typeof(ushort[]))
+        {
+            WriteFixedArray(writer, (ushort[])array, AmqpFormatCode.UShort, 2, static (span, item) => BinaryPrimitives.WriteUInt16BigEndian(span, item));
+        }
+        else if (type == typeof(sbyte[]))
+        {
+            WriteFixedArray(writer, (sbyte[])array, AmqpFormatCode.Byte, 1, static (span, item) => span[0] = (byte)item);
+        }
+        else if (type == typeof(bool[]))
+        {
+            WriteFixedArray(writer, (bool[])array, AmqpFormatCode.Boolean, 1, static (span, item) => span[0] = item ? (byte)1 : (byte)0);
+        }
+        else if (type == typeof(float[]))
+        {
+            WriteFixedArray(writer, (float[])array, AmqpFormatCode.Float, 4, static (span, item) => BinaryPrimitives.WriteSingleBigEndian(span, item));
+        }
+        else if (type == typeof(double[]))
+        {
+            WriteFixedArray(writer, (double[])array, AmqpFormatCode.Double, 8, static (span, item) => BinaryPrimitives.WriteDoubleBigEndian(span, item));
+        }
+        else if (type == typeof(Guid[]))
+        {
+            WriteFixedArray(writer, (Guid[])array, AmqpFormatCode.Uuid, 16, static (span, item) => item.TryWriteBytes(span, bigEndian: true, out _));
+        }
+        else if (type == typeof(DateTimeOffset[]))
+        {
+            WriteFixedArray(writer, (DateTimeOffset[])array, AmqpFormatCode.Timestamp, 8, static (span, item) => BinaryPrimitives.WriteInt64BigEndian(span, item.ToUnixTimeMilliseconds()));
+        }
+        else
+        {
+            return false;
+        }
+
+        return true;
     }
 
     private static void WriteStringArray(AmqpBufferWriter writer, string[] values)
@@ -758,7 +820,7 @@ internal static class AmqpEncoder
         }
     }
 
-    private static void ThrowIfTooDeep(int depth)
+    internal static void ThrowIfTooDeep(int depth)
     {
         if (depth >= MaxNestingDepth)
         {

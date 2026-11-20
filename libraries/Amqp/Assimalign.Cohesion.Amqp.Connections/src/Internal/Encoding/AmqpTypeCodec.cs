@@ -12,8 +12,16 @@ namespace Assimalign.Cohesion.Amqp.Connections.Internal;
 /// section 3.5; Part 4, section 4.5).
 /// </summary>
 /// <remarks>
+/// <para>
 /// A <c>Read*Body</c> method reads the list that follows a descriptor the caller already consumed; the
 /// other readers consume the descriptor themselves and accept <c>null</c>.
+/// </para>
+/// <para>
+/// A writer's <c>depth</c> is the number of compound and described values that enclose the value it writes.
+/// Its fields are two levels deeper, one for the descriptor and one for the list, which is as deep as
+/// <see cref="AmqpReader"/> ever counts them, so whatever these writers write the reader accepts. The
+/// overloads without a depth write a field of a performative, one level below the performative's list.
+/// </para>
 /// </remarks>
 internal static class AmqpTypeCodec
 {
@@ -35,11 +43,13 @@ internal static class AmqpTypeCodec
             throw new ArgumentException(ErrorMessages.ErrorConditionMissing, nameof(error));
         }
 
+        AmqpEncoder.ThrowIfTooDeep(depth);
+
         AmqpListWriter list = new(writer, AmqpDescriptor.Error);
 
         list.WriteSymbol(error.Condition);
         list.WriteString(error.Description);
-        AmqpEncoder.WriteSymbolMap(writer, error.Info, depth);
+        AmqpEncoder.WriteSymbolMap(writer, error.Info, depth + 2);
         list.Field(error.Info is null);
         list.Complete();
     }
@@ -84,6 +94,8 @@ internal static class AmqpTypeCodec
 
     internal static void WriteDeliveryState(AmqpBufferWriter writer, AmqpDeliveryState state, int depth)
     {
+        AmqpEncoder.ThrowIfTooDeep(depth);
+
         switch (state)
         {
             case AmqpAccepted:
@@ -102,7 +114,7 @@ internal static class AmqpTypeCodec
                 }
                 else
                 {
-                    WriteError(writer, rejected.Error, depth + 1);
+                    WriteError(writer, rejected.Error, depth + 2);
                     list.Field(false);
                 }
 
@@ -115,7 +127,7 @@ internal static class AmqpTypeCodec
 
                 list.WriteBoolean(modified.DeliveryFailed, false);
                 list.WriteBoolean(modified.UndeliverableHere, false);
-                AmqpEncoder.WriteSymbolMap(writer, modified.MessageAnnotations, depth);
+                AmqpEncoder.WriteSymbolMap(writer, modified.MessageAnnotations, depth + 2);
                 list.Field(modified.MessageAnnotations is null);
                 list.Complete();
                 return;
@@ -149,7 +161,7 @@ internal static class AmqpTypeCodec
                 }
                 else
                 {
-                    WriteDeliveryState(writer, transactional.Outcome, depth + 1);
+                    WriteDeliveryState(writer, transactional.Outcome, depth + 2);
                     list.Field(false);
                 }
 
@@ -257,6 +269,8 @@ internal static class AmqpTypeCodec
 
     internal static void WriteSource(AmqpBufferWriter writer, AmqpSource source, int depth)
     {
+        AmqpEncoder.ThrowIfTooDeep(depth);
+
         AmqpListWriter list = new(writer, AmqpDescriptor.Source);
 
         list.WriteString(source.Address);
@@ -264,10 +278,10 @@ internal static class AmqpTypeCodec
         WriteExpiryPolicy(ref list, source.ExpiryPolicy);
         list.WriteUInt(source.Timeout, 0u);
         list.WriteBoolean(source.Dynamic, false);
-        AmqpEncoder.WriteSymbolMap(writer, source.DynamicNodeProperties, depth);
+        AmqpEncoder.WriteSymbolMap(writer, source.DynamicNodeProperties, depth + 2);
         list.Field(source.DynamicNodeProperties is null);
         list.WriteSymbol(source.DistributionMode);
-        AmqpEncoder.WriteSymbolMap(writer, source.Filter, depth);
+        AmqpEncoder.WriteSymbolMap(writer, source.Filter, depth + 2);
         list.Field(source.Filter is null);
 
         if (source.DefaultOutcome is null)
@@ -276,7 +290,7 @@ internal static class AmqpTypeCodec
         }
         else
         {
-            WriteDeliveryState(writer, source.DefaultOutcome, depth + 1);
+            WriteDeliveryState(writer, source.DefaultOutcome, depth + 2);
             list.Field(false);
         }
 
@@ -342,6 +356,8 @@ internal static class AmqpTypeCodec
 
     internal static void WriteTarget(AmqpBufferWriter writer, AmqpTarget target, int depth)
     {
+        AmqpEncoder.ThrowIfTooDeep(depth);
+
         AmqpListWriter list = new(writer, AmqpDescriptor.Target);
 
         list.WriteString(target.Address);
@@ -349,7 +365,7 @@ internal static class AmqpTypeCodec
         WriteExpiryPolicy(ref list, target.ExpiryPolicy);
         list.WriteUInt(target.Timeout, 0u);
         list.WriteBoolean(target.Dynamic, false);
-        AmqpEncoder.WriteSymbolMap(writer, target.DynamicNodeProperties, depth);
+        AmqpEncoder.WriteSymbolMap(writer, target.DynamicNodeProperties, depth + 2);
         list.Field(target.DynamicNodeProperties is null);
         list.WriteSymbolMultiple(target.Capabilities);
         list.Complete();
@@ -414,9 +430,11 @@ internal static class AmqpTypeCodec
 
     internal static void WriteDeclare(AmqpBufferWriter writer, AmqpDeclare declare, int depth)
     {
+        AmqpEncoder.ThrowIfTooDeep(depth);
+
         AmqpListWriter list = new(writer, AmqpDescriptor.Declare);
 
-        AmqpEncoder.WriteValue(writer, declare.GlobalId, depth);
+        AmqpEncoder.WriteValue(writer, declare.GlobalId, depth + 2);
         list.Field(declare.GlobalId is null);
         list.Complete();
     }
@@ -465,7 +483,16 @@ internal static class AmqpTypeCodec
         foreach (KeyValuePair<AmqpDeliveryTag, AmqpDeliveryState?> entry in unsettled)
         {
             AmqpEncoder.WriteBinary(writer, entry.Key.Value.Span);
-            WriteDeliveryState(writer, entry.Value);
+
+            // The map is a field of the attach, so its states are one level below it.
+            if (entry.Value is null)
+            {
+                AmqpEncoder.WriteNull(writer);
+            }
+            else
+            {
+                WriteDeliveryState(writer, entry.Value, 2);
+            }
         }
 
         AmqpEncoder.EndCompound(writer, start, unsettled.Count * 2, AmqpFormatCode.Map8);
