@@ -37,4 +37,28 @@
   <data name="ExpiryPolicyInvalid" xml:space="preserve">
     <value>The terminus expiry policy must be one AMQP 1.0 defines: link-detach, session-end, connection-close or never.</value>
   </data>
+  <data name="CoordinatorRequestRequired" xml:space="preserve">
+    <value>The link request must come from a sender attaching to a transaction coordinator.</value>
+  </data>
+  <data name="CoordinatorAlreadyRunning" xml:space="preserve">
+    <value>The transaction coordinator has already run.</value>
+  </data>
+  <data name="CoordinatorMessageInvalid" xml:space="preserve">
+    <value>A transaction coordinator handles only a declare or a discharge in an amqp-value body.</value>
+  </data>
+  <data name="CoordinatorHandlerFailed" xml:space="preserve">
+    <value>The transactional resource failed while it handled a declare or discharge.</value>
+  </data>
+  <data name="TransactionIdTooLong" xml:space="preserve">
+    <value>The transaction handler declared an identifier longer than the 32 bytes AMQP 1.0 allows.</value>
+  </data>
+  <data name="TransactionIdDuplicate" xml:space="preserve">
+    <value>The transaction handler declared an identifier that names a transaction still live on the control link.</value>
+  </data>
+  <data name="TransactionUnknown" xml:space="preserve">
+    <value>The control link did not declare the transaction, or already discharged it.</value>
+  </data>
+  <data name="CoordinatorCapabilityMissing" xml:space="preserve">
+    <value>The transaction coordinator does not support the capability '{0}'.</value>
+  </data>
 </root>

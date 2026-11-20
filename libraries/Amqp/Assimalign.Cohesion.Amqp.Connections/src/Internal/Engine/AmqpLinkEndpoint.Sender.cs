@@ -24,6 +24,8 @@ internal sealed class AmqpSenderEndpoint : AmqpLinkEndpoint, IAmqpSender
     private readonly AmqpWaiter _credit;
     private readonly AmqpTransferPerformative _transfer;
     private bool _autoCompleteDrain;
+    private bool _transactionalAcquisition;
+    private ReadOnlyMemory<byte>? _acquisitionTransactionId;
     private uint _deliveryCount;
     private uint _linkCredit;
     private bool _drain;
@@ -40,6 +42,7 @@ internal sealed class AmqpSenderEndpoint : AmqpLinkEndpoint, IAmqpSender
         _credit = new AmqpWaiter();
         _transfer = new AmqpTransferPerformative();
         _autoCompleteDrain = options.AutoCompleteDrain;
+        _transactionalAcquisition = options.TransactionalAcquisition;
     }
 
     /// <summary>
@@ -57,6 +60,17 @@ internal sealed class AmqpSenderEndpoint : AmqpLinkEndpoint, IAmqpSender
     public uint Credit => Volatile.Read(ref _linkCredit);
 
     public bool IsDraining => Volatile.Read(ref _drain);
+
+    public ReadOnlyMemory<byte>? AcquisitionTransactionId
+    {
+        get
+        {
+            lock (Sync)
+            {
+                return _acquisitionTransactionId;
+            }
+        }
+    }
 
     private protected override uint? InitialDeliveryCount => _deliveryCount;
 
@@ -94,6 +108,20 @@ internal sealed class AmqpSenderEndpoint : AmqpLinkEndpoint, IAmqpSender
         }
     }
 
+    public bool ClearAcquisitionTransaction(ReadOnlyMemory<byte> transactionId)
+    {
+        lock (Sync)
+        {
+            if (_acquisitionTransactionId is not ReadOnlyMemory<byte> current || !current.Span.SequenceEqual(transactionId.Span))
+            {
+                return false;
+            }
+
+            _acquisitionTransactionId = null;
+            return true;
+        }
+    }
+
     public async ValueTask<AmqpDeliveryState?> SendAsync(AmqpMessage message, AmqpDeliveryOptions? options = null, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(message);
@@ -117,6 +145,21 @@ internal sealed class AmqpSenderEndpoint : AmqpLinkEndpoint, IAmqpSender
     public async ValueTask<AmqpDeliveryState?> SendAsync(ReadOnlyMemory<byte> payload, AmqpDeliveryOptions? options = null, CancellationToken cancellationToken = default)
     {
         bool settled = ResolveSettled(options);
+
+        if (IsControlLink)
+        {
+            // The controller must learn the coordinator's outcome (AMQP 1.0 Part 4, sections 4.2 and 4.3), and
+            // the control link carries no transactional work (section 4.1).
+            if (settled)
+            {
+                throw new ArgumentException(ErrorMessages.CoordinatorDeliverySettled, nameof(options));
+            }
+
+            if (options?.State is AmqpTransactionalState)
+            {
+                throw new ArgumentException(ErrorMessages.CoordinatorDeliveryTransactional, nameof(options));
+            }
+        }
 
         if (options is { Resume: true, DeliveryTag: null })
         {
@@ -197,6 +240,11 @@ internal sealed class AmqpSenderEndpoint : AmqpLinkEndpoint, IAmqpSender
             return;
         }
 
+        if (!TakeAcquisitionTransactionLocked(flow))
+        {
+            return;
+        }
+
         if (flow.LinkCredit is uint credit)
         {
             // The receiver's credit counts from its delivery-count, which lags this endpoint's by the transfers
@@ -232,6 +280,16 @@ internal sealed class AmqpSenderEndpoint : AmqpLinkEndpoint, IAmqpSender
         if (options is AmqpSenderOptions sender)
         {
             _autoCompleteDrain = sender.AutoCompleteDrain;
+            _transactionalAcquisition = sender.TransactionalAcquisition;
+        }
+
+        // A receiver may have named a transaction before the application answered, when the endpoint could not
+        // tell yet whether it supports transactional acquisition (AMQP 1.0 Part 4, section 4.4.3).
+        if (_acquisitionTransactionId is not null && !_transactionalAcquisition)
+        {
+            _acquisitionTransactionId = null;
+            FailLocked(AmqpErrorCondition.NotImplemented, ErrorMessages.FlowTransactionUnsupported);
+            return;
         }
 
         // A receiver may have asked for a drain before the application answered.
@@ -242,6 +300,38 @@ internal sealed class AmqpSenderEndpoint : AmqpLinkEndpoint, IAmqpSender
     {
         // Wake a send waiting for credit; the session wakes those waiting for its window.
         _credit.Signal();
+    }
+
+    /// <summary>
+    /// Takes the transaction a <c>flow</c> names in its <c>txn-id</c> property for the deliveries the sender
+    /// acquires (AMQP 1.0 Part 4, section 4.4.3). A <c>flow</c> that names none leaves the transaction as it
+    /// was: only a discharge clears it.
+    /// </summary>
+    /// <returns><see langword="false"/> when the link failed.</returns>
+    private bool TakeAcquisitionTransactionLocked(AmqpFlowPerformative flow)
+    {
+        if (flow.Properties is not { } properties || !properties.TryGetValue(TransactionIdKey, out object? value))
+        {
+            return true;
+        }
+
+        // An endpoint that does not support transactional acquisition MUST terminate the link with
+        // not-implemented. Until the application answers the attach it cannot tell, so the answer decides.
+        if (State == AmqpLinkState.Attached && !_transactionalAcquisition)
+        {
+            FailLocked(AmqpErrorCondition.NotImplemented, ErrorMessages.FlowTransactionUnsupported);
+            return false;
+        }
+
+        // A transaction identifier is binary (section 4.5.4).
+        if (value is not byte[] transactionId)
+        {
+            FailLocked(AmqpErrorCondition.InvalidField, ErrorMessages.FlowTransactionIdInvalid);
+            return false;
+        }
+
+        _acquisitionTransactionId = transactionId;
+        return true;
     }
 
     private bool ResolveSettled(AmqpDeliveryOptions? options)
@@ -397,12 +487,14 @@ internal sealed class AmqpSenderEndpoint : AmqpLinkEndpoint, IAmqpSender
         }
         finally
         {
-            // Later frames of the delivery carry only the handle and the more flag.
+            // Later frames of the delivery carry only the handle and the more flag, and a transactional state:
+            // every frame of a delivery names its transaction, an aborting one included (AMQP 1.0 Part 4,
+            // section 4.4.1).
             transfer.DeliveryId = null;
             transfer.DeliveryTag = null;
             transfer.MessageFormat = null;
             transfer.Settled = null;
-            transfer.State = null;
+            transfer.State = transfer.State as AmqpTransactionalState;
             transfer.Resume = false;
         }
 

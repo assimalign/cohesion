@@ -43,9 +43,16 @@ public sealed class AmqpDeliveryOptions
     /// Gets or sets the delivery state the first <c>transfer</c> frame carries, or <see langword="null"/>.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// A transactional send carries an <see cref="AmqpTransactionalState"/> naming the transaction
-    /// (AMQP 1.0 Part 4, section 4.4.1). A resumed delivery carries the state the sender last knew, such
-    /// as an <see cref="AmqpReceived"/> that tells the receiver where to resume.
+    /// (AMQP 1.0 Part 4, section 4.4.1). Every frame of a split delivery must name the same transaction, so
+    /// a transactional state goes on each of its frames, an aborting one included. A link to a transaction
+    /// coordinator refuses one: the control link carries no transactional work (section 4.1).
+    /// </para>
+    /// <para>
+    /// A resumed delivery carries the state the sender last knew, such as an <see cref="AmqpReceived"/> that
+    /// tells the receiver where to resume.
+    /// </para>
     /// </remarks>
     public AmqpDeliveryState? State { get; set; }
 

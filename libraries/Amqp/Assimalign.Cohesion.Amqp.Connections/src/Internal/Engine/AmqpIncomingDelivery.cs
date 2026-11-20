@@ -58,6 +58,11 @@ internal sealed class AmqpIncomingDelivery : IAmqpDelivery
 
     public IAmqpReceiver Receiver => _receiver;
 
+    /// <summary>
+    /// Gets the receiving endpoint the delivery arrived on.
+    /// </summary>
+    internal AmqpReceiverEndpoint ReceiverEndpoint => _receiver;
+
     public AmqpDeliveryTag DeliveryTag => _deliveryTag;
 
     public uint MessageFormat => _messageFormat;
@@ -149,6 +154,18 @@ internal sealed class AmqpIncomingDelivery : IAmqpDelivery
         _builder ??= new AmqpBufferWriter();
         _builder.Write(payload);
         return true;
+    }
+
+    /// <summary>
+    /// Returns whether a state the sender sends after the delivery's first frame keeps the delivery in the
+    /// transaction that frame named, or out of any: every frame of a delivery belongs to the same transaction
+    /// (AMQP 1.0 Part 4, section 4.4.1), and a later state may not move it.
+    /// </summary>
+    internal bool KeepsTransaction(AmqpDeliveryState state)
+    {
+        return RemoteState is AmqpTransactionalState current
+            ? state is AmqpTransactionalState next && next.TransactionId.Span.SequenceEqual(current.TransactionId.Span)
+            : state is not AmqpTransactionalState;
     }
 
     /// <summary>

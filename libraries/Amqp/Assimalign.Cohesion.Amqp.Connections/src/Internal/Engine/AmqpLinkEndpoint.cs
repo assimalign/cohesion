@@ -143,6 +143,18 @@ internal abstract class AmqpLinkEndpoint : IAmqpLink
     internal uint? RemoteHandle => _remoteHandle;
 
     /// <summary>
+    /// Gets a value indicating whether the link is a control link: either end's target is a transaction
+    /// coordinator (AMQP 1.0 Part 4, section 4.2). The control link carries no transactional work (section 4.1).
+    /// </summary>
+    internal bool IsControlLink => _localTarget is AmqpCoordinator || _remoteTarget is AmqpCoordinator;
+
+    /// <summary>
+    /// Gets the key of the <c>flow</c> property that names the transaction a sender acquires deliveries under
+    /// (AMQP 1.0 Part 4, section 4.4.3).
+    /// </summary>
+    private protected static AmqpSymbol TransactionIdKey { get; } = new("txn-id");
+
+    /// <summary>
     /// Gets the session the link is attached on.
     /// </summary>
     private protected AmqpSessionEndpoint SessionEndpoint => _session;
@@ -473,9 +485,13 @@ internal abstract class AmqpLinkEndpoint : IAmqpLink
         }
 
         _stopped = true;
+
+        // The token is canceled before any waiting operation fails, so code that observes such a failure
+        // always finds LinkDetached canceled: a failed receive's continuation runs on another thread and can
+        // start before this method returns. CancelAsync marks the token at once and runs its callbacks later.
+        _ = _detachedSource.CancelAsync();
         OnStoppedLocked(_detachedException);
         _session.OnLinkStoppedLocked(this, _detachedException);
-        _ = _detachedSource.CancelAsync();
     }
 
     private void DetachedLocked(AmqpException exception)
@@ -527,7 +543,7 @@ internal abstract class AmqpLinkEndpoint : IAmqpLink
     /// <exception cref="ArgumentException">Thrown when the attach breaks a rule.</exception>
     private static void ThrowIfRuleBroken(AmqpAttachPerformative attach, bool opening)
     {
-        if (AmqpAttachRules.FindViolation(attach, opening) is string violation)
+        if ((AmqpAttachRules.FindViolation(attach, opening) ?? AmqpAttachRules.FindLocalViolation(attach)) is string violation)
         {
             throw new ArgumentException(violation, "options");
         }

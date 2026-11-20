@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Runtime.ExceptionServices;
@@ -32,6 +33,7 @@ internal sealed class AmqpReceiverEndpoint : AmqpLinkEndpoint, IAmqpReceiver
     private int _buffered;
     private bool _draining;
     private AmqpIncomingDelivery? _partial;
+    private IReadOnlyDictionary<AmqpSymbol, object?>? _flowProperties;
 
     /// <summary>
     /// Creates the endpoint of a receiving link the application attaches.
@@ -102,6 +104,39 @@ internal sealed class AmqpReceiverEndpoint : AmqpLinkEndpoint, IAmqpReceiver
         }
     }
 
+    public AmqpDeliveryState? PartialDeliveryState
+    {
+        get
+        {
+            lock (Sync)
+            {
+                return _partial?.RemoteState;
+            }
+        }
+    }
+
+    public void SetAcquisitionTransaction(ReadOnlyMemory<byte>? transactionId)
+    {
+        lock (Sync)
+        {
+            ThrowIfNotAttachedLocked();
+
+            // The control link carries no transactional work (AMQP 1.0 Part 4, section 4.1).
+            if (IsControlLink)
+            {
+                throw new InvalidOperationException(ErrorMessages.CoordinatorLinkAcquisition);
+            }
+
+            // The txn-id entry of the flow's properties names the transaction (AMQP 1.0 Part 4, section 4.4.3);
+            // every later flow repeats it, so the sender cannot miss it.
+            _flowProperties = transactionId is ReadOnlyMemory<byte> id
+                ? new Dictionary<AmqpSymbol, object?>(1) { [TransactionIdKey] = id.ToArray() }
+                : null;
+            SessionEndpoint.WriteFlowLocked(this);
+            SessionEndpoint.Writer.Schedule();
+        }
+    }
+
     public async ValueTask DrainAsync(CancellationToken cancellationToken = default)
     {
         while (true)
@@ -147,6 +182,12 @@ internal sealed class AmqpReceiverEndpoint : AmqpLinkEndpoint, IAmqpReceiver
     /// </summary>
     internal ValueTask SettleAsync(AmqpIncomingDelivery delivery, AmqpDeliveryState? state, CancellationToken cancellationToken)
     {
+        // The control link carries no transactional work (AMQP 1.0 Part 4, section 4.1).
+        if (state is AmqpTransactionalState && IsControlLink)
+        {
+            throw new ArgumentException(ErrorMessages.CoordinatorOutcomeTransactional, nameof(state));
+        }
+
         Task settlement;
 
         lock (Sync)
@@ -196,6 +237,7 @@ internal sealed class AmqpReceiverEndpoint : AmqpLinkEndpoint, IAmqpReceiver
         flow.DeliveryCount = _deliveryCountKnown ? _deliveryCount : null;
         flow.LinkCredit = _linkCredit;
         flow.Drain = _draining;
+        flow.Properties = _flowProperties;
     }
 
     internal override void OnFlowLocked(AmqpFlowPerformative flow)
@@ -259,6 +301,11 @@ internal sealed class AmqpReceiverEndpoint : AmqpLinkEndpoint, IAmqpReceiver
                 return;
             }
 
+            if (FailIfControlTransferInvalidLocked(transfer))
+            {
+                return;
+            }
+
             if (session.ContainsIncomingLocked(deliveryId))
             {
                 session.EndWithErrorLocked(
@@ -294,6 +341,21 @@ internal sealed class AmqpReceiverEndpoint : AmqpLinkEndpoint, IAmqpReceiver
                 FailLocked(
                     AmqpErrorCondition.InvalidField,
                     string.Format(CultureInfo.CurrentCulture, ErrorMessages.TransferDeliveryIdMismatch, delivery.DeliveryId, deliveryId));
+                return;
+            }
+
+            if (FailIfControlTransferInvalidLocked(transfer))
+            {
+                return;
+            }
+
+            // Every frame of a delivery belongs to the transaction its first frame named, or to none (AMQP 1.0
+            // Part 4, section 4.4.1). A later frame without a state changes nothing.
+            if (transfer.State is AmqpDeliveryState state && !delivery.KeepsTransaction(state))
+            {
+                FailLocked(
+                    AmqpErrorCondition.InvalidField,
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.DeliveryTransactionChanged, delivery.DeliveryId));
                 return;
             }
 
@@ -335,6 +397,35 @@ internal sealed class AmqpReceiverEndpoint : AmqpLinkEndpoint, IAmqpReceiver
         _buffered++;
         _deliveries.Writer.TryWrite(delivery);
         CheckDrainedLocked();
+    }
+
+    /// <summary>
+    /// Detaches a link to a transaction coordinator that the peer sends a settled or transactional frame
+    /// on: declare and discharge need the coordinator's outcome, so the coordinator detaches with
+    /// <c>amqp:illegal-state</c> as AMQP 1.0 Part 4, section 4.2 asks, and the control link carries no
+    /// transactional work (section 4.1).
+    /// </summary>
+    /// <returns><see langword="true"/> when the link was detached.</returns>
+    private bool FailIfControlTransferInvalidLocked(AmqpTransferPerformative transfer)
+    {
+        if (!IsControlLink)
+        {
+            return false;
+        }
+
+        if (transfer.Settled == true)
+        {
+            FailLocked(AmqpErrorCondition.IllegalState, ErrorMessages.CoordinatorTransferSettled);
+            return true;
+        }
+
+        if (transfer.State is AmqpTransactionalState)
+        {
+            FailLocked(AmqpErrorCondition.NotAllowed, ErrorMessages.CoordinatorTransferTransactional);
+            return true;
+        }
+
+        return false;
     }
 
     private protected override void OnAttachSentLocked()

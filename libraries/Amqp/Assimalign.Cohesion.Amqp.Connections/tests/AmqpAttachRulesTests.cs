@@ -223,6 +223,73 @@ public class AmqpAttachRulesTests
         sender.Credit.ShouldBe(new AmqpReceiverOptions().Prefetch);
     }
 
+    [Theory(DisplayName = "Cohesion Test [Amqp.Connections] - FindLocalViolation: Should refuse a local link to a coordinator that resumes or sends settled, and nothing else")]
+    [InlineData("coordinator-unsettled", "resumed")]
+    [InlineData("coordinator-incomplete-unsettled", "resumed")]
+    [InlineData("coordinator-sender-settled", "settled")]
+    [InlineData("coordinator-sender-unsettled", null)]
+    [InlineData("coordinator-sender-mixed", null)]
+    [InlineData("coordinator-empty-unsettled", null)]
+    [InlineData("coordinator-receiver-settled", null)]
+    [InlineData("queue-resumed-settled", null)]
+    public void FindLocalViolation_OnLocalAttach_ShouldRefuseOnlyResumedOrSettledControlLinks(string scenario, string? expected)
+    {
+        // Arrange
+        AmqpAttachPerformative attach = CreateLocalAttach(scenario);
+
+        // Act
+        string? violation = AmqpAttachRules.FindLocalViolation(attach);
+
+        // Assert
+        violation.ShouldBe(expected switch
+        {
+            "resumed" => ErrorMessages.CoordinatorLinkResumed,
+            "settled" => ErrorMessages.CoordinatorLinkSettled,
+            _ => null
+        });
+    }
+
+    private static AmqpAttachPerformative CreateLocalAttach(string scenario)
+    {
+        AmqpAttachPerformative attach = new()
+        {
+            Name = "local",
+            Role = scenario.Contains("receiver", StringComparison.Ordinal) ? AmqpRole.Receiver : AmqpRole.Sender,
+            Source = new AmqpSource { Address = "controller" },
+            Target = scenario.StartsWith("coordinator", StringComparison.Ordinal) ? new AmqpCoordinator() : new AmqpTarget { Address = "queue" },
+            SenderSettleMode = AmqpSenderSettleMode.Unsettled,
+            InitialDeliveryCount = 0
+        };
+        Dictionary<AmqpDeliveryTag, AmqpDeliveryState?> unsettled = new() { [AmqpDeliveryTag.Create(1UL)] = null };
+
+        switch (scenario)
+        {
+            case "coordinator-unsettled":
+                attach.Unsettled = unsettled;
+                break;
+            case "coordinator-incomplete-unsettled":
+                attach.IncompleteUnsettled = true;
+                break;
+            case "coordinator-sender-settled":
+            case "coordinator-receiver-settled":
+                attach.SenderSettleMode = AmqpSenderSettleMode.Settled;
+                break;
+            case "coordinator-sender-mixed":
+                attach.SenderSettleMode = AmqpSenderSettleMode.Mixed;
+                break;
+            case "coordinator-empty-unsettled":
+                attach.Unsettled = new Dictionary<AmqpDeliveryTag, AmqpDeliveryState?>();
+                break;
+            case "queue-resumed-settled":
+                attach.Unsettled = unsettled;
+                attach.IncompleteUnsettled = true;
+                attach.SenderSettleMode = AmqpSenderSettleMode.Settled;
+                break;
+        }
+
+        return attach;
+    }
+
     private static (AmqpAttachPerformative Attach, string Expected) CreateContradictoryAttach(string scenario)
     {
         Dictionary<AmqpSymbol, object?> properties = new() { ["lifetime-policy"] = null };

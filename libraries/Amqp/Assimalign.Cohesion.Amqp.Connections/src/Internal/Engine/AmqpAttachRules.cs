@@ -74,6 +74,37 @@ internal static class AmqpAttachRules
         return null;
     }
 
+    /// <summary>
+    /// Finds the first rule a local <c>attach</c> breaks that a peer's is not refused for: a link to a
+    /// transaction coordinator cannot be resumed (AMQP 1.0 Part 4, section 4.2), and its controller sends no
+    /// declare or discharge settled (sections 4.2 and 4.3), so it does not attach to send settled.
+    /// </summary>
+    /// <remarks>
+    /// A peer's control link that breaks either is not refused at its attach: the coordinator detaches it at
+    /// the first settled transfer, as section 4.2 asks, and answers its attach without resuming anything.
+    /// </remarks>
+    /// <param name="attach">The attach.</param>
+    /// <returns>A description of the broken rule, or <see langword="null"/> when the attach breaks none.</returns>
+    public static string? FindLocalViolation(AmqpAttachPerformative attach)
+    {
+        if (attach.Target is not AmqpCoordinator)
+        {
+            return null;
+        }
+
+        if (attach.Unsettled is { Count: > 0 } || attach.IncompleteUnsettled)
+        {
+            return ErrorMessages.CoordinatorLinkResumed;
+        }
+
+        if (attach.Role == AmqpRole.Sender && attach.SenderSettleMode == AmqpSenderSettleMode.Settled)
+        {
+            return ErrorMessages.CoordinatorLinkSettled;
+        }
+
+        return null;
+    }
+
     private static string? FindDynamicViolation(string terminus, bool dynamic, string? address, bool hasDynamicNodeProperties, bool owner, bool opening)
     {
         // Only a dynamic node is created with properties (Part 3, sections 3.5.3 and 3.5.4).

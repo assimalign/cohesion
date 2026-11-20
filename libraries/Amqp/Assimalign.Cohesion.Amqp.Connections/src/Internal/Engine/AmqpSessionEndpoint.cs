@@ -694,6 +694,10 @@ internal sealed class AmqpSessionEndpoint : IAmqpSession
     {
         _endedException ??= exception;
 
+        // As on a link: the token is canceled before anything waiting fails, so a failure observed on
+        // another thread always finds the session's token canceled.
+        _ = _endedSource.CancelAsync();
+
         if (_localLinks.Count > 0)
         {
             AmqpLinkEndpoint[] links = new AmqpLinkEndpoint[_localLinks.Count];
@@ -712,7 +716,6 @@ internal sealed class AmqpSessionEndpoint : IAmqpSession
 
         _requests.Writer.TryComplete(_endedException);
         _window.Signal();
-        _ = _endedSource.CancelAsync();
     }
 
     private void TerminateLocked(AmqpException exception)
@@ -922,6 +925,7 @@ internal sealed class AmqpSessionEndpoint : IAmqpSession
         // An outcome, alone or inside a transactional state, is terminal: the sender may settle.
         bool terminal = state is AmqpOutcome or AmqpTransactionalState { Outcome: not null };
         List<uint> matches = CollectLocked(_outgoing, first, last);
+        List<AmqpSenderEndpoint>? controlLinks = null;
         uint runFirst = 0;
         uint runLast = 0;
         bool inRun = false;
@@ -929,6 +933,15 @@ internal sealed class AmqpSessionEndpoint : IAmqpSession
         foreach (uint deliveryId in matches)
         {
             AmqpOutgoingDelivery delivery = _outgoing[deliveryId];
+
+            // The coordinator answers a declare or discharge with an outcome, never with transactional work
+            // (AMQP 1.0 Part 4, section 4.1). The link fails once the range is walked, since failing it here
+            // would change the deliveries under the walk.
+            if (state is AmqpTransactionalState && delivery.Sender.IsControlLink)
+            {
+                (controlLinks ??= []).Add(delivery.Sender);
+                continue;
+            }
 
             delivery.RemoteState = state;
 
@@ -969,6 +982,17 @@ internal sealed class AmqpSessionEndpoint : IAmqpSession
         }
 
         matches.Clear();
+
+        if (controlLinks is not null)
+        {
+            foreach (AmqpSenderEndpoint link in controlLinks)
+            {
+                if (link.State == AmqpLinkState.Attached)
+                {
+                    link.FailLocked(AmqpErrorCondition.NotAllowed, ErrorMessages.CoordinatorAnswerTransactional);
+                }
+            }
+        }
     }
 
     private void OnIncomingDispositionLocked(uint first, uint last, bool settled, AmqpDeliveryState? state)
@@ -979,10 +1003,29 @@ internal sealed class AmqpSessionEndpoint : IAmqpSession
         }
 
         List<uint> matches = CollectLocked(_incoming, first, last);
+        List<(AmqpReceiverEndpoint Link, AmqpSymbol Condition, string Description)>? failures = null;
 
         foreach (uint deliveryId in matches)
         {
             AmqpIncomingDelivery delivery = _incoming[deliveryId];
+
+            // A link that breaks a transaction rule fails once the range is walked, since failing it here would
+            // change the deliveries under the walk. The control link carries no transactional work (AMQP 1.0
+            // Part 4, section 4.1), and a delivery stays in the transaction its first frame named (section 4.4.1).
+            if (state is AmqpTransactionalState && delivery.ReceiverEndpoint.IsControlLink)
+            {
+                (failures ??= []).Add((delivery.ReceiverEndpoint, AmqpErrorCondition.NotAllowed, ErrorMessages.CoordinatorDispositionTransactional));
+                continue;
+            }
+
+            if (state is not null && !delivery.KeepsTransaction(state))
+            {
+                (failures ??= []).Add((
+                    delivery.ReceiverEndpoint,
+                    AmqpErrorCondition.InvalidField,
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.DeliveryTransactionChanged, deliveryId)));
+                continue;
+            }
 
             if (settled)
             {
@@ -993,6 +1036,18 @@ internal sealed class AmqpSessionEndpoint : IAmqpSession
         }
 
         matches.Clear();
+
+        if (failures is not null)
+        {
+            foreach ((AmqpReceiverEndpoint link, AmqpSymbol condition, string description) in failures)
+            {
+                // A link that broke two rules in one range fails once, with the first.
+                if (link.State is AmqpLinkState.Attached or AmqpLinkState.RemoteAttached)
+                {
+                    link.FailLocked(condition, description);
+                }
+            }
+        }
     }
 
     /// <summary>

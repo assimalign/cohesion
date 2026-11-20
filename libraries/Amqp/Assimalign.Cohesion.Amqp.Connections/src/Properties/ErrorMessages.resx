@@ -400,4 +400,43 @@
   <data name="SaslFrameBodyInvalid" xml:space="preserve">
     <value>The peer sent a SASL frame whose body holds more than one value.</value>
   </data>
+  <data name="CoordinatorTransferSettled" xml:space="preserve">
+    <value>The peer sent a settled transfer to the transaction coordinator, which answers every declare and discharge with an outcome.</value>
+  </data>
+  <data name="CoordinatorTransferTransactional" xml:space="preserve">
+    <value>The peer sent transactional work on the link to the transaction coordinator, which carries none.</value>
+  </data>
+  <data name="CoordinatorDispositionTransactional" xml:space="preserve">
+    <value>The peer settled a delivery on the link to the transaction coordinator with a transactional state; that link carries no transactional work.</value>
+  </data>
+  <data name="DeliveryTransactionChanged" xml:space="preserve">
+    <value>The sender of delivery {0} changed the transaction the delivery belongs to.</value>
+  </data>
+  <data name="FlowTransactionUnsupported" xml:space="preserve">
+    <value>The peer asked for transactional acquisition on a link that does not support it.</value>
+  </data>
+  <data name="FlowTransactionIdInvalid" xml:space="preserve">
+    <value>The peer's flow names a txn-id that is not binary.</value>
+  </data>
+  <data name="CoordinatorLinkSettled" xml:space="preserve">
+    <value>A link to a transaction coordinator cannot send settled: every declare and discharge needs the coordinator's outcome.</value>
+  </data>
+  <data name="CoordinatorLinkResumed" xml:space="preserve">
+    <value>A link to a transaction coordinator cannot be resumed, so its attach lists no unsettled deliveries.</value>
+  </data>
+  <data name="CoordinatorDeliverySettled" xml:space="preserve">
+    <value>A declare or discharge cannot be sent settled: the coordinator's outcome is its answer.</value>
+  </data>
+  <data name="CoordinatorDeliveryTransactional" xml:space="preserve">
+    <value>Work on the link to a transaction coordinator cannot be part of a transaction.</value>
+  </data>
+  <data name="CoordinatorOutcomeTransactional" xml:space="preserve">
+    <value>A transaction coordinator answers a declare or discharge with an outcome, not with a transactional state.</value>
+  </data>
+  <data name="CoordinatorLinkAcquisition" xml:space="preserve">
+    <value>A link to a transaction coordinator acquires nothing, so it names no transaction for acquisition.</value>
+  </data>
+  <data name="CoordinatorAnswerTransactional" xml:space="preserve">
+    <value>The peer answered a declare or discharge with a transactional state; the link to a transaction coordinator carries no transactional work.</value>
+  </data>
 </root>

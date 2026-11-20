@@ -457,10 +457,13 @@ internal sealed class AmqpConnectionEndpoint : DuplexConnection, IAmqpConnection
 
         _state = state;
         _closedException ??= exception;
+
+        // As on a link: the token is canceled before anything waiting fails, so a failure observed on
+        // another thread always finds the connection's token canceled.
+        _ = _closedSource.CancelAsync();
         EndSessionsLocked(_closedException);
         _accepted.Writer.TryComplete(_closedException);
         _closeCompleted.TrySetResult();
-        _ = _closedSource.CancelAsync();
     }
 
     private void EndSessionsLocked(AmqpException exception)

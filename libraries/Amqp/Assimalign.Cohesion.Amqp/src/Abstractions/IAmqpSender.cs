@@ -35,6 +35,24 @@ public interface IAmqpSender : IAmqpLink
     bool IsDraining { get; }
 
     /// <summary>
+    /// Gets the transaction the receiver last named for the deliveries the sender acquires, or
+    /// <see langword="null"/> when it named none or the transaction was cleared (AMQP 1.0 Part 4, section 4.4.3).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A receiver names it in the <c>txn-id</c> entry of a <c>flow</c>'s properties, which only a sender with
+    /// <see cref="AmqpSenderOptions.TransactionalAcquisition"/> accepts. A later <c>flow</c> naming another
+    /// transaction replaces it; one that names none leaves it, because only a discharge clears it.
+    /// </para>
+    /// <para>
+    /// The sender does not stamp deliveries itself: the application decides which transaction a message it
+    /// acquires belongs to, and sends it with an <see cref="AmqpTransactionalState"/> naming that transaction
+    /// in <see cref="AmqpDeliveryOptions.State"/>.
+    /// </para>
+    /// </remarks>
+    ReadOnlyMemory<byte>? AcquisitionTransactionId { get; }
+
+    /// <summary>
     /// Waits until the sender has link credit.
     /// </summary>
     /// <param name="cancellationToken">A token to cancel the wait.</param>
@@ -49,6 +67,23 @@ public interface IAmqpSender : IAmqpLink
     /// </summary>
     /// <remarks>Calling it when no drain is pending does nothing.</remarks>
     void CompleteDrain();
+
+    /// <summary>
+    /// Clears the transaction the receiver named for acquisitions, once that transaction is discharged
+    /// (AMQP 1.0 Part 4, section 4.4.3).
+    /// </summary>
+    /// <param name="transactionId">The identifier of the discharged transaction.</param>
+    /// <returns>
+    /// <see langword="true"/> when <see cref="AcquisitionTransactionId"/> named the transaction and is now
+    /// cleared; <see langword="false"/> when it named another transaction or none, and is unchanged.
+    /// </returns>
+    /// <remarks>
+    /// The engine does not see discharges, which the coordinator handles; the application that discharges a
+    /// transaction clears it from every sender that acquires under it. A transaction a receiver names again
+    /// after its discharge is unknown, which the application refuses with
+    /// <see cref="AmqpErrorCondition.TransactionUnknownId"/>.
+    /// </remarks>
+    bool ClearAcquisitionTransaction(ReadOnlyMemory<byte> transactionId);
 
     /// <summary>
     /// Encodes a message and sends it as one delivery.

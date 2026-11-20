@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -19,6 +20,12 @@ public interface IAmqpTransactionController : IAsyncDisposable
     /// Gets the coordinator link the controller sends on.
     /// </summary>
     IAmqpSender Link { get; }
+
+    /// <summary>
+    /// Gets the capabilities the coordinator announced in its <c>attach</c>, or <see langword="null"/> when it
+    /// announced none (AMQP 1.0 Part 4, section 4.5.1).
+    /// </summary>
+    IReadOnlyList<AmqpSymbol>? Capabilities { get; }
 
     /// <summary>
     /// Declares a local transaction.
