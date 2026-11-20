@@ -36,10 +36,13 @@ The model references `Connections` because an AMQP connection is a Cohesion conn
 (`IAmqpConnection : IConnection`): it has the carrier's identity, endpoints, features and lifetime,
 and SASL EXTERNAL reads the carrier's TLS facts from its features.
 
-`AmqpPackageBoundaryTests`, in each package's tests, fails when the model uses a Cohesion assembly
-other than `Core` and `Connections`, or the engine one other than the model, `Connections` and
-`Core` (#401). A carrier driver, a TLS layer or a host is composed by the application, never
-referenced by either package, and COHLIB001 already refuses any `resources/` project to both.
+`AmqpPackageBoundaryTests`, in each package's tests, fails when the model uses or declares a
+Cohesion assembly other than `Core` and `Connections`, or the engine one other than the model,
+`Connections` and `Core` (#401). It reads both lists: the compiled assembly's references, and the
+test project's dependency file, which also lists a declared reference nothing uses (the compiler
+drops that one from the assembly, and the package would still depend on it). A carrier driver, a
+TLS layer or a host is composed by the application, never referenced by either package, and
+COHLIB001 already refuses any `resources/` project to both.
 
 ## Contracts here, the engine beside them
 
