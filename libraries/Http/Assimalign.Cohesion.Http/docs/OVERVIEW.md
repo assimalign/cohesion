@@ -42,6 +42,9 @@ and typed scalar getters return the first occurrence (decision 31).
 `HttpQueryCollection.Add` appends occurrences; assigning its key indexer
 replaces all values for that key. `HttpQuery.Create(query)` encodes every
 occurrence for a redirect or rewritten URL. Collection `Count` counts keys.
+`HttpQueryCollection.Source` keeps the query text a parsed collection came from
+until the collection changes; code that passes the query on as the client sent
+it, such as a proxy, reads it before falling back to `HttpQuery.Create`.
 These behaviors replace preview.1's last-value parsing; see the compatibility
 and caller audit in DESIGN before upgrading code that sends duplicate keys.
 

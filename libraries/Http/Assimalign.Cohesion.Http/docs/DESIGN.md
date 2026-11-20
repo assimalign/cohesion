@@ -580,8 +580,22 @@ rules they have to mirror:
   each name and value except for the
   unreserved characters, so an `&`, `=` or `+` inside one cannot split or change
   it, and writes an empty value as the bare name. `Parse` reads it back as the
-  same collection. It is not the query the request carried: only the parsed
-  collection survives the transport, so order and percent-encoding are rebuilt.
+  same collection. It is not the query the request carried: the collection
+  keeps no order across keys and no percent-encoding, so both are rebuilt.
+- **`HttpQueryCollection.Source`** is the query the request carried (#1894).
+  `HttpQuery.Parse` records the `HttpQuery` it read on the collection it returns,
+  and the collection forgets it on the first change: `Add`, the indexer's setter,
+  `Clear`, or a `Remove` that removes an entry. A collection built in code has
+  none. Rebuilding with `Create` is lossy in four ways: keys compare
+  case-insensitively, so `?Id=1&id=2` merges; repeated keys regroup
+  (`a=1&b=2&a=3` becomes `a=1&a=3&b=2`); an empty-name parameter drops; and `+`
+  is written as `%2B`, so `?q=hello+world` reaches a form-decoding server as
+  `hello+world` instead of `hello world`. A proxy must forward what the client
+  sent, and a signed URL breaks on any of the four, so Http.Proxy reads `Source`
+  first and calls `Create` only when it is `null`. Every transport (HTTP/1.1,
+  HTTP/2, HTTP/3) hands `HttpQuery` the raw query text of the request-target and
+  parses through `HttpQuery.Parse`, so on a request `Source` is the query exactly
+  as received, percent-encoding included.
 
 A space, `?` or `#` never needs encoding in a path that came from a request:
 `HttpPath` rejects them, and the transports fail a request-target whose path
