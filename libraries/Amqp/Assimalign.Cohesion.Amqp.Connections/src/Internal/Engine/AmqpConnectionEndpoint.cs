@@ -234,7 +234,11 @@ internal sealed class AmqpConnectionEndpoint : DuplexConnection, IAmqpConnection
 
         lock (_sync)
         {
-            ThrowIfNotOpenLocked();
+            // A connection the peer closed is not a usage error, so the failure is the returned task's.
+            if (_state != ConnectionState.Open)
+            {
+                return ValueTask.FromException<IAmqpSession>(GetClosedExceptionLocked());
+            }
 
             if (!TryAllocateChannelLocked(out ushort channel))
             {
@@ -367,14 +371,6 @@ internal sealed class AmqpConnectionEndpoint : DuplexConnection, IAmqpConnection
     internal AmqpException GetClosedExceptionLocked()
     {
         return _closedException ?? AmqpException.ConnectionClosed(null);
-    }
-
-    private void ThrowIfNotOpenLocked()
-    {
-        if (_state != ConnectionState.Open)
-        {
-            throw GetClosedExceptionLocked();
-        }
     }
 
     private bool TryAllocateChannelLocked(out ushort channel)

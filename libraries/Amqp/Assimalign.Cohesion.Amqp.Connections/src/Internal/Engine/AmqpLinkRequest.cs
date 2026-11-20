@@ -62,93 +62,123 @@ internal sealed class AmqpLinkRequest : IAmqpLinkRequest
 
     public ValueTask<IAmqpSender> AcceptSenderAsync(AmqpSenderOptions? options = null, CancellationToken cancellationToken = default)
     {
-        cancellationToken.ThrowIfCancellationRequested();
-
         if (_link is not AmqpSenderEndpoint sender)
         {
             throw new InvalidOperationException(ErrorMessages.LinkRequestNeedsReceiver);
         }
 
-        lock (_session.Sync)
+        if (cancellationToken.IsCancellationRequested)
         {
-            ThrowIfCannotAnswerLocked();
-
-            // A failed answer, such as an attach larger than the peer's frames, leaves the request open.
-            sender.AcceptLocked(options);
-            _answered = true;
+            return ValueTask.FromCanceled<IAmqpSender>(cancellationToken);
         }
 
-        _session.Writer.Schedule();
+        lock (_session.Sync)
+        {
+            ThrowIfAnsweredLocked();
+
+            if (GetAnswerFailureLocked() is AmqpException failure)
+            {
+                return ValueTask.FromException<IAmqpSender>(failure);
+            }
+
+            try
+            {
+                // A failed answer, such as an attach larger than the peer's frames, leaves the request open.
+                sender.AcceptLocked(options);
+            }
+            catch (AmqpException exception)
+            {
+                return ValueTask.FromException<IAmqpSender>(exception);
+            }
+
+            _answered = true;
+            _session.Writer.Schedule();
+        }
+
         return ValueTask.FromResult<IAmqpSender>(sender);
     }
 
     public ValueTask<IAmqpReceiver> AcceptReceiverAsync(AmqpReceiverOptions? options = null, CancellationToken cancellationToken = default)
     {
-        cancellationToken.ThrowIfCancellationRequested();
-
         if (_link is not AmqpReceiverEndpoint receiver)
         {
             throw new InvalidOperationException(ErrorMessages.LinkRequestNeedsSender);
         }
 
-        lock (_session.Sync)
+        if (cancellationToken.IsCancellationRequested)
         {
-            ThrowIfCannotAnswerLocked();
-
-            receiver.AcceptLocked(options);
-            _answered = true;
+            return ValueTask.FromCanceled<IAmqpReceiver>(cancellationToken);
         }
 
-        _session.Writer.Schedule();
+        lock (_session.Sync)
+        {
+            ThrowIfAnsweredLocked();
+
+            if (GetAnswerFailureLocked() is AmqpException failure)
+            {
+                return ValueTask.FromException<IAmqpReceiver>(failure);
+            }
+
+            try
+            {
+                receiver.AcceptLocked(options);
+            }
+            catch (AmqpException exception)
+            {
+                return ValueTask.FromException<IAmqpReceiver>(exception);
+            }
+
+            _answered = true;
+            _session.Writer.Schedule();
+        }
+
         return ValueTask.FromResult<IAmqpReceiver>(receiver);
     }
 
     public ValueTask RejectAsync(AmqpError error, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(error);
-        cancellationToken.ThrowIfCancellationRequested();
 
-        bool written = false;
+        if (cancellationToken.IsCancellationRequested)
+        {
+            return ValueTask.FromCanceled(cancellationToken);
+        }
 
         lock (_session.Sync)
         {
-            if (_answered)
-            {
-                throw new InvalidOperationException(ErrorMessages.LinkRequestAnswered);
-            }
+            ThrowIfAnsweredLocked();
 
             _answered = true;
 
             // A link the peer already detached, or whose session ended, needs no answer.
-            if (_link.State == AmqpLinkState.RemoteAttached && _session.IsMappedLocked)
+            if (GetAnswerFailureLocked() is null)
             {
                 _link.RefuseLocked(error);
-                written = true;
+                _session.Writer.Schedule();
             }
-        }
-
-        if (written)
-        {
-            _session.Writer.Schedule();
         }
 
         return ValueTask.CompletedTask;
     }
 
-    private void ThrowIfCannotAnswerLocked()
+    private void ThrowIfAnsweredLocked()
     {
+        // Answering twice is a usage error, so it throws at the call rather than through the returned task.
         if (_answered)
         {
             throw new InvalidOperationException(ErrorMessages.LinkRequestAnswered);
         }
+    }
 
-        _session.ThrowIfNotMappedLocked();
+    private AmqpException? GetAnswerFailureLocked()
+    {
+        if (!_session.IsMappedLocked)
+        {
+            return _session.GetEndedExceptionLocked();
+        }
 
         // The peer detached the link before the application answered it.
-        if (_link.State != AmqpLinkState.RemoteAttached)
-        {
-            throw _link.GetDetachedExceptionLocked();
-        }
+        return _link.State == AmqpLinkState.RemoteAttached ? null : _link.GetDetachedExceptionLocked();
     }
 
     private sealed class DebugView

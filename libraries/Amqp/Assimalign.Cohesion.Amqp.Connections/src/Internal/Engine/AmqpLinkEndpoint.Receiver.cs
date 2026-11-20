@@ -161,12 +161,16 @@ internal sealed class AmqpReceiverEndpoint : AmqpLinkEndpoint, IAmqpReceiver
                 return ValueTask.CompletedTask;
             }
 
+            // A link or delivery the peer ended is not a usage error, so the failure is the returned task's.
             if (delivery.Failure is AmqpException failure)
             {
-                throw failure;
+                return ValueTask.FromException(failure);
             }
 
-            ThrowIfNotAttachedLocked();
+            if (State != AmqpLinkState.Attached)
+            {
+                return ValueTask.FromException(GetDetachedExceptionLocked());
+            }
 
             AmqpSessionEndpoint session = SessionEndpoint;
 
