@@ -242,6 +242,9 @@
 		<File Path="libraries/Amqp/Assimalign.Cohesion.Amqp.Connections/docs/DESIGN.md" />
 		<File Path="libraries/Amqp/Assimalign.Cohesion.Amqp.Connections/docs/OVERVIEW.md" />
 	</Folder>
+	<Folder Name="/cohesion/libraries/Amqp/Assimalign.Cohesion.Amqp.Connections/samples/">
+		<Project Path="libraries/Amqp/Assimalign.Cohesion.Amqp.Connections/samples/Assimalign.Cohesion.Amqp.Connections.AotSample/Assimalign.Cohesion.Amqp.Connections.AotSample.csproj" />
+	</Folder>
 	<Folder Name="/cohesion/libraries/Amqp/Assimalign.Cohesion.Amqp.Connections/src/">
 		<Project Path="libraries/Amqp/Assimalign.Cohesion.Amqp.Connections/src/Assimalign.Cohesion.Amqp.Connections.csproj" />
 	</Folder>

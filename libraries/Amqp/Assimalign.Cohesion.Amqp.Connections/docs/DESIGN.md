@@ -560,6 +560,14 @@ numeric descriptors in both directions; encoding and decoding are span and buffe
 pooled buffers and `ReadOnlySequence<byte>`. Fully NativeAOT compatible (`IsAotCompatible` is set
 for the whole `libraries/` tree).
 
+A guard proves it on every change to the area (#433).
+`samples/Assimalign.Cohesion.Amqp.Connections.AotSample` publishes with `PublishAot=true` and every
+trim and AOT warning as an error, then runs eleven checks over TCP loopback: establishment with SASL
+PLAIN, every Part 1 type, every Part 3 section, the four outcomes, a pre-settled and a multi-frame
+transfer, a transaction, the codec, a refused link, a refused login, and a close with an error. The
+`aot-guard` job in `.github/workflows/library-amqp.yml` publishes it for `linux-x64` and fails on
+any IL warning, a non-zero exit, or a summary line that does not report every check passed.
+
 ## Non-goals
 
 - **No broker semantics.** Queues, routing, persistence and redelivery belong to the service that

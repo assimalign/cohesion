@@ -32,6 +32,10 @@
 		<File Path="Amqp/Assimalign.Cohesion.Amqp.Connections/docs/DESIGN.md" />
 		<File Path="Amqp/Assimalign.Cohesion.Amqp.Connections/docs/OVERVIEW.md" />
 	</Folder>
+	<Folder Name="/libraries/Amqp/Assimalign.Cohesion.Amqp.Connections/samples/" />
+	<Folder Name="/libraries/Amqp/Assimalign.Cohesion.Amqp.Connections/samples/Assimalign.Cohesion.Amqp.Connections.AotSample/">
+		<Project Path="Amqp/Assimalign.Cohesion.Amqp.Connections/samples/Assimalign.Cohesion.Amqp.Connections.AotSample/Assimalign.Cohesion.Amqp.Connections.AotSample.csproj" />
+	</Folder>
 	<Folder Name="/libraries/Amqp/Assimalign.Cohesion.Amqp.Connections/src/">
 		<Project Path="Amqp/Assimalign.Cohesion.Amqp.Connections/src/Assimalign.Cohesion.Amqp.Connections.csproj" />
 	</Folder>
