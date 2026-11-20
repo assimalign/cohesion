@@ -36,6 +36,13 @@ namespace Assimalign.Cohesion.Amqp.Connections.Internal;
 /// and refused, as section 2.2 requires. A peer that breaks the protocol after both <c>open</c> frames are
 /// on their way is sent <c>close</c> with the error before the carrier is released.
 /// </para>
+/// <para>
+/// Between the AMQP header and the peer's <c>open</c> only AMQP frames are accepted. An empty one on
+/// channel 0 is skipped although <c>open</c> should come first, because its meaning is clear; one on
+/// another channel is a framing error. The peer's <c>open</c> must declare an idle timeout this endpoint
+/// can keep: a shorter one than <see cref="AmqpConnectionSettings.MinRemoteIdleTimeout"/> is refused with
+/// <c>close</c> and <c>amqp:not-implemented</c>, as section 2.4.5 allows.
+/// </para>
 /// </remarks>
 internal static class AmqpHandshake
 {
@@ -55,7 +62,10 @@ internal static class AmqpHandshake
     private static readonly string _peerSaslFrameTooLargeFormat = ErrorMessages.PeerSaslFrameTooLarge;
     private static readonly string _saslFrameEmpty = ErrorMessages.SaslFrameEmpty;
     private static readonly string _saslFrameBodyInvalid = ErrorMessages.SaslFrameBodyInvalid;
-    private static readonly string _saslFrameTypeInvalid = ErrorMessages.SaslFrameTypeInvalid;
+    private static readonly string _saslFrameTypeInvalidFormat = ErrorMessages.SaslFrameTypeInvalid;
+    private static readonly string _frameTypeUnexpectedFormat = ErrorMessages.FrameTypeUnexpected;
+    private static readonly string _channelOutOfRangeFormat = ErrorMessages.ChannelOutOfRange;
+    private static readonly string _peerIdleTimeoutTooShortFormat = ErrorMessages.PeerIdleTimeoutTooShort;
 
     /// <summary>
     /// Establishes an AMQP connection over a carrier within the settings' handshake timeout, and starts it.
@@ -177,7 +187,9 @@ internal static class AmqpHandshake
 
         if (amqp != amqpHeader)
         {
-            throw amqp == saslHeader
+            // A SASL header asks for authentication only when none took place; after it, the header is just
+            // one this endpoint does not accept.
+            throw amqp == saslHeader && sasl is null
                 ? new AmqpException(AmqpErrorCode.AuthenticationFailed, ErrorMessages.SaslAuthenticationRequired)
                 : CreateHeaderException(amqp);
         }
@@ -393,7 +405,8 @@ internal static class AmqpHandshake
 
     /// <summary>
     /// Reads the peer's <c>open</c>, which must be the first frame after its AMQP header and arrive on
-    /// channel 0. A violation is answered with <c>close</c>, since the local <c>open</c> is already sent.
+    /// channel 0, and refuses an idle timeout too short to keep. A violation or refusal is answered with
+    /// <c>close</c>, since the local <c>open</c> is already sent.
     /// </summary>
     private static async ValueTask<AmqpOpenPerformative> ReadOpenAsync(
         PipeReader input,
@@ -404,13 +417,7 @@ internal static class AmqpHandshake
     {
         try
         {
-            (AmqpFrameHeader header, AmqpPerformative performative) = await ReadFrameAsync(input, settings.MaxFrameSize, sasl: false, cancellationToken).ConfigureAwait(false);
-
-            if (header.Type != AmqpFrame.AmqpType)
-            {
-                throw AmqpException.FramingError(
-                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.FrameTypeUnexpected, header.Type));
-            }
+            (AmqpFrameHeader header, AmqpPerformative performative) = await ReadFrameAsync(input, settings.MaxFrameSize, AmqpFrame.AmqpType, cancellationToken).ConfigureAwait(false);
 
             if (performative is not AmqpOpenPerformative open)
             {
@@ -423,6 +430,22 @@ internal static class AmqpHandshake
             {
                 throw AmqpException.FramingError(
                     string.Format(CultureInfo.CurrentCulture, ErrorMessages.OpenChannelInvalid, header.Channel));
+            }
+
+            // Zero means no idle timeout, as an absent one does. A shorter one than this endpoint can keep is
+            // refused with the reason rather than kept late (AMQP 1.0 Part 2, section 2.4.5).
+            if (open.IdleTimeout is uint idleTimeout and > 0 and < AmqpConnectionSettings.MinRemoteIdleTimeout)
+            {
+                string message = string.Format(
+                    CultureInfo.CurrentCulture,
+                    _peerIdleTimeoutTooShortFormat,
+                    idleTimeout,
+                    AmqpConnectionSettings.MinRemoteIdleTimeout);
+
+                throw new AmqpException(AmqpErrorCode.Other, message)
+                {
+                    Error = new AmqpError(AmqpErrorCondition.NotImplemented, message)
+                };
             }
 
             return open;
@@ -440,27 +463,31 @@ internal static class AmqpHandshake
     /// </summary>
     private static async ValueTask<AmqpPerformative> ReadSaslFrameAsync(PipeReader input, CancellationToken cancellationToken)
     {
-        (AmqpFrameHeader header, AmqpPerformative performative) = await ReadFrameAsync(input, AmqpFrame.MinMaxFrameSize, sasl: true, cancellationToken).ConfigureAwait(false);
-
-        if (header.Type != AmqpFrame.SaslType)
-        {
-            throw new AmqpException(AmqpErrorCode.ProtocolViolation, _saslFrameTypeInvalid);
-        }
+        (_, AmqpPerformative performative) = await ReadFrameAsync(input, AmqpFrame.MinMaxFrameSize, AmqpFrame.SaslType, cancellationToken).ConfigureAwait(false);
 
         return performative;
     }
 
     /// <summary>
-    /// Reads the next frame with a body and leaves every byte after it in the pipe. Outside the SASL
-    /// exchange an empty frame only keeps the connection alive and is skipped (AMQP 1.0 Part 2,
-    /// section 2.4.5); during it, an empty frame is an irrecoverable error (Part 5, section 5.3.1).
+    /// Reads the next frame with a body and leaves every byte after it in the pipe. A frame of another type
+    /// than <paramref name="type"/> is refused.
     /// </summary>
+    /// <remarks>
+    /// During the SASL exchange an empty frame is an irrecoverable error (AMQP 1.0 Part 5, section 5.3.1).
+    /// Before the peer's <c>open</c>, an empty AMQP frame breaks the rule that <c>open</c> comes first
+    /// (Part 2, section 2.4.1), but its meaning is clear, so one on channel 0 is skipped as keep-alive
+    /// traffic, as other implementations do; the handshake timeout still bounds the wait for the
+    /// <c>open</c>. One on another channel is a framing error: until the limits are negotiated the
+    /// highest channel is 0.
+    /// </remarks>
     private static async ValueTask<(AmqpFrameHeader Header, AmqpPerformative Performative)> ReadFrameAsync(
         PipeReader input,
         uint maxFrameSize,
-        bool sasl,
+        byte type,
         CancellationToken cancellationToken)
     {
+        bool sasl = type == AmqpFrame.SaslType;
+
         while (true)
         {
             ReadResult result = await input.ReadAsync(cancellationToken).ConfigureAwait(false);
@@ -488,11 +515,23 @@ internal static class AmqpHandshake
 
                     consumed = buffer.Start;
 
+                    if (header.Type != type)
+                    {
+                        throw sasl
+                            ? new AmqpException(AmqpErrorCode.ProtocolViolation, string.Format(CultureInfo.CurrentCulture, _saslFrameTypeInvalidFormat, header.Type))
+                            : AmqpException.FramingError(string.Format(CultureInfo.CurrentCulture, _frameTypeUnexpectedFormat, header.Type));
+                    }
+
                     if (body.IsEmpty)
                     {
                         if (sasl)
                         {
                             throw new AmqpException(AmqpErrorCode.ProtocolViolation, _saslFrameEmpty);
+                        }
+
+                        if (header.Channel != 0)
+                        {
+                            throw AmqpException.FramingError(string.Format(CultureInfo.CurrentCulture, _channelOutOfRangeFormat, header.Channel, 0));
                         }
 
                         continue;

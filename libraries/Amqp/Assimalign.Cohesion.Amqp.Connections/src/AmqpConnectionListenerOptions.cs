@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Globalization;
 
 using Assimalign.Cohesion.Amqp;
 using Assimalign.Cohesion.Amqp.Connections.Internal;
@@ -76,9 +77,12 @@ public sealed class AmqpConnectionListenerOptions
     /// <remarks>
     /// Defaults to one minute. A connection declares half the value in its <c>open</c>, as AMQP 1.0 Part 2,
     /// section 2.4.5 recommends, so a peer that sends a frame at least that often never trips it. Whatever
-    /// this value, a connection keeps the peer's own idle timeout by sending empty frames.
+    /// this value, a connection keeps the peer's own idle timeout by sending empty frames, down to 100
+    /// milliseconds; a peer that asks for less is refused with <see cref="AmqpErrorCondition.NotImplemented"/>.
+    /// A value other than zero is therefore at least 200 milliseconds, so the half a connection declares is
+    /// one this library keeps.
     /// </remarks>
-    /// <exception cref="ArgumentOutOfRangeException">Thrown when the assigned value is negative or longer than <see cref="uint.MaxValue"/> - 1 milliseconds.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">Thrown when the assigned value is negative, above zero but under 200 milliseconds, or longer than <see cref="uint.MaxValue"/> - 1 milliseconds.</exception>
     public TimeSpan IdleTimeout
     {
         get => _idleTimeout;
@@ -86,6 +90,14 @@ public sealed class AmqpConnectionListenerOptions
         {
             ArgumentOutOfRangeException.ThrowIfLessThan(value, TimeSpan.Zero);
             ArgumentOutOfRangeException.ThrowIfGreaterThan(value, AmqpConnectionSettings.MaxTimeout);
+
+            if (value > TimeSpan.Zero && value < AmqpConnectionSettings.MinIdleTimeout)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(value),
+                    value,
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.IdleTimeoutTooShort, AmqpConnectionSettings.MinIdleTimeout));
+            }
 
             _idleTimeout = value;
         }

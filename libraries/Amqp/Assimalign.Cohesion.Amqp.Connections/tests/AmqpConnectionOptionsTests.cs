@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Threading.Tasks;
 
 using Shouldly;
@@ -69,6 +70,61 @@ public class AmqpConnectionOptionsTests
         Should.Throw<ArgumentOutOfRangeException>(() => options.MaxFrameSize = 100);
         Should.Throw<ArgumentOutOfRangeException>(() => options.IdleTimeout = TimeSpan.FromSeconds(-1));
         Should.Throw<ArgumentOutOfRangeException>(() => options.HandshakeTimeout = TimeSpan.FromDays(60));
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Amqp.Connections] - ListenerOptions: Should refuse an idle timeout above zero and under 200 ms")]
+    [InlineData(1)]
+    [InlineData(100)]
+    [InlineData(199)]
+    public void ListenerOptions_OnIdleTimeoutTooShort_ShouldThrowArgumentOutOfRangeException(int milliseconds)
+    {
+        // Arrange
+        AmqpConnectionListenerOptions options = new();
+
+        // Act
+        ArgumentOutOfRangeException exception = Should.Throw<ArgumentOutOfRangeException>(() => options.IdleTimeout = TimeSpan.FromMilliseconds(milliseconds));
+
+        // Assert
+        exception.ParamName.ShouldBe("value");
+        exception.Message.ShouldStartWith(string.Format(CultureInfo.CurrentCulture, ErrorMessages.IdleTimeoutTooShort, TimeSpan.FromMilliseconds(200)));
+        options.IdleTimeout.ShouldBe(TimeSpan.FromMinutes(1));
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Amqp.Connections] - FactoryOptions: Should refuse an idle timeout above zero and under 200 ms")]
+    [InlineData(1)]
+    [InlineData(199)]
+    public void FactoryOptions_OnIdleTimeoutTooShort_ShouldThrowArgumentOutOfRangeException(int milliseconds)
+    {
+        // Arrange
+        AmqpConnectionFactoryOptions options = new();
+
+        // Act
+        ArgumentOutOfRangeException exception = Should.Throw<ArgumentOutOfRangeException>(() => options.IdleTimeout = TimeSpan.FromMilliseconds(milliseconds));
+
+        // Assert
+        exception.ParamName.ShouldBe("value");
+        exception.Message.ShouldStartWith(string.Format(CultureInfo.CurrentCulture, ErrorMessages.IdleTimeoutTooShort, TimeSpan.FromMilliseconds(200)));
+        options.IdleTimeout.ShouldBe(TimeSpan.FromMinutes(1));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - Options: Should take an idle timeout of zero or from 200 ms up")]
+    public void Options_OnIdleTimeoutZeroOrFrom200Milliseconds_ShouldTakeIt()
+    {
+        // Arrange
+        AmqpConnectionListenerOptions listenerOptions = new();
+        AmqpConnectionFactoryOptions factoryOptions = new();
+
+        // Act
+        listenerOptions.IdleTimeout = TimeSpan.Zero;
+        factoryOptions.IdleTimeout = TimeSpan.FromMilliseconds(200);
+
+        // Assert
+        listenerOptions.IdleTimeout.ShouldBe(TimeSpan.Zero);
+        factoryOptions.IdleTimeout.ShouldBe(TimeSpan.FromMilliseconds(200));
+        listenerOptions.IdleTimeout = TimeSpan.FromMilliseconds(200);
+        factoryOptions.IdleTimeout = TimeSpan.Zero;
+        listenerOptions.IdleTimeout.ShouldBe(TimeSpan.FromMilliseconds(200));
+        factoryOptions.IdleTimeout.ShouldBe(TimeSpan.Zero);
     }
 
     [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - Create: Should read the options once, so later changes do not apply")]

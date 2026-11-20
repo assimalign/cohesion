@@ -37,9 +37,6 @@ namespace Assimalign.Cohesion.Amqp.Connections.Internal;
 [DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class AmqpConnectionEndpoint : DuplexConnection, IAmqpConnection
 {
-    // A timer period below this would let a peer that declares a tiny idle timeout spin the timer.
-    private const long minTimerPeriod = 50;
-
     private static readonly string _idleTimeoutExpiredFormat = ErrorMessages.IdleTimeoutExpired;
 
     private readonly IDuplexConnection _carrier;
@@ -207,7 +204,7 @@ internal sealed class AmqpConnectionEndpoint : DuplexConnection, IAmqpConnection
             _writeLoop = Task.Run(WriteLoopAsync);
             _readLoop = Task.Run(ReadLoopAsync);
 
-            long period = GetTimerPeriod();
+            long period = GetTimerPeriod(_localIdleTimeout, _remoteIdleTimeout);
 
             if (period > 0)
             {
@@ -612,48 +609,56 @@ internal sealed class AmqpConnectionEndpoint : DuplexConnection, IAmqpConnection
     /// <returns><see langword="true"/> to keep reading; <see langword="false"/> once the connection is closed.</returns>
     private bool ProcessFrame(AmqpFrameHeader header, ReadOnlySequence<byte> body, ref byte[]? scratch)
     {
-        if (body.IsEmpty)
-        {
-            // An empty frame only keeps the connection alive (AMQP 1.0 Part 2, section 2.4.5).
-            return true;
-        }
-
-        ReadOnlySpan<byte> span;
-
-        if (body.IsSingleSegment)
-        {
-            span = body.FirstSpan;
-        }
-        else
-        {
-            int length = (int)body.Length;
-
-            if (scratch is null || scratch.Length < length)
-            {
-                if (scratch is not null)
-                {
-                    ArrayPool<byte>.Shared.Return(scratch);
-                }
-
-                scratch = ArrayPool<byte>.Shared.Rent(length);
-            }
-
-            body.CopyTo(scratch);
-            span = scratch.AsSpan(0, length);
-        }
-
+        ReadOnlySpan<byte> span = default;
         AmqpPerformative? performative = null;
         AmqpError? violation = null;
         int payloadOffset = 0;
 
         if (header.Type != AmqpFrame.AmqpType)
         {
+            // Once the connection is open only AMQP frames travel, empty or not (AMQP 1.0 Part 2, section 2.3.1).
             violation = new AmqpError(
                 AmqpErrorCondition.FramingError,
                 string.Format(CultureInfo.CurrentCulture, ErrorMessages.FrameTypeUnexpected, header.Type));
         }
+        else if (body.IsEmpty)
+        {
+            if (header.Channel <= _settings.ChannelMax)
+            {
+                // An empty frame only keeps the connection alive, on any channel the peer may use (AMQP 1.0
+                // Part 2, section 2.4.5).
+                return true;
+            }
+
+            // A channel above the declared maximum is a framing error, empty frame or not (section 2.7.1).
+            violation = new AmqpError(
+                AmqpErrorCondition.FramingError,
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.ChannelOutOfRange, header.Channel, _settings.ChannelMax));
+        }
         else
         {
+            if (body.IsSingleSegment)
+            {
+                span = body.FirstSpan;
+            }
+            else
+            {
+                int length = (int)body.Length;
+
+                if (scratch is null || scratch.Length < length)
+                {
+                    if (scratch is not null)
+                    {
+                        ArrayPool<byte>.Shared.Return(scratch);
+                    }
+
+                    scratch = ArrayPool<byte>.Shared.Rent(length);
+                }
+
+                body.CopyTo(scratch);
+                span = scratch.AsSpan(0, length);
+            }
+
             try
             {
                 AmqpReader reader = new(span);
@@ -706,6 +711,15 @@ internal sealed class AmqpConnectionEndpoint : DuplexConnection, IAmqpConnection
 
     private void DispatchLocked(ushort channel, AmqpPerformative performative, ReadOnlySpan<byte> payload)
     {
+        // The peer may use channels up to the limit this endpoint declared, its close included (AMQP 1.0
+        // Part 2, sections 2.4.3 and 2.7.1). Once this endpoint has sent close, only the peer's close gets
+        // here, and it ends the connection whatever its channel: refusing it would only hold the carrier
+        // until the close timeout.
+        if (_state == ConnectionState.Open)
+        {
+            ThrowIfChannelOutOfRange(channel);
+        }
+
         switch (performative)
         {
             case AmqpClosePerformative close:
@@ -724,8 +738,6 @@ internal sealed class AmqpConnectionEndpoint : DuplexConnection, IAmqpConnection
                     AmqpErrorCondition.IllegalState,
                     string.Format(CultureInfo.CurrentCulture, ErrorMessages.PerformativeUnexpected, performative.PerformativeName));
         }
-
-        ThrowIfChannelOutOfRange(channel);
 
         if (!_remoteSessions.TryGetValue(channel, out AmqpSessionEndpoint? session))
         {
@@ -749,8 +761,6 @@ internal sealed class AmqpConnectionEndpoint : DuplexConnection, IAmqpConnection
 
     private void OnBeginLocked(ushort channel, AmqpBeginPerformative begin)
     {
-        ThrowIfChannelOutOfRange(channel);
-
         if (_remoteSessions.ContainsKey(channel))
         {
             throw AmqpException.ProtocolViolation(
@@ -830,30 +840,51 @@ internal sealed class AmqpConnectionEndpoint : DuplexConnection, IAmqpConnection
 
             if (_remoteIdleTimeout > 0)
             {
-                _writer.WriteHeartbeatIfIdle(now, _remoteIdleTimeout / 2);
+                _writer.WriteHeartbeatIfIdle(now, GetHeartbeatInterval(_remoteIdleTimeout));
             }
         }
     }
 
-    private long GetTimerPeriod()
+    /// <summary>
+    /// Gets how long, in milliseconds, this endpoint may write nothing before it sends an empty frame to
+    /// keep the peer's idle timeout: half of it, so a frame reaches the peer well within it.
+    /// </summary>
+    /// <param name="remoteIdleTimeout">The idle timeout the peer declared in milliseconds.</param>
+    internal static long GetHeartbeatInterval(long remoteIdleTimeout)
     {
-        // A quarter of each timeout bounds both checks: the peer hears from this endpoint at least every
-        // three quarters of its timeout, and this endpoint notices a silent peer within a quarter of its own.
+        return remoteIdleTimeout / 2;
+    }
+
+    /// <summary>
+    /// Gets the period, in milliseconds, of the idle timer, or zero when neither side has an idle timeout.
+    /// </summary>
+    /// <remarks>
+    /// A quarter of each timeout bounds both checks. The timer sends an empty frame once nothing was written
+    /// for half the peer's timeout, so the peer hears from this endpoint at least every three quarters of
+    /// it; under 200 milliseconds the period floor takes over, and the gap is half the timeout plus
+    /// <see cref="AmqpConnectionSettings.MinTimerPeriod"/>, still within it from
+    /// <see cref="AmqpConnectionSettings.MinRemoteIdleTimeout"/> up. This endpoint notices a silent peer
+    /// within a quarter of its own timeout, or one floor period.
+    /// </remarks>
+    /// <param name="localIdleTimeout">This endpoint's idle timeout in milliseconds, or zero for none.</param>
+    /// <param name="remoteIdleTimeout">The idle timeout the peer declared in milliseconds, or zero for none.</param>
+    internal static long GetTimerPeriod(long localIdleTimeout, long remoteIdleTimeout)
+    {
         long period = 0;
 
-        if (_localIdleTimeout > 0)
+        if (localIdleTimeout > 0)
         {
-            period = _localIdleTimeout / 4;
+            period = localIdleTimeout / 4;
         }
 
-        if (_remoteIdleTimeout > 0)
+        if (remoteIdleTimeout > 0)
         {
-            long remote = _remoteIdleTimeout / 4;
+            long remote = remoteIdleTimeout / 4;
 
             period = period == 0 ? remote : Math.Min(period, remote);
         }
 
-        return period == 0 ? 0 : Math.Max(period, minTimerPeriod);
+        return period == 0 ? 0 : Math.Max(period, AmqpConnectionSettings.MinTimerPeriod);
     }
 
     private Task ReleaseAsync()

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -84,10 +85,8 @@ public class AmqpSaslFrameTests
         init.Mechanism.ShouldBe((AmqpSymbol)"ANONYMOUS");
     }
 
-    [Theory(DisplayName = "Cohesion Test [Amqp.Connections] - ConnectAsync: Should refuse an empty frame during the SASL exchange")]
-    [InlineData(AmqpFrame.SaslType)]
-    [InlineData(AmqpFrame.AmqpType)]
-    public async Task ConnectAsync_OnEmptySaslFrame_ShouldRefuse(byte type)
+    [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - ConnectAsync: Should refuse an empty frame during the SASL exchange")]
+    public async Task ConnectAsync_OnEmptySaslFrame_ShouldRefuse()
     {
         // Arrange
         using CancellationTokenSource timeout = new(_testTimeout);
@@ -98,12 +97,32 @@ public class AmqpSaslFrameTests
         await peer.WriteProtocolHeaderAsync(AmqpFrame.SaslProtocolId, timeout.Token);
 
         // Act
-        await peer.WriteAsync(new byte[] { 0, 0, 0, 8, 2, type, 0, 0 }, timeout.Token);
+        await peer.WriteAsync(new byte[] { 0, 0, 0, 8, 2, AmqpFrame.SaslType, 0, 0 }, timeout.Token);
         AmqpException exception = await Should.ThrowAsync<AmqpException>(connect);
 
         // Assert
         exception.ErrorCode.ShouldBe(AmqpErrorCode.ProtocolViolation);
         exception.Message.ShouldBe(ErrorMessages.SaslFrameEmpty);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - ConnectAsync: Should refuse an empty AMQP frame during the SASL exchange for its type")]
+    public async Task ConnectAsync_OnEmptyAmqpFrameDuringSasl_ShouldRefuseForItsType()
+    {
+        // Arrange
+        using CancellationTokenSource timeout = new(_testTimeout);
+        (AmqpTestPeer peer, AmqpConnectionFactory factory, Task<IAmqpConnection> connect) = AmqpTestPeer.StartFactory(
+            new AmqpConnectionFactoryOptions { SaslMechanism = new AmqpSaslAnonymousClientMechanism() },
+            timeout.Token);
+        await peer.ReadProtocolHeaderAsync(timeout.Token);
+        await peer.WriteProtocolHeaderAsync(AmqpFrame.SaslProtocolId, timeout.Token);
+
+        // Act
+        await peer.WriteAsync(new byte[] { 0, 0, 0, 8, 2, AmqpFrame.AmqpType, 0, 0 }, timeout.Token);
+        AmqpException exception = await Should.ThrowAsync<AmqpException>(connect);
+
+        // Assert
+        exception.ErrorCode.ShouldBe(AmqpErrorCode.ProtocolViolation);
+        exception.Message.ShouldBe(string.Format(CultureInfo.CurrentCulture, ErrorMessages.SaslFrameTypeInvalid, AmqpFrame.AmqpType));
     }
 
     [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - AcceptAsync: Should hang up on an empty frame during the SASL exchange")]

@@ -218,13 +218,19 @@
     <value>The peer answered a begin on the local channel {0}, which sent none.</value>
   </data>
   <data name="FrameTypeUnexpected" xml:space="preserve">
-    <value>The peer sent a frame of type 0x{0:x2} on an open AMQP connection.</value>
+    <value>The peer sent a frame of type 0x{0:x2} where only AMQP frames are allowed.</value>
   </data>
   <data name="PerformativeUnexpected" xml:space="preserve">
     <value>The peer sent '{0}', which is not allowed in the current state.</value>
   </data>
   <data name="IdleTimeoutExpired" xml:space="preserve">
     <value>The peer sent nothing for longer than the idle timeout of {0}.</value>
+  </data>
+  <data name="PeerIdleTimeoutTooShort" xml:space="preserve">
+    <value>The peer asked for an idle timeout of {0} ms, below the {1} ms this endpoint can keep.</value>
+  </data>
+  <data name="IdleTimeoutTooShort" xml:space="preserve">
+    <value>The idle timeout must be zero, which disables it, or at least {0}.</value>
   </data>
   <data name="SessionEnded" xml:space="preserve">
     <value>The AMQP session has ended.</value>
@@ -329,7 +335,7 @@
     <value>The peer sent '{0}' where the SASL exchange expects '{1}'.</value>
   </data>
   <data name="SaslFrameTypeInvalid" xml:space="preserve">
-    <value>The peer sent an AMQP frame during the SASL exchange.</value>
+    <value>The peer sent a frame of type 0x{0:x2} during the SASL exchange, where only SASL frames are allowed.</value>
   </data>
   <data name="SaslAuthenticationRequired" xml:space="preserve">
     <value>The peer requires SASL authentication, but no SASL mechanism is configured.</value>

@@ -24,6 +24,28 @@ internal sealed class AmqpConnectionSettings
     public static TimeSpan MaxTimeout { get; } = TimeSpan.FromMilliseconds(uint.MaxValue - 1d);
 
     /// <summary>
+    /// The shortest period, in milliseconds, of a connection's idle timer: a shorter one would let a peer
+    /// that declares a tiny idle timeout spin the timer.
+    /// </summary>
+    public const long MinTimerPeriod = 50;
+
+    /// <summary>
+    /// The shortest idle timeout, in milliseconds, a connection keeps for its peer. A connection sends an
+    /// empty frame once it has written nothing for half the peer's idle timeout, and its timer runs no
+    /// more often than every <see cref="MinTimerPeriod"/>, so the longest gap between its frames is half
+    /// the peer's timeout plus one timer period: within the timeout only from twice the period up. A peer
+    /// that declares less is refused, as AMQP 1.0 Part 2, section 2.4.5 allows.
+    /// </summary>
+    public const uint MinRemoteIdleTimeout = 2 * (uint)MinTimerPeriod;
+
+    /// <summary>
+    /// Gets the shortest idle timeout, other than zero, a listener or factory accepts: twice
+    /// <see cref="MinRemoteIdleTimeout"/>, so the half a connection declares in its <c>open</c> is one a
+    /// connection of this library keeps.
+    /// </summary>
+    public static TimeSpan MinIdleTimeout { get; } = TimeSpan.FromMilliseconds(2 * MinRemoteIdleTimeout);
+
+    /// <summary>
     /// Gets the container identifier every connection sends in its <c>open</c>.
     /// </summary>
     public required string ContainerId { get; init; }
@@ -46,8 +68,9 @@ internal sealed class AmqpConnectionSettings
 
     /// <summary>
     /// Gets how long the peer may stay silent before a connection closes; <see cref="TimeSpan.Zero"/>
-    /// disables the limit. A connection declares half of it in its <c>open</c>, as AMQP 1.0 Part 2,
-    /// section 2.4.5 recommends, so a peer that keeps to the declared value never trips it.
+    /// disables the limit, and any other value is at least <see cref="MinIdleTimeout"/>. A connection
+    /// declares half of it in its <c>open</c>, as AMQP 1.0 Part 2, section 2.4.5 recommends, so a peer
+    /// that keeps to the declared value never trips it.
     /// </summary>
     public required TimeSpan IdleTimeout { get; init; }
 
