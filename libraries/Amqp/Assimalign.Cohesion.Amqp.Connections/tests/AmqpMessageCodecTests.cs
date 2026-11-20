@@ -224,14 +224,16 @@ public class AmqpMessageCodecTests
         decoded.MessageId.ShouldBeOfType<byte[]>().ShouldBe(new byte[] { 9, 8 });
     }
 
-    [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - Decode: Should refuse a message identifier of a type the specification does not allow")]
-    public void Decode_WithIntegerMessageId_ShouldThrowDecodeError()
+    [Theory(DisplayName = "Cohesion Test [Amqp.Connections] - Decode: Should refuse a message identifier of a type the specification does not allow")]
+    [InlineData("an int", "005373c003015405")]
+    [InlineData("an array of byte, which decodes as sbyte[]", "005373c00701e00402510102")]
+    public void Decode_WithDisallowedMessageIdType_ShouldThrowDecodeError(string scenario, string hex)
     {
         // Arrange
-        byte[] payload = Convert.FromHexString("005373c003015405");
+        byte[] payload = Convert.FromHexString(hex);
 
         // Act
-        AmqpException exception = Should.Throw<AmqpException>(() => AmqpMessageCodec.Decode(payload));
+        AmqpException exception = Should.Throw<AmqpException>(() => AmqpMessageCodec.Decode(payload), scenario);
 
         // Assert
         exception.ErrorCode.ShouldBe(AmqpErrorCode.ProtocolViolation);

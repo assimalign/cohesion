@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -12,6 +13,8 @@ namespace Assimalign.Cohesion.Amqp;
 /// layer, such as a TLS client certificate, and an application delegate maps what that layer established
 /// to an identity.
 /// </summary>
+[DebuggerDisplay("{Name,nq}")]
+[DebuggerTypeProxy(typeof(DebugView))]
 public sealed class AmqpSaslExternalServerMechanism : IAmqpSaslServerMechanism
 {
     private readonly Func<IConnection, string?, CancellationToken, ValueTask<string?>> _authenticate;
@@ -55,5 +58,17 @@ public sealed class AmqpSaslExternalServerMechanism : IAmqpSaslServerMechanism
         ArgumentNullException.ThrowIfNull(connection);
 
         return new AmqpSaslExternalServerExchange(connection, _authenticate);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly AmqpSaslExternalServerMechanism _mechanism;
+
+        public DebugView(AmqpSaslExternalServerMechanism mechanism)
+        {
+            _mechanism = mechanism;
+        }
+
+        public AmqpSymbol Name => _mechanism.Name;
     }
 }

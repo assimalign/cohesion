@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -8,6 +9,8 @@ namespace Assimalign.Cohesion.Amqp.Internal;
 /// The client exchange of a single-message mechanism (<c>PLAIN</c>, <c>ANONYMOUS</c>, <c>EXTERNAL</c>): it
 /// sends one message as the initial response and answers any challenge with a fixed response.
 /// </summary>
+[DebuggerDisplay("AmqpSaslInitialResponseClientExchange")]
+[DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class AmqpSaslInitialResponseClientExchange : IAmqpSaslClientExchange
 {
     private readonly ReadOnlyMemory<byte> _initialResponse;
@@ -38,5 +41,13 @@ internal sealed class AmqpSaslInitialResponseClientExchange : IAmqpSaslClientExc
         cancellationToken.ThrowIfCancellationRequested();
 
         return ValueTask.CompletedTask;
+    }
+
+    private sealed class DebugView
+    {
+        // The responses can hold credentials, so the view shows nothing of them.
+        public DebugView(AmqpSaslInitialResponseClientExchange exchange)
+        {
+        }
     }
 }

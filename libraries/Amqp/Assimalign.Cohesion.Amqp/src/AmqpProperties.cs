@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 
 namespace Assimalign.Cohesion.Amqp;
 
@@ -6,6 +7,8 @@ namespace Assimalign.Cohesion.Amqp;
 /// Represents the properties section of a message: its immutable standard properties (AMQP 1.0 Part 3,
 /// section 3.2.4).
 /// </summary>
+[DebuggerDisplay("MessageId = {MessageId}, To = {To,nq}")]
+[DebuggerTypeProxy(typeof(DebugView))]
 public sealed class AmqpProperties
 {
     private object? _messageId;
@@ -100,10 +103,37 @@ public sealed class AmqpProperties
 
     private static object? ValidateId(object? value)
     {
+        // Binary is matched by exact type: CLR array covariance lets an sbyte[] pass a byte[] pattern, and
+        // it would reach the wire as an array, not binary.
         return value switch
         {
-            null or ulong or Guid or string or byte[] or ReadOnlyMemory<byte> => value,
+            null or ulong or Guid or string or ReadOnlyMemory<byte> => value,
+            byte[] bytes when bytes.GetType() == typeof(byte[]) => value,
             _ => throw new ArgumentException(ErrorMessages.MessageIdTypeInvalid, nameof(value))
         };
+    }
+
+    private sealed class DebugView
+    {
+        private readonly AmqpProperties _properties;
+
+        public DebugView(AmqpProperties properties)
+        {
+            _properties = properties;
+        }
+
+        public object? MessageId => _properties.MessageId;
+        public ReadOnlyMemory<byte>? UserId => _properties.UserId;
+        public string? To => _properties.To;
+        public string? Subject => _properties.Subject;
+        public string? ReplyTo => _properties.ReplyTo;
+        public object? CorrelationId => _properties.CorrelationId;
+        public AmqpSymbol? ContentType => _properties.ContentType;
+        public AmqpSymbol? ContentEncoding => _properties.ContentEncoding;
+        public DateTimeOffset? AbsoluteExpiryTime => _properties.AbsoluteExpiryTime;
+        public DateTimeOffset? CreationTime => _properties.CreationTime;
+        public string? GroupId => _properties.GroupId;
+        public uint? GroupSequence => _properties.GroupSequence;
+        public string? ReplyToGroupId => _properties.ReplyToGroupId;
     }
 }

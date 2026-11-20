@@ -2,7 +2,7 @@ namespace Assimalign.Cohesion.Amqp;
 
 /// <summary>
 /// Provides the transaction capabilities AMQP 1.0 defines, which a <see cref="AmqpCoordinator"/> carries
-/// (Part 4, section 4.5.8).
+/// (Part 4, section 4.5.7).
 /// </summary>
 public static class AmqpTransactionCapability
 {

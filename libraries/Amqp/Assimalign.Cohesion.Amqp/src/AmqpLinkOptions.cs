@@ -15,6 +15,8 @@ namespace Assimalign.Cohesion.Amqp;
 [DebuggerTypeProxy(typeof(DebugView))]
 public abstract class AmqpLinkOptions
 {
+    private AmqpSenderSettleMode _senderSettleMode = AmqpSenderSettleMode.Mixed;
+    private AmqpReceiverSettleMode _receiverSettleMode = AmqpReceiverSettleMode.First;
     private ulong? _maxMessageSize;
 
     private protected AmqpLinkOptions()
@@ -43,13 +45,39 @@ public abstract class AmqpLinkOptions
     /// Gets or sets the sender settlement mode. A sender uses it; a receiver proposes it. Defaults to
     /// <see cref="AmqpSenderSettleMode.Mixed"/>.
     /// </summary>
-    public AmqpSenderSettleMode SenderSettleMode { get; set; } = AmqpSenderSettleMode.Mixed;
+    /// <exception cref="ArgumentOutOfRangeException">Thrown when the assigned value is not a defined mode.</exception>
+    public AmqpSenderSettleMode SenderSettleMode
+    {
+        get => _senderSettleMode;
+        set
+        {
+            if (!Enum.IsDefined(value))
+            {
+                throw new ArgumentOutOfRangeException(nameof(value));
+            }
+
+            _senderSettleMode = value;
+        }
+    }
 
     /// <summary>
     /// Gets or sets the receiver settlement mode. A receiver uses it; a sender proposes it. Defaults to
     /// <see cref="AmqpReceiverSettleMode.First"/>.
     /// </summary>
-    public AmqpReceiverSettleMode ReceiverSettleMode { get; set; } = AmqpReceiverSettleMode.First;
+    /// <exception cref="ArgumentOutOfRangeException">Thrown when the assigned value is not a defined mode.</exception>
+    public AmqpReceiverSettleMode ReceiverSettleMode
+    {
+        get => _receiverSettleMode;
+        set
+        {
+            if (!Enum.IsDefined(value))
+            {
+                throw new ArgumentOutOfRangeException(nameof(value));
+            }
+
+            _receiverSettleMode = value;
+        }
+    }
 
     /// <summary>
     /// Gets or sets the largest message, in bytes, the local endpoint accepts on the link, or

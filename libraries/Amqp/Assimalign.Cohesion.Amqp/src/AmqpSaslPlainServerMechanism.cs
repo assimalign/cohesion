@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -16,6 +17,8 @@ namespace Assimalign.Cohesion.Amqp;
 /// TLS layer. The authenticated identity is the authorization identity when the client named one and
 /// the delegate accepted it, and otherwise the user name.
 /// </remarks>
+[DebuggerDisplay("{Name,nq}")]
+[DebuggerTypeProxy(typeof(DebugView))]
 public sealed class AmqpSaslPlainServerMechanism : IAmqpSaslServerMechanism
 {
     private readonly Func<AmqpSaslPlainCredentials, CancellationToken, ValueTask<bool>> _validate;
@@ -58,5 +61,17 @@ public sealed class AmqpSaslPlainServerMechanism : IAmqpSaslServerMechanism
         ArgumentNullException.ThrowIfNull(connection);
 
         return new AmqpSaslPlainServerExchange(_validate);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly AmqpSaslPlainServerMechanism _mechanism;
+
+        public DebugView(AmqpSaslPlainServerMechanism mechanism)
+        {
+            _mechanism = mechanism;
+        }
+
+        public AmqpSymbol Name => _mechanism.Name;
     }
 }

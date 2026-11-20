@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -13,6 +14,8 @@ namespace Assimalign.Cohesion.Amqp.Internal;
 /// A client whose <c>sasl-init</c> carried no initial response gets one empty challenge; a second missing
 /// or malformed message fails the exchange with <see cref="AmqpSaslCode.Auth"/>.
 /// </remarks>
+[DebuggerDisplay("AmqpSaslPlainServerExchange")]
+[DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class AmqpSaslPlainServerExchange : IAmqpSaslServerExchange
 {
     private static readonly UTF8Encoding _strictUtf8 = new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
@@ -88,6 +91,13 @@ internal sealed class AmqpSaslPlainServerExchange : IAmqpSaslServerExchange
         catch (DecoderFallbackException)
         {
             return false;
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(AmqpSaslPlainServerExchange exchange)
+        {
         }
     }
 }

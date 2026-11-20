@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.Text;
 
 using Assimalign.Cohesion.Amqp.Internal;
@@ -14,6 +15,8 @@ namespace Assimalign.Cohesion.Amqp;
 /// <c>PLAIN</c> sends the password in the clear, so use it only over a carrier that encrypts, such as a TLS
 /// layer.
 /// </remarks>
+[DebuggerDisplay("{Name,nq}")]
+[DebuggerTypeProxy(typeof(DebugView))]
 public sealed class AmqpSaslPlainClientMechanism : IAmqpSaslClientMechanism
 {
     private readonly byte[] _response;
@@ -76,5 +79,18 @@ public sealed class AmqpSaslPlainClientMechanism : IAmqpSaslClientMechanism
 
         // A server that wants the response after an empty challenge gets the same message again.
         return new AmqpSaslInitialResponseClientExchange(_response, _response);
+    }
+
+    private sealed class DebugView
+    {
+        // The encoded response holds the password, so the view shows only the name.
+        private readonly AmqpSaslPlainClientMechanism _mechanism;
+
+        public DebugView(AmqpSaslPlainClientMechanism mechanism)
+        {
+            _mechanism = mechanism;
+        }
+
+        public AmqpSymbol Name => _mechanism.Name;
     }
 }

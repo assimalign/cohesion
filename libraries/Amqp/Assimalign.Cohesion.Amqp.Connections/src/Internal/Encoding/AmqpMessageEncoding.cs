@@ -330,7 +330,9 @@ internal static class AmqpMessageEncoding
         object? id = fields.ReadValue();
 
         // message-id-ulong, message-id-uuid, message-id-binary and message-id-string (Part 3, section 3.2.11).
-        if (id is not (null or ulong or Guid or string or byte[]))
+        // Binary is matched by exact type: an array of byte decodes as sbyte[], which a byte[] pattern
+        // accepts through CLR array covariance.
+        if (id is not (null or ulong or Guid or string) && id.GetType() != typeof(byte[]))
         {
             throw AmqpException.DecodeError(ErrorMessages.MessageIdInvalid);
         }

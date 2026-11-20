@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -12,6 +13,8 @@ namespace Assimalign.Cohesion.Amqp.Internal;
 /// (empty for none), and the application delegate maps the carrier's established identity to the
 /// authenticated one.
 /// </summary>
+[DebuggerDisplay("AmqpSaslExternalServerExchange")]
+[DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class AmqpSaslExternalServerExchange : IAmqpSaslServerExchange
 {
     private static readonly UTF8Encoding _strictUtf8 = new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
@@ -52,5 +55,12 @@ internal sealed class AmqpSaslExternalServerExchange : IAmqpSaslServerExchange
         string? identity = await _authenticate(_connection, authorizationId, cancellationToken).ConfigureAwait(false);
 
         return identity is null ? AmqpSaslServerStep.Fail() : AmqpSaslServerStep.Success(identity);
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(AmqpSaslExternalServerExchange exchange)
+        {
+        }
     }
 }
