@@ -169,7 +169,7 @@ those patterns can be made slow by a crafted instance.
 CONTEXTJ and CONTEXTO rules and the Bidi rule, all of which the official suite exercises.
 `IdnMapping` delegates to ICU on Linux and macOS, to the operating system on Windows, and to a
 managed fallback under `InvariantGlobalization`, and the three disagree. On .NET 10 on Linux,
-`IdnMapping.GetAscii("a‍b.com")` (a zero-width joiner outside the context RFC 5892 allows it in)
+`IdnMapping.GetAscii("a\u200Db.com")` (a zero-width joiner outside the context RFC 5892 allows it in)
 throws with ICU and returns `xn--ab-m1t.com` with invariant globalization. A schema must give the
 same answer on a Windows workstation and in a Linux container built with NativeAOT, so the library
 implements the algorithm itself:
