@@ -106,6 +106,27 @@ internal static class AmqpFrame
     }
 
     /// <summary>
+    /// Reads the size the next frame header declares, once the buffer holds the four bytes that carry it.
+    /// </summary>
+    /// <param name="buffer">The received bytes; not advanced.</param>
+    /// <param name="size">The declared size of the whole frame, header included.</param>
+    /// <returns><see langword="true"/> when the size field has arrived; <see langword="false"/> when more bytes are needed.</returns>
+    public static bool TryReadSize(in ReadOnlySequence<byte> buffer, out uint size)
+    {
+        if (buffer.Length < sizeof(uint))
+        {
+            size = 0;
+            return false;
+        }
+
+        Span<byte> bytes = stackalloc byte[sizeof(uint)];
+
+        buffer.Slice(0, sizeof(uint)).CopyTo(bytes);
+        size = BinaryPrimitives.ReadUInt32BigEndian(bytes);
+        return true;
+    }
+
+    /// <summary>
     /// Reads the next frame when the buffer holds all of it.
     /// </summary>
     /// <param name="buffer">The received bytes; advanced past the frame when one is read.</param>

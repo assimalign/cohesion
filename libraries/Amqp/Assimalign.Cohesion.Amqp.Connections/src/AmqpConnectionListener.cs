@@ -82,9 +82,10 @@ public sealed class AmqpConnectionListener : ConnectionListener<IAmqpConnection>
     /// <returns>The AMQP connection listener.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="listener"/> is <see langword="null"/>.</exception>
     /// <exception cref="ArgumentException">
-    /// Thrown when the carrier does not deliver a reliable, ordered byte stream, or when
+    /// Thrown when the carrier does not deliver a reliable, ordered byte stream; when
     /// <see cref="AmqpConnectionListenerOptions.SaslMechanisms"/> holds <see langword="null"/> or two
-    /// mechanisms with the same name.
+    /// mechanisms with the same name; or when the options make the listener's <c>open</c> or its
+    /// <c>sasl-mechanisms</c> frame larger than the 512 bytes a peer accepts before the connection opens.
     /// </exception>
     public static AmqpConnectionListener Create(IDuplexConnectionListener listener, AmqpConnectionListenerOptions? options = null)
     {
@@ -103,9 +104,10 @@ public sealed class AmqpConnectionListener : ConnectionListener<IAmqpConnection>
     /// <returns>The AMQP connection listener.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="listener"/> is <see langword="null"/>.</exception>
     /// <exception cref="ArgumentException">
-    /// Thrown when the carrier does not deliver a reliable, ordered byte stream, or when
+    /// Thrown when the carrier does not deliver a reliable, ordered byte stream; when
     /// <see cref="AmqpConnectionListenerOptions.SaslMechanisms"/> holds <see langword="null"/> or two
-    /// mechanisms with the same name.
+    /// mechanisms with the same name; or when the options make the listener's <c>open</c> or its
+    /// <c>sasl-mechanisms</c> frame larger than the 512 bytes a peer accepts before the connection opens.
     /// </exception>
     public static AmqpConnectionListener Create(IMultiplexedConnectionListener listener, AmqpConnectionListenerOptions? options = null)
     {
@@ -196,6 +198,8 @@ public sealed class AmqpConnectionListener : ConnectionListener<IAmqpConnection>
             DesiredCapabilities = options.DesiredCapabilities,
             Properties = options.Properties
         };
+
+        AmqpHandshake.ThrowIfListenerFramesTooLarge(settings, nameof(options));
 
         return new AmqpConnectionListener(
             carrier.Use(new AmqpConnectionLayer(settings), options.MaxConcurrentHandshakes),

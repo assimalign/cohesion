@@ -134,6 +134,29 @@ public class AmqpEngineViolationTests
         error.ShouldNotBeNull().Condition.ShouldBe(AmqpErrorCondition.FramingError);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - ProcessFrame: Should accept a frame of exactly the local max-frame-size")]
+    public async Task ProcessFrame_OnFrameOfExactlyMaxFrameSize_ShouldAccept()
+    {
+        // Arrange
+        using CancellationTokenSource timeout = new(_testTimeout);
+        await using AmqpScriptedHost host = await AmqpScriptedHost.AcceptAsync(new AmqpConnectionListenerOptions { MaxFrameSize = 1024 }, null, timeout.Token);
+        AmqpTestPeer peer = host.Peer;
+        await peer.BeginAsync(null, timeout.Token);
+        AmqpFlowPerformative flow = new() { IncomingWindow = 10, NextOutgoingId = 1, OutgoingWindow = 10 };
+        using AmqpBufferWriter measure = new();
+        AmqpFrame.Write(measure, AmqpFrame.AmqpType, 0, flow);
+        byte[] padding = new byte[1024 - measure.Length];
+
+        // Act: a second session's begin is answered only if the 1024-byte frame before it was accepted.
+        await peer.WriteFrameAsync(0, flow, timeout.Token, payload: padding);
+        await peer.WriteFrameAsync(1, AmqpTestPeer.CreateBegin(), timeout.Token);
+        AmqpTestFrame answer = await peer.ReadNonEmptyFrameAsync(timeout.Token);
+
+        // Assert
+        answer.Performative.ShouldBeOfType<AmqpBeginPerformative>().RemoteChannel.ShouldBe((ushort)1);
+        host.Connection.State.ShouldBe(ConnectionState.Open);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - OnAttach: Should close the connection when a handle exceeds handle-max")]
     public async Task OnAttach_OnHandleAboveHandleMax_ShouldCloseWithFramingError()
     {

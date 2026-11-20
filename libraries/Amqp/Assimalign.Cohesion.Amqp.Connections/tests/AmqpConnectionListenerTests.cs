@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Globalization;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -42,6 +44,43 @@ public class AmqpConnectionListenerTests
 
         // Assert
         exception.Message.ShouldContain("ANONYMOUS", Case.Sensitive);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - Create: Should reject options whose open exceeds the 512 bytes allowed before the peer's open")]
+    public void Create_WithOpenAbove512Bytes_ShouldThrowArgumentException()
+    {
+        // Arrange
+        AmqpConnectionListenerOptions options = new()
+        {
+            Properties = new Dictionary<AmqpSymbol, object?> { ["padding"] = new string('x', 600) }
+        };
+        TestConnectionListener carrier = new();
+
+        // Act
+        ArgumentException exception = Should.Throw<ArgumentException>(() => AmqpConnectionListener.Create(carrier, options));
+
+        // Assert
+        exception.ParamName.ShouldBe("options");
+        exception.Message.ShouldStartWith("The local 'open' encodes to ");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - Create: Should reject mechanisms whose sasl-mechanisms frame exceeds 512 bytes")]
+    public void Create_WithMechanismsAbove512Bytes_ShouldThrowArgumentException()
+    {
+        // Arrange
+        AmqpConnectionListenerOptions options = new();
+
+        for (int index = 0; index < 3; index++)
+        {
+            options.SaslMechanisms.Add(new TestNamedSaslServerMechanism(string.Concat("X-", index.ToString(CultureInfo.InvariantCulture), new string('M', 200))));
+        }
+
+        // Act
+        ArgumentException exception = Should.Throw<ArgumentException>(() => AmqpConnectionListener.Create(new TestConnectionListener(), options));
+
+        // Assert
+        exception.ParamName.ShouldBe("options");
+        exception.Message.ShouldStartWith("The local 'sasl-mechanisms' encodes to a SASL frame of ");
     }
 
     [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - Properties: Should represent the carrier listener's endpoint and capabilities")]

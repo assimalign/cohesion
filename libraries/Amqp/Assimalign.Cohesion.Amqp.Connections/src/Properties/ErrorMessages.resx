@@ -319,4 +319,16 @@
   <data name="SaslMechanismDuplicate" xml:space="preserve">
     <value>The SASL mechanism '{0}' is configured more than once.</value>
   </data>
+  <data name="PeerSaslFrameTooLarge" xml:space="preserve">
+    <value>The peer sent a SASL frame of {0} bytes, above the {1} bytes AMQP 1.0 allows any SASL frame.</value>
+  </data>
+  <data name="SaslFrameTooLarge" xml:space="preserve">
+    <value>The local '{0}' encodes to a SASL frame of {1} bytes, above the {2} bytes AMQP 1.0 allows any SASL frame.</value>
+  </data>
+  <data name="SaslFrameEmpty" xml:space="preserve">
+    <value>The peer sent an empty frame during the SASL exchange, which AMQP 1.0 makes an irrecoverable error.</value>
+  </data>
+  <data name="SaslFrameBodyInvalid" xml:space="preserve">
+    <value>The peer sent a SASL frame whose body holds more than one value.</value>
+  </data>
 </root>

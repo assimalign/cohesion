@@ -121,6 +121,42 @@ public class AmqpFrameTests
         exception.Message.ShouldContain("512", Case.Sensitive);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - TryRead: Should read a frame of exactly the maximum frame size")]
+    public void TryRead_WithFrameOfExactlyMaxFrameSize_ShouldReadFrame()
+    {
+        // Arrange
+        byte[] bytes = new byte[512];
+        Convert.FromHexString("0000020002000000").CopyTo(bytes, 0);
+
+        // Act
+        ReadOnlySequence<byte> buffer = new(bytes);
+        bool read = AmqpFrame.TryRead(ref buffer, 512, out AmqpFrameHeader header, out ReadOnlySequence<byte> body);
+
+        // Assert
+        read.ShouldBeTrue();
+        header.Size.ShouldBe(512u);
+        body.Length.ShouldBe(504);
+        buffer.IsEmpty.ShouldBeTrue();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - TryReadSize: Should read the declared size once four bytes have arrived")]
+    public void TryReadSize_WithPartialHeader_ShouldReadOnceSizeFieldArrives()
+    {
+        // Arrange
+        ReadOnlySequence<byte> partial = new(Convert.FromHexString("000002"));
+        ReadOnlySequence<byte> sizeOnly = new(Convert.FromHexString("00000201"));
+
+        // Act
+        bool early = AmqpFrame.TryReadSize(partial, out _);
+        bool ready = AmqpFrame.TryReadSize(sizeOnly, out uint size);
+
+        // Assert
+        early.ShouldBeFalse();
+        ready.ShouldBeTrue();
+        size.ShouldBe(513u);
+        sizeOnly.Length.ShouldBe(4);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - TryRead: Should read a frame split across buffer segments")]
     public void TryRead_WithSegmentedBuffer_ShouldReadFrame()
     {

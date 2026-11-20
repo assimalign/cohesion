@@ -21,8 +21,15 @@ namespace Assimalign.Cohesion.Amqp.Connections.Internal;
 /// <para>
 /// Both sides send their <c>open</c> right behind their AMQP protocol header, without waiting for the
 /// peer's, as section 2.4.1 permits. The local <c>open</c> must fit the 512 bytes a peer accepts before
-/// the connection opens; the peer's <c>open</c> and SASL frames are accepted up to the local maximum frame
-/// size, since SASL tokens routinely exceed 512 bytes.
+/// the connection opens; the peer's <c>open</c> is accepted up to the local maximum frame size, which
+/// bounds what this endpoint buffers whatever the peer declares.
+/// </para>
+/// <para>
+/// Every SASL frame, in either direction, is held to those 512 bytes, because SASL negotiates no larger
+/// size (Part 5, section 5.3.1). A peer's SASL frame is refused from the size its header declares, before
+/// its body arrives; a local one is refused before it is written. A SASL frame carries exactly one value,
+/// and an empty one is an irrecoverable error. Credentials too large for a SASL frame, such as bearer
+/// tokens, belong on a link after the connection opens.
 /// </para>
 /// <para>
 /// A peer whose protocol header this endpoint does not accept is answered with the header it does accept
@@ -45,6 +52,10 @@ internal static class AmqpHandshake
     private static readonly string _saslRequired = ErrorMessages.SaslRequired;
     private static readonly string _saslAuthenticationFailedFormat = ErrorMessages.SaslAuthenticationFailed;
     private static readonly string _saslMechanismUnknownFormat = ErrorMessages.SaslMechanismUnknown;
+    private static readonly string _peerSaslFrameTooLargeFormat = ErrorMessages.PeerSaslFrameTooLarge;
+    private static readonly string _saslFrameEmpty = ErrorMessages.SaslFrameEmpty;
+    private static readonly string _saslFrameBodyInvalid = ErrorMessages.SaslFrameBodyInvalid;
+    private static readonly string _saslFrameTypeInvalid = ErrorMessages.SaslFrameTypeInvalid;
 
     /// <summary>
     /// Establishes an AMQP connection over a carrier within the settings' handshake timeout, and starts it.
@@ -94,6 +105,38 @@ internal static class AmqpHandshake
             throw new TimeoutException(
                 string.Format(CultureInfo.CurrentCulture, _handshakeTimedOutFormat, settings.HandshakeTimeout),
                 exception);
+        }
+    }
+
+    /// <summary>
+    /// Refuses listener settings whose <c>open</c> or <c>sasl-mechanisms</c> frame would exceed the 512 bytes
+    /// a peer accepts before the connection opens, so a misconfigured listener fails when it is created
+    /// rather than on every connection it accepts.
+    /// </summary>
+    /// <param name="settings">The listener's settings.</param>
+    /// <param name="paramName">The name of the parameter the settings came from.</param>
+    /// <exception cref="ArgumentException">Thrown when either frame is too large.</exception>
+    public static void ThrowIfListenerFramesTooLarge(AmqpConnectionSettings settings, string paramName)
+    {
+        using AmqpBufferWriter scratch = new(256);
+
+        if (!TryEncodeFrame(AmqpFrame.AmqpType, settings.CreateOpen(null), scratch))
+        {
+            throw new ArgumentException(
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.OpenTooLarge, scratch.Length, AmqpFrame.MinMaxFrameSize),
+                paramName);
+        }
+
+        if (settings.ServerMechanisms.Count > 0)
+        {
+            AmqpSaslMechanismsPerformative offered = CreateMechanisms(settings.ServerMechanisms);
+
+            if (!TryEncodeFrame(AmqpFrame.SaslType, offered, scratch))
+            {
+                throw new ArgumentException(
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.SaslFrameTooLarge, offered.PerformativeName, scratch.Length, AmqpFrame.MinMaxFrameSize),
+                    paramName);
+            }
         }
     }
 
@@ -203,7 +246,7 @@ internal static class AmqpHandshake
         PipeReader input = carrier.Input;
         PipeWriter output = carrier.Output;
 
-        AmqpPerformative first = await ReadSaslFrameAsync(input, settings.MaxFrameSize, cancellationToken).ConfigureAwait(false);
+        AmqpPerformative first = await ReadSaslFrameAsync(input, cancellationToken).ConfigureAwait(false);
 
         if (first is not AmqpSaslMechanismsPerformative offered)
         {
@@ -220,7 +263,7 @@ internal static class AmqpHandshake
         IAmqpSaslClientExchange exchange = mechanism.CreateExchange(carrier, hostName);
         ReadOnlyMemory<byte>? initialResponse = await exchange.GetInitialResponseAsync(cancellationToken).ConfigureAwait(false);
 
-        WriteFrame(output, AmqpFrame.SaslType, new AmqpSaslInitPerformative
+        WriteSaslFrame(output, new AmqpSaslInitPerformative
         {
             Mechanism = mechanism.Name,
             InitialResponse = initialResponse,
@@ -230,14 +273,14 @@ internal static class AmqpHandshake
 
         while (true)
         {
-            AmqpPerformative frame = await ReadSaslFrameAsync(input, settings.MaxFrameSize, cancellationToken).ConfigureAwait(false);
+            AmqpPerformative frame = await ReadSaslFrameAsync(input, cancellationToken).ConfigureAwait(false);
 
             switch (frame)
             {
                 case AmqpSaslChallengePerformative challenge:
                     ReadOnlyMemory<byte> response = await exchange.RespondAsync(challenge.Challenge, cancellationToken).ConfigureAwait(false);
 
-                    WriteFrame(output, AmqpFrame.SaslType, new AmqpSaslResponsePerformative { Response = response }, scratch);
+                    WriteSaslFrame(output, new AmqpSaslResponsePerformative { Response = response }, scratch);
                     await FlushAsync(output, cancellationToken).ConfigureAwait(false);
                     break;
                 case AmqpSaslOutcomePerformative outcome:
@@ -272,17 +315,11 @@ internal static class AmqpHandshake
         PipeReader input = carrier.Input;
         PipeWriter output = carrier.Output;
         IReadOnlyList<IAmqpSaslServerMechanism> mechanisms = settings.ServerMechanisms;
-        AmqpSymbol[] names = new AmqpSymbol[mechanisms.Count];
 
-        for (int index = 0; index < names.Length; index++)
-        {
-            names[index] = mechanisms[index].Name;
-        }
-
-        WriteFrame(output, AmqpFrame.SaslType, new AmqpSaslMechanismsPerformative { Mechanisms = names }, scratch);
+        WriteSaslFrame(output, CreateMechanisms(mechanisms), scratch);
         await FlushAsync(output, cancellationToken).ConfigureAwait(false);
 
-        AmqpPerformative first = await ReadSaslFrameAsync(input, settings.MaxFrameSize, cancellationToken).ConfigureAwait(false);
+        AmqpPerformative first = await ReadSaslFrameAsync(input, cancellationToken).ConfigureAwait(false);
 
         if (first is not AmqpSaslInitPerformative init)
         {
@@ -302,7 +339,7 @@ internal static class AmqpHandshake
 
         if (mechanism is null)
         {
-            await WriteOutcomeAsync(output, AmqpSaslCode.Auth, ReadOnlyMemory<byte>.Empty, scratch, cancellationToken).ConfigureAwait(false);
+            await WriteMechanismFrameAsync(output, CreateOutcome(AmqpSaslCode.Auth, ReadOnlyMemory<byte>.Empty), scratch, cancellationToken).ConfigureAwait(false);
 
             throw new AmqpException(
                 AmqpErrorCode.AuthenticationFailed,
@@ -319,10 +356,9 @@ internal static class AmqpHandshake
 
             while (!step.IsComplete)
             {
-                WriteFrame(output, AmqpFrame.SaslType, new AmqpSaslChallengePerformative { Challenge = step.Data }, scratch);
-                await FlushAsync(output, cancellationToken).ConfigureAwait(false);
+                await WriteMechanismFrameAsync(output, new AmqpSaslChallengePerformative { Challenge = step.Data }, scratch, cancellationToken).ConfigureAwait(false);
 
-                AmqpPerformative frame = await ReadSaslFrameAsync(input, settings.MaxFrameSize, cancellationToken).ConfigureAwait(false);
+                AmqpPerformative frame = await ReadSaslFrameAsync(input, cancellationToken).ConfigureAwait(false);
 
                 if (frame is not AmqpSaslResponsePerformative response)
                 {
@@ -343,7 +379,7 @@ internal static class AmqpHandshake
         AmqpSaslCode code = step.Code.GetValueOrDefault();
         ReadOnlyMemory<byte> additionalData = code == AmqpSaslCode.Ok ? step.Data : ReadOnlyMemory<byte>.Empty;
 
-        await WriteOutcomeAsync(output, code, additionalData, scratch, cancellationToken).ConfigureAwait(false);
+        await WriteMechanismFrameAsync(output, CreateOutcome(code, additionalData), scratch, cancellationToken).ConfigureAwait(false);
 
         if (code != AmqpSaslCode.Ok)
         {
@@ -368,7 +404,7 @@ internal static class AmqpHandshake
     {
         try
         {
-            (AmqpFrameHeader header, AmqpPerformative performative) = await ReadFrameAsync(input, settings.MaxFrameSize, cancellationToken).ConfigureAwait(false);
+            (AmqpFrameHeader header, AmqpPerformative performative) = await ReadFrameAsync(input, settings.MaxFrameSize, sasl: false, cancellationToken).ConfigureAwait(false);
 
             if (header.Type != AmqpFrame.AmqpType)
             {
@@ -399,26 +435,30 @@ internal static class AmqpHandshake
     }
 
     /// <summary>
-    /// Reads the next SASL frame. AMQP frames are not allowed until the SASL exchange completes.
+    /// Reads the next SASL frame. AMQP frames are not allowed until the SASL exchange completes, and no SASL
+    /// frame may exceed the minimum maximum frame size (AMQP 1.0 Part 5, section 5.3.1).
     /// </summary>
-    private static async ValueTask<AmqpPerformative> ReadSaslFrameAsync(PipeReader input, uint maxFrameSize, CancellationToken cancellationToken)
+    private static async ValueTask<AmqpPerformative> ReadSaslFrameAsync(PipeReader input, CancellationToken cancellationToken)
     {
-        (AmqpFrameHeader header, AmqpPerformative performative) = await ReadFrameAsync(input, maxFrameSize, cancellationToken).ConfigureAwait(false);
+        (AmqpFrameHeader header, AmqpPerformative performative) = await ReadFrameAsync(input, AmqpFrame.MinMaxFrameSize, sasl: true, cancellationToken).ConfigureAwait(false);
 
         if (header.Type != AmqpFrame.SaslType)
         {
-            throw new AmqpException(AmqpErrorCode.ProtocolViolation, ErrorMessages.SaslFrameTypeInvalid);
+            throw new AmqpException(AmqpErrorCode.ProtocolViolation, _saslFrameTypeInvalid);
         }
 
         return performative;
     }
 
     /// <summary>
-    /// Reads the next frame with a body, skipping empty frames, and leaves every byte after it in the pipe.
+    /// Reads the next frame with a body and leaves every byte after it in the pipe. Outside the SASL
+    /// exchange an empty frame only keeps the connection alive and is skipped (AMQP 1.0 Part 2,
+    /// section 2.4.5); during it, an empty frame is an irrecoverable error (Part 5, section 5.3.1).
     /// </summary>
     private static async ValueTask<(AmqpFrameHeader Header, AmqpPerformative Performative)> ReadFrameAsync(
         PipeReader input,
         uint maxFrameSize,
+        bool sasl,
         CancellationToken cancellationToken)
     {
         while (true)
@@ -430,19 +470,37 @@ internal static class AmqpHandshake
 
             try
             {
-                while (AmqpFrame.TryRead(ref buffer, maxFrameSize, out AmqpFrameHeader header, out ReadOnlySequence<byte> body))
+                while (true)
                 {
+                    // A SASL frame is refused from the size it declares, before its body arrives, with a message
+                    // that names the SASL limit rather than the local maximum frame size.
+                    if (sasl && AmqpFrame.TryReadSize(buffer, out uint size) && size > AmqpFrame.MinMaxFrameSize)
+                    {
+                        throw new AmqpException(
+                            AmqpErrorCode.ProtocolViolation,
+                            string.Format(CultureInfo.CurrentCulture, _peerSaslFrameTooLargeFormat, size, AmqpFrame.MinMaxFrameSize));
+                    }
+
+                    if (!AmqpFrame.TryRead(ref buffer, maxFrameSize, out AmqpFrameHeader header, out ReadOnlySequence<byte> body))
+                    {
+                        break;
+                    }
+
                     consumed = buffer.Start;
 
-                    // An empty frame only keeps the connection alive (AMQP 1.0 Part 2, section 2.4.5).
                     if (body.IsEmpty)
                     {
+                        if (sasl)
+                        {
+                            throw new AmqpException(AmqpErrorCode.ProtocolViolation, _saslFrameEmpty);
+                        }
+
                         continue;
                     }
 
                     // Bytes behind the frame belong to the next reader, which must see them without new data.
                     examined = consumed;
-                    return (header, Decode(body));
+                    return (header, Decode(body, sasl));
                 }
 
                 if (result.IsCompleted || result.IsCanceled)
@@ -495,12 +553,22 @@ internal static class AmqpHandshake
         return true;
     }
 
-    private static AmqpPerformative Decode(ReadOnlySequence<byte> body)
+    /// <summary>
+    /// Decodes a frame body's performative. A SASL frame body holds exactly that one value (AMQP 1.0 Part 5,
+    /// section 5.3.1); an AMQP frame may carry a payload behind it, which the <c>open</c> ignores.
+    /// </summary>
+    private static AmqpPerformative Decode(ReadOnlySequence<byte> body, bool sasl)
     {
         ReadOnlySpan<byte> span = body.IsSingleSegment ? body.FirstSpan : body.ToArray();
         AmqpReader reader = new(span);
+        AmqpPerformative performative = AmqpPerformative.Decode(ref reader);
 
-        return AmqpPerformative.Decode(ref reader);
+        if (sasl && !reader.IsEnd)
+        {
+            throw new AmqpException(AmqpErrorCode.ProtocolViolation, _saslFrameBodyInvalid);
+        }
+
+        return performative;
     }
 
     private static AmqpException CreateHeaderException(ulong header)
@@ -551,11 +619,8 @@ internal static class AmqpHandshake
 
     private static void WriteOpen(PipeWriter output, AmqpOpenPerformative open, AmqpBufferWriter scratch)
     {
-        scratch.Reset();
-        AmqpFrame.Write(scratch, AmqpFrame.AmqpType, 0, open);
-
         // Until the peer's open arrives, no frame may exceed the minimum maximum frame size (section 2.4.1).
-        if (scratch.Length > AmqpFrame.MinMaxFrameSize)
+        if (!TryEncodeFrame(AmqpFrame.AmqpType, open, scratch))
         {
             throw new AmqpException(
                 AmqpErrorCode.Other,
@@ -565,34 +630,93 @@ internal static class AmqpHandshake
         output.Write(scratch.WrittenSpan);
     }
 
-    private static void WriteFrame(PipeWriter output, byte type, AmqpPerformative performative, AmqpBufferWriter scratch)
+    /// <summary>
+    /// Writes a SASL frame, refusing one larger than the minimum maximum frame size.
+    /// </summary>
+    /// <exception cref="AmqpException">Thrown when the frame exceeds the minimum maximum frame size.</exception>
+    private static void WriteSaslFrame(PipeWriter output, AmqpPerformative performative, AmqpBufferWriter scratch)
     {
-        scratch.Reset();
-        AmqpFrame.Write(scratch, type, 0, performative);
+        if (!TryEncodeFrame(AmqpFrame.SaslType, performative, scratch))
+        {
+            throw CreateSaslFrameTooLargeException(performative, scratch.Length);
+        }
+
         output.Write(scratch.WrittenSpan);
     }
 
-    private static async ValueTask WriteOutcomeAsync(
+    /// <summary>
+    /// Writes and flushes a SASL frame whose content the listening side's mechanism chose: a challenge or an
+    /// outcome. One too large for a SASL frame is answered with a system outcome instead, so the peer learns
+    /// that authentication ended rather than losing the connection without a word.
+    /// </summary>
+    /// <exception cref="AmqpException">Thrown when the frame exceeds the minimum maximum frame size.</exception>
+    private static async ValueTask WriteMechanismFrameAsync(
         PipeWriter output,
-        AmqpSaslCode code,
-        ReadOnlyMemory<byte> additionalData,
+        AmqpPerformative performative,
         AmqpBufferWriter scratch,
         CancellationToken cancellationToken)
     {
-        WriteFrame(output, AmqpFrame.SaslType, new AmqpSaslOutcomePerformative
+        if (!TryEncodeFrame(AmqpFrame.SaslType, performative, scratch))
+        {
+            AmqpException exception = CreateSaslFrameTooLargeException(performative, scratch.Length);
+
+            await TryWriteOutcomeAsync(output, AmqpSaslCode.Sys, scratch).ConfigureAwait(false);
+            throw exception;
+        }
+
+        output.Write(scratch.WrittenSpan);
+        await FlushAsync(output, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Encodes a frame on channel 0 into the scratch buffer and reports whether it fits the minimum maximum
+    /// frame size, the limit before the peer's <c>open</c> arrives and on every SASL frame.
+    /// </summary>
+    private static bool TryEncodeFrame(byte type, AmqpPerformative performative, AmqpBufferWriter scratch)
+    {
+        scratch.Reset();
+        AmqpFrame.Write(scratch, type, 0, performative);
+        return scratch.Length <= AmqpFrame.MinMaxFrameSize;
+    }
+
+    private static AmqpSaslMechanismsPerformative CreateMechanisms(IReadOnlyList<IAmqpSaslServerMechanism> mechanisms)
+    {
+        AmqpSymbol[] names = new AmqpSymbol[mechanisms.Count];
+
+        for (int index = 0; index < names.Length; index++)
+        {
+            names[index] = mechanisms[index].Name;
+        }
+
+        return new AmqpSaslMechanismsPerformative { Mechanisms = names };
+    }
+
+    private static AmqpSaslOutcomePerformative CreateOutcome(AmqpSaslCode code, ReadOnlyMemory<byte> additionalData)
+    {
+        // The cast matters: a bare null would convert through byte[] to an empty memory, and the field
+        // would travel as an empty binary instead of being left out.
+        return new AmqpSaslOutcomePerformative
         {
             Code = code,
-            AdditionalData = additionalData.IsEmpty ? null : additionalData
-        }, scratch);
+            AdditionalData = additionalData.IsEmpty ? (ReadOnlyMemory<byte>?)null : additionalData
+        };
+    }
 
-        await FlushAsync(output, cancellationToken).ConfigureAwait(false);
+    private static AmqpException CreateSaslFrameTooLargeException(AmqpPerformative performative, int size)
+    {
+        return new AmqpException(
+            AmqpErrorCode.Other,
+            string.Format(CultureInfo.CurrentCulture, ErrorMessages.SaslFrameTooLarge, performative.PerformativeName, size, AmqpFrame.MinMaxFrameSize));
     }
 
     private static async ValueTask TryWriteOutcomeAsync(PipeWriter output, AmqpSaslCode code, AmqpBufferWriter scratch)
     {
         try
         {
-            await WriteOutcomeAsync(output, code, ReadOnlyMemory<byte>.Empty, scratch, CancellationToken.None).ConfigureAwait(false);
+            // An outcome without additional data always fits a SASL frame.
+            TryEncodeFrame(AmqpFrame.SaslType, CreateOutcome(code, ReadOnlyMemory<byte>.Empty), scratch);
+            output.Write(scratch.WrittenSpan);
+            await FlushAsync(output, CancellationToken.None).ConfigureAwait(false);
         }
         catch (Exception exception) when (exception is AmqpException or InvalidOperationException or System.IO.IOException or ObjectDisposedException)
         {
@@ -604,7 +728,14 @@ internal static class AmqpHandshake
     {
         try
         {
-            WriteFrame(output, AmqpFrame.AmqpType, new AmqpClosePerformative { Error = error }, scratch);
+            // The peer's open has not arrived, so the close must fit the minimum maximum frame size. A
+            // description too long for it is left out; the condition still travels.
+            if (!TryEncodeFrame(AmqpFrame.AmqpType, new AmqpClosePerformative { Error = error }, scratch))
+            {
+                TryEncodeFrame(AmqpFrame.AmqpType, new AmqpClosePerformative { Error = new AmqpError(error.Condition) }, scratch);
+            }
+
+            output.Write(scratch.WrittenSpan);
             await FlushAsync(output, CancellationToken.None).ConfigureAwait(false);
         }
         catch (Exception exception) when (exception is AmqpException or InvalidOperationException or System.IO.IOException or ObjectDisposedException)
