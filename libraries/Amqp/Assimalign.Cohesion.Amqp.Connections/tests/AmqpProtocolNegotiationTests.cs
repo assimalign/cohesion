@@ -1,5 +1,4 @@
 using System;
-using System.Net;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -7,69 +6,39 @@ using Shouldly;
 
 using Xunit;
 
+using Assimalign.Cohesion.Connections.InMemory;
+
 namespace Assimalign.Cohesion.Amqp.Connections.Tests;
 
 public class AmqpProtocolNegotiationTests
 {
     private static readonly TimeSpan _testTimeout = TimeSpan.FromSeconds(5);
 
-    private static readonly EndPoint _testEndPoint = new IPEndPoint(IPAddress.Loopback, 5672);
-
-    private static readonly byte[] _amqp10HeaderBytes = { (byte)'A', (byte)'M', (byte)'Q', (byte)'P', 0, 1, 0, 0 };
-
-    private static readonly byte[] _sasl10HeaderBytes = { (byte)'A', (byte)'M', (byte)'Q', (byte)'P', 3, 1, 0, 0 };
-
-    private static AmqpServerTransport CreateServerTransport(TestConnection carrier, AmqpTransportOptions? options = null)
+    [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - NegotiateAsync: Should exchange the protocol headers on call when auto-negotiation is disabled")]
+    public async Task NegotiateAsync_WithoutAutoNegotiation_ShouldExchangeProtocolHeaders()
     {
+        // Arrange
+        using CancellationTokenSource timeout = new(_testTimeout);
+        TestConnection carrier = new();
         TestConnectionListener listener = new();
         listener.Enqueue(carrier);
-
-        return new AmqpServerTransport(listener, options);
-    }
-
-    [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - OpenAsync: Should exchange protocol headers when auto-negotiation is enabled")]
-    public async Task OpenAsync_WithAutoNegotiate_ShouldExchangeProtocolHeaders()
-    {
-        // Arrange
-        using CancellationTokenSource timeout = new(_testTimeout);
-        TestConnection carrier = new();
-        await carrier.WritePeerAsync(_amqp10HeaderBytes, timeout.Token);
-        await using AmqpServerTransport transport = CreateServerTransport(carrier);
-        AmqpConnection connection = await transport.AcceptAsync(timeout.Token);
-
-        // Act
-        AmqpConnectionContext context = await connection.OpenAsync(timeout.Token);
-        byte[] sentToPeer = await carrier.ReadBufferedPeerBytesAsync(timeout.Token);
-
-        // Assert
-        context.LocalProtocolHeader.ShouldBe(AmqpProtocolHeader.Amqp10);
-        context.RemoteProtocolHeader.ShouldBe(AmqpProtocolHeader.Amqp10);
-        sentToPeer.ShouldBe(_amqp10HeaderBytes);
-    }
-
-    [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - OpenAsync: Should not exchange bytes until NegotiateAsync when auto-negotiation is disabled")]
-    public async Task OpenAsync_WithoutAutoNegotiate_ShouldNotExchangeBytesUntilNegotiateAsync()
-    {
-        // Arrange
-        using CancellationTokenSource timeout = new(_testTimeout);
-        TestConnection carrier = new();
-        AmqpTransportOptions options = new() { AutoNegotiateProtocolHeader = false };
-        await using AmqpServerTransport transport = CreateServerTransport(carrier, options);
-        AmqpConnection connection = await transport.AcceptAsync(timeout.Token);
-
-        // Act
-        AmqpConnectionContext context = await connection.OpenAsync(timeout.Token);
+        await using AmqpConnectionListener amqp = AmqpConnectionListener.Create(listener, new AmqpConnectionListenerOptions
+        {
+            AutoNegotiateProtocolHeader = false
+        });
+        await using IAmqpConnection connection = await amqp.AcceptAsync(timeout.Token);
         bool bytesBeforeNegotiation = carrier.HasBufferedPeerBytes;
+        await carrier.WritePeerAsync(AmqpTestWire.Amqp10Header, timeout.Token);
 
-        await carrier.WritePeerAsync(_amqp10HeaderBytes, timeout.Token);
-        AmqpProtocolHeader negotiated = await context.NegotiateAsync(timeout.Token);
+        // Act
+        AmqpProtocolHeader negotiated = await connection.NegotiateAsync(timeout.Token);
         byte[] sentToPeer = await carrier.ReadBufferedPeerBytesAsync(timeout.Token);
 
         // Assert
         bytesBeforeNegotiation.ShouldBeFalse();
-        context.RemoteProtocolHeader.ShouldBe(AmqpProtocolHeader.Amqp10);
         negotiated.ShouldBe(AmqpProtocolHeader.Amqp10);
-        sentToPeer.ShouldBe(_amqp10HeaderBytes);
+        connection.RemoteProtocolHeader.ShouldBe(AmqpProtocolHeader.Amqp10);
+        sentToPeer.ShouldBe(AmqpTestWire.Amqp10Header);
     }
 
     [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - NegotiateAsync: Should return the cached remote header on repeated calls")]
@@ -78,14 +47,15 @@ public class AmqpProtocolNegotiationTests
         // Arrange
         using CancellationTokenSource timeout = new(_testTimeout);
         TestConnection carrier = new();
-        await carrier.WritePeerAsync(_amqp10HeaderBytes, timeout.Token);
-        await using AmqpServerTransport transport = CreateServerTransport(carrier);
-        AmqpConnection connection = await transport.AcceptAsync(timeout.Token);
-        AmqpConnectionContext context = await connection.OpenAsync(timeout.Token);
+        await carrier.WritePeerAsync(AmqpTestWire.Amqp10Header, timeout.Token);
+        TestConnectionListener listener = new();
+        listener.Enqueue(carrier);
+        await using AmqpConnectionListener amqp = AmqpConnectionListener.Create(listener);
+        await using IAmqpConnection connection = await amqp.AcceptAsync(timeout.Token);
         await carrier.ReadBufferedPeerBytesAsync(timeout.Token);
 
         // Act
-        AmqpProtocolHeader renegotiated = await context.NegotiateAsync(timeout.Token);
+        AmqpProtocolHeader renegotiated = await connection.NegotiateAsync(timeout.Token);
 
         // Assert
         renegotiated.ShouldBe(AmqpProtocolHeader.Amqp10);
@@ -98,67 +68,99 @@ public class AmqpProtocolNegotiationTests
         // Arrange
         using CancellationTokenSource timeout = new(_testTimeout);
         TestConnection carrier = new();
-        await carrier.WritePeerAsync(_sasl10HeaderBytes, timeout.Token);
-        AmqpTransportOptions options = new() { InitialProtocolHeader = AmqpProtocolHeader.Sasl10 };
-        await using AmqpServerTransport transport = CreateServerTransport(carrier, options);
-        AmqpConnection connection = await transport.AcceptAsync(timeout.Token);
+        await carrier.WritePeerAsync(AmqpTestWire.Sasl10Header, timeout.Token);
+        TestConnectionListener listener = new();
+        listener.Enqueue(carrier);
+        await using AmqpConnectionListener amqp = AmqpConnectionListener.Create(listener, new AmqpConnectionListenerOptions
+        {
+            InitialProtocolHeader = AmqpProtocolHeader.Sasl10
+        });
+        await using IAmqpConnection connection = await amqp.AcceptAsync(timeout.Token);
+        AmqpProtocolHeader? saslHeader = connection.RemoteProtocolHeader;
+        await carrier.WritePeerAsync(AmqpTestWire.Amqp10Header, timeout.Token);
 
         // Act
-        AmqpConnectionContext context = await connection.OpenAsync(timeout.Token);
-        AmqpProtocolHeader saslHeader = context.RemoteProtocolHeader!.Value;
-
-        await carrier.WritePeerAsync(_amqp10HeaderBytes, timeout.Token);
-        AmqpProtocolHeader amqpHeader = await context.SwitchProtocolAsync(AmqpProtocolHeader.Amqp10, timeout.Token);
+        AmqpProtocolHeader amqpHeader = await connection.SwitchProtocolAsync(AmqpProtocolHeader.Amqp10, timeout.Token);
         byte[] sentToPeer = await carrier.ReadBufferedPeerBytesAsync(timeout.Token);
 
         // Assert
         saslHeader.ShouldBe(AmqpProtocolHeader.Sasl10);
         amqpHeader.ShouldBe(AmqpProtocolHeader.Amqp10);
-        context.LocalProtocolHeader.ShouldBe(AmqpProtocolHeader.Amqp10);
-        context.RemoteProtocolHeader.ShouldBe(AmqpProtocolHeader.Amqp10);
-        sentToPeer.ShouldBe(new byte[] { (byte)'A', (byte)'M', (byte)'Q', (byte)'P', 3, 1, 0, 0, (byte)'A', (byte)'M', (byte)'Q', (byte)'P', 0, 1, 0, 0 });
+        connection.LocalProtocolHeader.ShouldBe(AmqpProtocolHeader.Amqp10);
+        connection.RemoteProtocolHeader.ShouldBe(AmqpProtocolHeader.Amqp10);
+        sentToPeer.ShouldBe(AmqpTestWire.Combine(AmqpTestWire.Sasl10Header, AmqpTestWire.Amqp10Header));
     }
 
-    [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - OpenAsync: Should negotiate both sides over cross-wired carrier peers")]
-    public async Task OpenAsync_OnCrossWiredPeers_ShouldNegotiateBothSides()
-    {
-        // Arrange
-        using CancellationTokenSource timeout = new(_testTimeout);
-        (TestConnection clientCarrier, TestConnection serverCarrier) = TestConnection.CreatePair();
-
-        TestConnectionListener listener = new();
-        listener.Enqueue(serverCarrier);
-        TestConnectionFactory factory = new();
-        factory.Enqueue(clientCarrier);
-
-        await using AmqpServerTransport server = new(listener);
-        await using AmqpClientTransport client = new(factory, _testEndPoint);
-
-        AmqpConnection serverConnection = await server.AcceptAsync(timeout.Token);
-        AmqpConnection clientConnection = await client.ConnectAsync(timeout.Token);
-
-        // Act
-        Task<AmqpConnectionContext> serverOpen = serverConnection.OpenAsync(timeout.Token).AsTask();
-        Task<AmqpConnectionContext> clientOpen = clientConnection.OpenAsync(timeout.Token).AsTask();
-        await Task.WhenAll(serverOpen, clientOpen);
-
-        // Assert
-        (await serverOpen).RemoteProtocolHeader.ShouldBe(AmqpProtocolHeader.Amqp10);
-        (await clientOpen).RemoteProtocolHeader.ShouldBe(AmqpProtocolHeader.Amqp10);
-    }
-
-    [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - OpenAsync: Should surface a protocol error when the remote header is truncated")]
-    public async Task OpenAsync_OnTruncatedRemoteHeader_ShouldThrowAmqpProtocolException()
+    [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - SendAsync: Should encode SASL frames while the connection is in the SASL phase")]
+    public async Task SendAsync_InSaslPhase_ShouldWriteSaslFrame()
     {
         // Arrange
         using CancellationTokenSource timeout = new(_testTimeout);
         TestConnection carrier = new();
-        await carrier.WritePeerAsync(new byte[] { (byte)'A', (byte)'M', (byte)'Q' }, timeout.Token);
-        carrier.CompletePeerOutput();
-        await using AmqpServerTransport transport = CreateServerTransport(carrier);
-        AmqpConnection connection = await transport.AcceptAsync(timeout.Token);
+        await carrier.WritePeerAsync(AmqpTestWire.Sasl10Header, timeout.Token);
+        TestConnectionListener listener = new();
+        listener.Enqueue(carrier);
+        await using AmqpConnectionListener amqp = AmqpConnectionListener.Create(listener, new AmqpConnectionListenerOptions
+        {
+            InitialProtocolHeader = AmqpProtocolHeader.Sasl10
+        });
+        await using IAmqpConnection connection = await amqp.AcceptAsync(timeout.Token);
 
-        // Act + Assert
-        await Should.ThrowAsync<AmqpProtocolException>(async () => await connection.OpenAsync(timeout.Token));
+        // Act
+        await connection.SendAsync(
+            new AmqpFrame(0, new AmqpSaslMechanismsPerformative { SaslServerMechanisms = new AmqpSymbol[] { "ANONYMOUS" } }),
+            timeout.Token);
+        byte[] outbound = await carrier.ReadBufferedPeerBytesAsync(timeout.Token);
+
+        // Assert
+        outbound.AsSpan(0, 8).ToArray().ShouldBe(AmqpTestWire.Sasl10Header);
+        AmqpFrame frame = AmqpFrameCodec.Decode(outbound.AsSpan(8), AmqpFrameType.Sasl);
+        frame.Performative.ShouldBeOfType<AmqpSaslMechanismsPerformative>()
+            .SaslServerMechanisms.ShouldHaveSingleItem().ShouldBe((AmqpSymbol)"ANONYMOUS");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - ConnectAsync: Should negotiate both ends of a single-stream carrier and carry frames between them")]
+    public async Task ConnectAsync_OnInMemoryCarrier_ShouldNegotiateBothEndsAndCarryFrames()
+    {
+        // Arrange
+        using CancellationTokenSource timeout = new(_testTimeout);
+        InMemoryConnectionListener carrierListener = new();
+        await using AmqpConnectionListener server = AmqpConnectionListener.Create(carrierListener);
+        AmqpConnectionFactory client = AmqpConnectionFactory.Create(carrierListener.CreateFactory());
+        Task<IAmqpConnection> accept = server.AcceptAsync(timeout.Token).AsTask();
+
+        // Act
+        await using IAmqpConnection clientConnection = await client.ConnectAsync(carrierListener.EndPoint, timeout.Token);
+        await using IAmqpConnection serverConnection = await accept;
+        await clientConnection.SendAsync(new AmqpFrame(0, new AmqpOpenPerformative { ContainerId = "client-container" }), timeout.Token);
+        AmqpFrame received = await AmqpTestWire.ReceiveFrameAsync(serverConnection, timeout.Token);
+
+        // Assert
+        clientConnection.RemoteProtocolHeader.ShouldBe(AmqpProtocolHeader.Amqp10);
+        serverConnection.RemoteProtocolHeader.ShouldBe(AmqpProtocolHeader.Amqp10);
+        received.Performative.ShouldBeOfType<AmqpOpenPerformative>().ContainerId.ShouldBe("client-container");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - ConnectAsync: Should negotiate both ends of a multiplexed carrier over one stream and carry frames between them")]
+    public async Task ConnectAsync_OnInMemoryMultiplexedCarrier_ShouldNegotiateBothEndsAndCarryFrames()
+    {
+        // Arrange
+        using CancellationTokenSource timeout = new(_testTimeout);
+        InMemoryMultiplexedConnectionListener carrierListener = new();
+        await using AmqpConnectionListener server = AmqpConnectionListener.Create(carrierListener);
+        AmqpConnectionFactory client = AmqpConnectionFactory.Create(carrierListener.CreateFactory());
+        Task<IAmqpConnection> accept = server.AcceptAsync(timeout.Token).AsTask();
+
+        // Act
+        await using IAmqpConnection clientConnection = await client.ConnectAsync(carrierListener.EndPoint, timeout.Token);
+        await using IAmqpConnection serverConnection = await accept;
+        await serverConnection.SendAsync(new AmqpFrame(0, new AmqpOpenPerformative { ContainerId = "server-container" }), timeout.Token);
+        AmqpFrame received = await AmqpTestWire.ReceiveFrameAsync(clientConnection, timeout.Token);
+
+        // Assert
+        clientConnection.RemoteProtocolHeader.ShouldBe(AmqpProtocolHeader.Amqp10);
+        serverConnection.RemoteProtocolHeader.ShouldBe(AmqpProtocolHeader.Amqp10);
+        clientConnection.Capabilities.IsMultiplexed.ShouldBeFalse();
+        received.Performative.ShouldBeOfType<AmqpOpenPerformative>().ContainerId.ShouldBe("server-container");
     }
 }

@@ -10,4 +10,25 @@
   <data name="FrameSizeInvalid" xml:space="preserve">
     <value>The AMQP maximum frame size must be at least 512 bytes.</value>
   </data>
+  <data name="CarrierNotReliableStream" xml:space="preserve">
+    <value>AMQP requires a carrier that delivers a reliable, ordered byte stream.</value>
+  </data>
+  <data name="CarrierStreamNotAcquired" xml:space="preserve">
+    <value>The AMQP stream of the multiplexed carrier has not been acquired.</value>
+  </data>
+  <data name="CarrierStreamNotBidirectional" xml:space="preserve">
+    <value>The first stream the peer opened on the multiplexed carrier is not bidirectional, so it cannot carry an AMQP connection.</value>
+  </data>
+  <data name="ProtocolHeaderNotNegotiated" xml:space="preserve">
+    <value>AMQP protocol header negotiation must be performed before exchanging frames.</value>
+  </data>
+  <data name="ProtocolHeaderIncomplete" xml:space="preserve">
+    <value>The carrier stream ended before the AMQP protocol header was fully received.</value>
+  </data>
+  <data name="FrameIncomplete" xml:space="preserve">
+    <value>The carrier stream ended with an incomplete AMQP frame.</value>
+  </data>
+  <data name="HandshakeTimedOut" xml:space="preserve">
+    <value>The AMQP connection was not established within the handshake timeout of {0}.</value>
+  </data>
 </root>

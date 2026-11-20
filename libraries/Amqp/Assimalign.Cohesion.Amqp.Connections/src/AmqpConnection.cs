@@ -1,4 +1,4 @@
-using System;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -7,51 +7,33 @@ using Assimalign.Cohesion.Connections;
 namespace Assimalign.Cohesion.Amqp.Connections;
 
 /// <summary>
-/// Represents an AMQP connection layered on top of a carrier connection produced by a lower-level transport.
+/// Provides the guided base class for implementing <see cref="IAmqpConnection"/>, sharing the
+/// <see cref="DuplexConnection"/> lifecycle and lazy feature plumbing.
 /// </summary>
 /// <remarks>
-/// The connection wraps either a single-stream carrier (the carrier <see cref="IDuplexConnection"/> itself)
-/// or a multiplexed carrier (an <see cref="IMultiplexedConnection"/> whose AMQP stream is acquired
-/// when the connection context is opened). Use <see cref="OpenAsync(CancellationToken)"/> to obtain
-/// the <see cref="AmqpConnectionContext"/> used to negotiate protocol headers and exchange frames.
+/// <see cref="AmqpConnectionListener"/> and <see cref="AmqpConnectionFactory"/> produce connections of
+/// their own. Derive from this class for another source of AMQP connections, such as a test double or a
+/// carrier those types do not cover.
 /// </remarks>
-public abstract class AmqpConnection : IAmqpConnection
+public abstract class AmqpConnection : DuplexConnection, IAmqpConnection
 {
-    /// <inheritdoc cref="IAmqpConnection.Id" />
-    public abstract ConnectionId Id { get; }
-
-    /// <inheritdoc cref="IAmqpConnection.State" />
-    public abstract ConnectionState State { get; }
-
-    /// <inheritdoc cref="IAmqpConnection.ConnectionClosed" />
-    public abstract CancellationToken ConnectionClosed { get; }
-
-    /// <inheritdoc cref="IAmqpConnection.Abort(Exception?)" />
-    public abstract void Abort(Exception? reason = null);
-
-    /// <summary>
-    /// Opens the AMQP connection context used to negotiate the protocol header and exchange frames.
-    /// </summary>
-    /// <returns>The opened AMQP connection context.</returns>
-    public abstract AmqpConnectionContext Open();
-
-    /// <summary>
-    /// Opens the AMQP connection context used to negotiate the protocol header and exchange frames.
-    /// </summary>
-    /// <param name="cancellationToken">The cancellation token for the open operation.</param>
-    /// <returns>The opened AMQP connection context.</returns>
-    public abstract ValueTask<AmqpConnectionContext> OpenAsync(CancellationToken cancellationToken = default);
+    /// <inheritdoc />
+    public abstract AmqpProtocolHeader LocalProtocolHeader { get; }
 
     /// <inheritdoc />
-    public abstract ValueTask DisposeAsync();
+    public abstract AmqpProtocolHeader? RemoteProtocolHeader { get; }
 
-    IAmqpConnectionContext IAmqpConnection.Open()
-    {
-        return Open();
-    }
+    /// <inheritdoc />
+    public abstract ValueTask<AmqpProtocolHeader> NegotiateAsync(CancellationToken cancellationToken = default);
 
-    async ValueTask<IAmqpConnectionContext> IAmqpConnection.OpenAsync(CancellationToken cancellationToken)
-    {
-        return await OpenAsync(cancellationToken).ConfigureAwait(false);
-    }
+    /// <inheritdoc />
+    public abstract ValueTask<AmqpProtocolHeader> SwitchProtocolAsync(
+        AmqpProtocolHeader protocolHeader,
+        CancellationToken cancellationToken = default);
+
+    /// <inheritdoc />
+    public abstract IAsyncEnumerable<AmqpFrame> ReceiveAsync(CancellationToken cancellationToken = default);
+
+    /// <inheritdoc />
+    public abstract ValueTask SendAsync(AmqpFrame frame, CancellationToken cancellationToken = default);
 }

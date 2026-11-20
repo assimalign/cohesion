@@ -23,8 +23,8 @@ internal sealed class TestConnection : MultiplexedConnectionStream
     private readonly IDuplexConnection _self;
     private readonly IDuplexConnection _peer;
     private Exception? _abortReason;
-    private bool _isAborted;
-    private bool _isDisposed;
+    private volatile bool _isAborted;
+    private volatile bool _isDisposed;
 
     public TestConnection(ConnectionCapabilities? capabilities = null)
         : this(CreateEndPointedPair(capabilities))
@@ -38,7 +38,7 @@ internal sealed class TestConnection : MultiplexedConnectionStream
     }
 
     /// <summary>
-    /// Gets the default carrier capabilities accepted by the AMQP transports:
+    /// Gets the default carrier capabilities the AMQP listener and factory accept:
     /// a reliable, ordered, single-stream byte stream.
     /// </summary>
     public static ConnectionCapabilities DefaultCapabilities => InMemoryConnectionPair.DefaultCapabilities;
@@ -91,6 +91,13 @@ internal sealed class TestConnection : MultiplexedConnectionStream
 
     public bool InputCompleted { get; set; }
 
+    /// <summary>
+    /// Gets or sets the direction the double reports, so a test can play a unidirectional stream.
+    /// </summary>
+    public ConnectionDirection StreamDirection { get; set; } = ConnectionDirection.Bidirectional;
+
+    public override ConnectionDirection Direction => StreamDirection;
+
     public override bool IsInputCompleted => InputCompleted;
 
     public override ConnectionId Id => _self.Id;
@@ -108,6 +115,16 @@ internal sealed class TestConnection : MultiplexedConnectionStream
     public override ConnectionState State => _self.State;
 
     public override CancellationToken ConnectionClosed => _self.ConnectionClosed;
+
+    /// <summary>
+    /// Returns a task that completes when the connection's lifetime ends (close, abort, or disposal).
+    /// </summary>
+    public Task WhenClosedAsync()
+    {
+        TaskCompletionSource closed = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        ConnectionClosed.Register(static state => ((TaskCompletionSource)state!).TrySetResult(), closed);
+        return closed.Task;
+    }
 
     /// <summary>
     /// Plays the remote peer by writing bytes that arrive on the connection's <see cref="Input"/>.
