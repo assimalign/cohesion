@@ -686,8 +686,9 @@ The model, the registry, and the stored layout are in the root, and nothing call
 - The builder has no verb for a code-first registration yet. The one designed for it is
   `builder.AddClient(IdentityClientId.FromName("orders-api"), client => { ... })`, where the
   callback fills an `IdentityClientDescriptor`. It replaces today's `AddClient(Action<IdentityHubClientOptions>)`
-  in the change that moves the token endpoint onto the registry (#1913), because a verb that
-  registers a client the token endpoint does not serve would be a trap.
+  in the change that moves the token endpoint onto the registry (#1913; owner decision,
+  2026-11-20), because a verb that registers a client the token endpoint does not serve would be
+  a trap.
 - No web API manages stored registrations (#1924). Run-time creation exists below it:
   `IIdentityClientRegistry.TryAddAsync`. The endpoint derives the identifier with `FromName` when
   the caller gives a name, which is what makes the registration adoptable.
@@ -781,7 +782,7 @@ and the app registration work under #69 (delivered here as #1923):
 | The client identifier | Decided 2026-11-20: a GUID. One defined in code is derived from a name with `FromName`, so code adopts a registration created at run time under that name (*Deterministic identifiers*) | Nothing. The namespace GUID and the lowercasing are fixed from the first release |
 | What adoption does to what the stored registration held | Code wins whole: from the deployment that adopts a registration, only the code definition's redirects, permissions, and credentials are served. A secret issued through the API stops being accepted | The owner's confirmation. The alternative, merging stored credentials into a locked registration, was refused on 2026-11-19 for locked registrations in general |
 | Whether a registration keeps the name its identifier was derived from | It does not. A message names a registration by display name and identifier, and by a bare GUID when it has no display name | The owner. Keeping the name adds a field to the model and the stored layout, and leaves a registration created under a random identifier without one |
-| The builder verb for a code-first registration | Designed, not built: `AddClient(IdentityClientId, Action<IdentityClientDescriptor>)` | #1913, in the change that moves the token endpoint onto the registry, unless the owner wants the verb sooner |
+| The builder verb for a code-first registration | Decided 2026-11-20: `AddClient(IdentityClientId, Action<IdentityClientDescriptor>)` lands in the change that moves the token endpoint onto the registry, and not before. Two alternatives were refused: moving the token endpoint in the pull request that added the registry, and shipping the verb ahead of the endpoint, where a client it adds could get no token | #1913 |
 | Where the registration model lives | In the root, because every part of the hub reads it | The owner's confirmation. `resource-areas.md` keeps feature abstractions out of an area root; the alternative is an `IdentityHub.Clients` feature package that the root's builder contract could then not name |
 | What "locked" covers | Decided 2026-11-19: the whole registration, credentials included. Rotating a locked registration's credentials through the API was refused (*Code-first objects are locked*) | Nothing |
 | The cost of a chosen secret | PBKDF2-HMAC-SHA256, 600,000 iterations; 1 for a generated secret | The owner's confirmation, and the rate limit on the endpoint that verifies secrets (#1913) |
