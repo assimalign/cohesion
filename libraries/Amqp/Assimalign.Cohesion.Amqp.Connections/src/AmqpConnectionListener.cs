@@ -1,9 +1,12 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
+using System.Globalization;
 using System.Net;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.Amqp;
 using Assimalign.Cohesion.Amqp.Connections.Internal;
 using Assimalign.Cohesion.Connections;
 
@@ -19,12 +22,13 @@ namespace Assimalign.Cohesion.Amqp.Connections;
 /// <see cref="ConnectionCapabilities.IsOrdered"/>). Over a single-stream carrier each accepted
 /// <see cref="IDuplexConnection"/> carries one AMQP connection. Over a multiplexed carrier each accepted
 /// <see cref="IMultiplexedConnection"/> carries one AMQP connection, on the first stream its peer opens.
+/// TLS is the carrier's concern: compose the carrier listener with a TLS layer first.
 /// </para>
 /// <para>
-/// <see cref="ConnectionListener{TConnection}.AcceptAsync(CancellationToken)"/> returns established
-/// connections: a multiplexed carrier's AMQP stream has been accepted and, with
-/// <see cref="AmqpConnectionListenerOptions.AutoNegotiateProtocolHeader"/>, the protocol headers have been
-/// exchanged. Establishment runs on the Connections layered listener: each connection on its own task, at
+/// <see cref="ConnectionListener{TConnection}.AcceptAsync(CancellationToken)"/> returns open connections:
+/// the protocol headers, the SASL exchange when
+/// <see cref="AmqpConnectionListenerOptions.SaslMechanisms"/> configures one, and both <c>open</c> frames
+/// are done. Establishment runs on the Connections layered listener: each connection on its own task, at
 /// most <see cref="AmqpConnectionListenerOptions.MaxConcurrentHandshakes"/> at a time, each within
 /// <see cref="AmqpConnectionListenerOptions.HandshakeTimeout"/>, and connections are returned in the order
 /// their establishment completes. A connection whose establishment fails or times out is disposed and
@@ -38,16 +42,18 @@ namespace Assimalign.Cohesion.Amqp.Connections;
 /// does not close connections already handed out; their owners do.
 /// </para>
 /// </remarks>
-[global::System.Diagnostics.DebuggerDisplay("AmqpConnectionListener {Id,nq}")]
-[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
+[DebuggerDisplay("AmqpConnectionListener {Id,nq}")]
+[DebuggerTypeProxy(typeof(DebugView))]
 public sealed class AmqpConnectionListener : ConnectionListener<IAmqpConnection>, IAmqpConnectionListener
 {
     private readonly IDuplexConnectionListener _listener;
+    private readonly string _containerId;
     private int _isDisposed;
 
-    private AmqpConnectionListener(IDuplexConnectionListener listener)
+    private AmqpConnectionListener(IDuplexConnectionListener listener, string containerId)
     {
         _listener = listener;
+        _containerId = containerId;
     }
 
     /// <summary>
@@ -65,6 +71,9 @@ public sealed class AmqpConnectionListener : ConnectionListener<IAmqpConnection>
     /// </remarks>
     public ConnectionCapabilities Capabilities => _listener.Capabilities;
 
+    /// <inheritdoc />
+    public string ContainerId => _containerId;
+
     /// <summary>
     /// Creates an AMQP connection listener over a single-stream carrier listener.
     /// </summary>
@@ -72,7 +81,11 @@ public sealed class AmqpConnectionListener : ConnectionListener<IAmqpConnection>
     /// <param name="options">The establishment options, read once here; <see langword="null"/> uses the defaults.</param>
     /// <returns>The AMQP connection listener.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="listener"/> is <see langword="null"/>.</exception>
-    /// <exception cref="ArgumentException">Thrown when the carrier does not deliver a reliable, ordered byte stream.</exception>
+    /// <exception cref="ArgumentException">
+    /// Thrown when the carrier does not deliver a reliable, ordered byte stream, or when
+    /// <see cref="AmqpConnectionListenerOptions.SaslMechanisms"/> holds <see langword="null"/> or two
+    /// mechanisms with the same name.
+    /// </exception>
     public static AmqpConnectionListener Create(IDuplexConnectionListener listener, AmqpConnectionListenerOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(listener);
@@ -89,7 +102,11 @@ public sealed class AmqpConnectionListener : ConnectionListener<IAmqpConnection>
     /// <param name="options">The establishment options, read once here; <see langword="null"/> uses the defaults.</param>
     /// <returns>The AMQP connection listener.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="listener"/> is <see langword="null"/>.</exception>
-    /// <exception cref="ArgumentException">Thrown when the carrier does not deliver a reliable, ordered byte stream.</exception>
+    /// <exception cref="ArgumentException">
+    /// Thrown when the carrier does not deliver a reliable, ordered byte stream, or when
+    /// <see cref="AmqpConnectionListenerOptions.SaslMechanisms"/> holds <see langword="null"/> or two
+    /// mechanisms with the same name.
+    /// </exception>
     public static AmqpConnectionListener Create(IMultiplexedConnectionListener listener, AmqpConnectionListenerOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(listener);
@@ -142,27 +159,62 @@ public sealed class AmqpConnectionListener : ConnectionListener<IAmqpConnection>
     {
         options ??= new AmqpConnectionListenerOptions();
 
-        AmqpConnectionSettings settings = new(
-            options.InitialProtocolHeader,
-            options.AutoNegotiateProtocolHeader,
-            options.MaxFrameSize,
-            options.HandshakeTimeout);
+        IAmqpSaslServerMechanism[] mechanisms = new IAmqpSaslServerMechanism[options.SaslMechanisms.Count];
 
-        return new AmqpConnectionListener(carrier.Use(new AmqpConnectionLayer(settings), options.MaxConcurrentHandshakes));
+        options.SaslMechanisms.CopyTo(mechanisms, 0);
+
+        for (int index = 0; index < mechanisms.Length; index++)
+        {
+            IAmqpSaslServerMechanism? mechanism = mechanisms[index];
+
+            if (mechanism is null)
+            {
+                throw new ArgumentException(ErrorMessages.SaslMechanismNull, nameof(options));
+            }
+
+            for (int previous = 0; previous < index; previous++)
+            {
+                if (mechanisms[previous].Name == mechanism.Name)
+                {
+                    throw new ArgumentException(
+                        string.Format(CultureInfo.CurrentCulture, ErrorMessages.SaslMechanismDuplicate, mechanism.Name),
+                        nameof(options));
+                }
+            }
+        }
+
+        AmqpConnectionSettings settings = new()
+        {
+            ContainerId = options.ContainerId ?? AmqpConnectionSettings.CreateContainerId(),
+            MaxFrameSize = options.MaxFrameSize,
+            ChannelMax = options.ChannelMax,
+            IdleTimeout = options.IdleTimeout,
+            HandshakeTimeout = options.HandshakeTimeout,
+            ServerMechanisms = mechanisms,
+            SessionSettings = AmqpSessionSettings.From(options.SessionOptions),
+            OfferedCapabilities = options.OfferedCapabilities,
+            DesiredCapabilities = options.DesiredCapabilities,
+            Properties = options.Properties
+        };
+
+        return new AmqpConnectionListener(
+            carrier.Use(new AmqpConnectionLayer(settings), options.MaxConcurrentHandshakes),
+            settings.ContainerId);
     }
 
     private sealed class DebugView
     {
-        private readonly AmqpConnectionListener _target;
+        private readonly AmqpConnectionListener _listener;
 
-        public DebugView(AmqpConnectionListener value)
+        public DebugView(AmqpConnectionListener listener)
         {
-            _target = value;
+            _listener = listener;
         }
 
-        public ListenerId Id => _target.Id;
-        public EndPoint EndPoint => _target.EndPoint;
-        public ConnectionCapabilities Capabilities => _target.Capabilities;
-        public IReadOnlyCollection<IAmqpConnection> Connections => _target.Connections;
+        public ListenerId Id => _listener.Id;
+        public EndPoint EndPoint => _listener.EndPoint;
+        public ConnectionCapabilities Capabilities => _listener.Capabilities;
+        public string ContainerId => _listener.ContainerId;
+        public IReadOnlyCollection<IAmqpConnection> Connections => _listener.Connections;
     }
 }

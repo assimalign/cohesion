@@ -10,9 +10,10 @@ namespace Assimalign.Cohesion.Amqp.Connections;
 /// </summary>
 /// <remarks>
 /// <see cref="IConnectionListener{TConnection}.AcceptAsync(System.Threading.CancellationToken)"/> returns
-/// a connection that is ready to use. A failure that belongs to one inbound connection, such as a peer
-/// that never sends its protocol header, ends that connection only; an exception from accept means the
-/// listener itself can produce no more connections.
+/// an open connection: the protocol headers, any SASL exchange and both <c>open</c> frames are done. A
+/// failure that belongs to one inbound connection, such as a peer that never sends its protocol header,
+/// ends that connection only; an exception from accept means the listener itself can produce no more
+/// connections.
 /// </remarks>
 public interface IAmqpConnectionListener : IConnectionListener<IAmqpConnection>
 {
@@ -25,4 +26,9 @@ public interface IAmqpConnectionListener : IConnectionListener<IAmqpConnection>
     /// Gets the capabilities of the connections this listener produces.
     /// </summary>
     ConnectionCapabilities Capabilities { get; }
+
+    /// <summary>
+    /// Gets the container identifier every connection the listener accepts sends in its <c>open</c>.
+    /// </summary>
+    string ContainerId { get; }
 }

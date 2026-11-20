@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <resheader name="resmimetype"><value>text/microsoft-resx</value></resheader>
+  <resheader name="version"><value>2.0</value></resheader>
+  <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value></resheader>
+  <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value></resheader>
+  <data name="SymbolInvalid" xml:space="preserve">
+    <value>An AMQP symbol must be non-null seven-bit ASCII text.</value>
+  </data>
+  <data name="DescriptorTypeInvalid" xml:space="preserve">
+    <value>An AMQP descriptor must be a symbol or an unsigned long.</value>
+  </data>
+  <data name="MessageIdTypeInvalid" xml:space="preserve">
+    <value>An AMQP message or correlation identifier must be an unsigned long, a GUID, binary data or a string.</value>
+  </data>
+  <data name="BodySectionsEmpty" xml:space="preserve">
+    <value>An AMQP message body must have at least one section.</value>
+  </data>
+  <data name="DeliveryTagTooLong" xml:space="preserve">
+    <value>An AMQP delivery tag must be at most 32 bytes long.</value>
+  </data>
+  <data name="PlainCredentialInvalid" xml:space="preserve">
+    <value>A SASL PLAIN user name, password or authorization identity cannot contain a NUL character.</value>
+  </data>
+  <data name="CoordinatorTargetRequired" xml:space="preserve">
+    <value>The link's target must be a transaction coordinator.</value>
+  </data>
+  <data name="TransactionDeclareRefused" xml:space="preserve">
+    <value>The transaction coordinator refused to declare a transaction.</value>
+  </data>
+  <data name="TransactionDischargeRefused" xml:space="preserve">
+    <value>The transaction coordinator refused to discharge the transaction.</value>
+  </data>
+  <data name="TransactionOutcomeUnexpected" xml:space="preserve">
+    <value>The transaction coordinator answered with the unexpected outcome '{0}'.</value>
+  </data>
+</root>
