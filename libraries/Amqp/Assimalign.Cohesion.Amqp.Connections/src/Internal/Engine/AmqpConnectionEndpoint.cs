@@ -895,6 +895,20 @@ internal sealed class AmqpConnectionEndpoint : DuplexConnection, IAmqpConnection
             _idleTimer?.Dispose();
             _closeTimer?.Dispose();
 
+            if (_readLoop is not null)
+            {
+                // The connection reads nothing more, and a carrier whose disposal leaves a pending read waiting
+                // for the peer would hold the read loop open: end the read here.
+                try
+                {
+                    _carrier.Input.CancelPendingRead();
+                }
+                catch (Exception exception) when (exception is InvalidOperationException or ObjectDisposedException)
+                {
+                    // The read loop already completed the carrier's input.
+                }
+            }
+
             try
             {
                 await _carrier.DisposeAsync().ConfigureAwait(false);
