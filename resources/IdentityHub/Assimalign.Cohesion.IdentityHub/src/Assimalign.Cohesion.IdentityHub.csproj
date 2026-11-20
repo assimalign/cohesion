@@ -37,5 +37,34 @@
 						   ObjectHasImplicitOperators="true"
 						   ObjectHasIsValidMethod="true"
 						   ObjectComparison="Ordinal" />
+		<!-- The app registration vocabulary. Each compares ordinally: RFC 6749 treats a client identifier and a scope token as exact strings, and RFC 7519 compares an audience the same way. -->
+		<CohesionValueType Include="ValueObjects\IdentityClientId.cs"
+						   ObjectRuntimeType="String"
+						   ObjectNamespace="Assimalign.Cohesion.IdentityHub"
+						   ObjectAccessModifier="public"
+						   ObjectHasImplicitOperators="true"
+						   ObjectHasIsValidMethod="true"
+						   ObjectComparison="Ordinal" />
+		<CohesionValueType Include="ValueObjects\IdentityClientCredentialId.cs"
+						   ObjectRuntimeType="String"
+						   ObjectNamespace="Assimalign.Cohesion.IdentityHub"
+						   ObjectAccessModifier="public"
+						   ObjectHasImplicitOperators="true"
+						   ObjectHasIsValidMethod="true"
+						   ObjectComparison="Ordinal" />
+		<CohesionValueType Include="ValueObjects\IdentityClientPermissionName.cs"
+						   ObjectRuntimeType="String"
+						   ObjectNamespace="Assimalign.Cohesion.IdentityHub"
+						   ObjectAccessModifier="public"
+						   ObjectHasImplicitOperators="true"
+						   ObjectHasIsValidMethod="true"
+						   ObjectComparison="Ordinal" />
+		<CohesionValueType Include="ValueObjects\IdentityClientAudience.cs"
+						   ObjectRuntimeType="String"
+						   ObjectNamespace="Assimalign.Cohesion.IdentityHub"
+						   ObjectAccessModifier="public"
+						   ObjectHasImplicitOperators="true"
+						   ObjectHasIsValidMethod="true"
+						   ObjectComparison="Ordinal" />
 	</ItemGroup>
 </Project>

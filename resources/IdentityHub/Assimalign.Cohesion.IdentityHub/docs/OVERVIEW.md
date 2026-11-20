@@ -2,14 +2,19 @@
 
 ## Summary
 
-The IdentityHub area root. It defines the two seams the rest of the area builds against:
+The IdentityHub area root. IdentityHub is a code-first identity server: its identity objects are
+defined in code, and the same objects can be created at run time through an API. The root defines
+the two seams the rest of the area builds against, and the first of those objects:
 
 - **The application seam**: the code-first composition and lifecycle contracts of an IdentityHub
   resource. The concrete issuer is supplied by `Assimalign.Cohesion.IdentityHub.Hosting`.
 - **The store seam**: `IIdentityHubStore`, the one contract between the hub and the data layer
   that keeps its state. The hub depends on no concrete store.
+- **App registrations**: `IIdentityClient`, an application the hub knows as a client, as an API,
+  or as both, and `IIdentityClientRegistry`, which serves the registrations defined in code
+  (locked) over the ones kept in the store.
 
-The reasoning behind both is in [DESIGN.md](./DESIGN.md).
+The reasoning behind all three is in [DESIGN.md](./DESIGN.md).
 
 ## Dependencies
 
@@ -26,6 +31,50 @@ never `Assimalign.Cohesion.IdentityHub.Hosting` (COHRES001).
 - `Build()` produces an `IIdentityHubApplication`, which exposes `Context`, `StartAsync`, and `StopAsync`.
 
 At least one grant and one declared audience are required for every registered client. The code-first registration verbs ship here, and Hosting issues tokens for the clients they register.
+
+`AddAudience`, `AddClient`, and `IdentityHubClientOptions` predate app registrations and are
+transitional: they are what Hosting runs on until it adopts the registry.
+
+### App registrations
+
+| Type | Role |
+| --- | --- |
+| `IIdentityClient`, `IdentityClient` | A registration and its one implementation, created by `IdentityClient.Create(descriptor)`, which checks every rule |
+| `IdentityClientDescriptor` | The mutable definition: set it with an object initializer, or copy one with `From` to edit a stored registration |
+| `IIdentityClientRegistry`, `IdentityClientRegistry` | Find by identifier or audience, list, and the conditional writes. Created over a store and the registrations defined in code |
+| `IdentityClientPage`, `IdentityClientWriteResult`, `IdentityClientWriteStatus` | A page of a listing, and the outcome of a write: `Written`, `Removed`, `Locked`, `IdConflict`, `VersionConflict`, `AudienceConflict` |
+| `IdentityClientGrants` | The grants an application may use |
+| `IdentityClientRedirect`, `IdentityClientPlatform` | A redirect URI, matched exactly, and the kind of application it returns to |
+| `IdentityClientCredential` and `IdentityClientSecretCredential`, `IdentityClientCertificateCredential`, `IdentityClientFederatedCredential` | What an application proves its identity with. A secret is kept only as a salted PBKDF2 verifier |
+| `IdentityClientScope`, `IdentityClientRole`, `IdentityClientRoleMembers` | What a registration's API exposes: delegated scopes, and roles for users or applications |
+| `IdentityClientPermission`, `IdentityClientPermissionKind` | A scope or role, of another registration or its own, that a registration may be issued |
+| `IdentityClientId`, `IdentityClientCredentialId`, `IdentityClientPermissionName`, `IdentityClientAudience` | Generated value objects; each carries its grammar in `IsValid` |
+
+```csharp
+IdentityClientRegistry registry = IdentityClientRegistry.Create(store,
+[
+    IdentityClient.Create(new()
+    {
+        Id = "orders-api",
+        Audiences = { "api://orders" },
+        Scopes = { IdentityClientScope.Create("orders.read") },
+    }),
+    IdentityClient.Create(new()
+    {
+        Id = "orders-web",
+        Grants = IdentityClientGrants.AuthorizationCode | IdentityClientGrants.RefreshToken,
+        Redirects = { IdentityClientRedirect.Web("https://orders.example/signin") },
+        Permissions = { IdentityClientPermission.Delegated("orders-api", "orders.read") },
+    }),
+]);
+
+IIdentityClient? web = await registry.FindAsync("orders-web", cancellationToken);   // web.IsLocked is true
+IdentityClientWriteResult result = await registry.TryAddAsync(runtimeClient, cancellationToken);
+```
+
+A registration defined in code is locked: it is never written to the store, and every write that
+names it is answered `Locked`. A registration added through the registry is stored, and changes
+only at the version that was read.
 
 ### Store seam
 
@@ -61,11 +110,13 @@ value is hashed before it becomes a key (DESIGN.md, "Security rules").
 
 ### What is not here yet
 
-Nothing consumes the store seam today. `IdentityHub.Hosting` still keeps its device
-authorizations, signing key, and clients in its own internal types, and the builder has no verb
-for a store. Durable stores are separate packages that do not exist yet. Both are tracked as
-follow-up work items, and DESIGN.md lists the decisions that are still open, tenancy in the record
-address first among them.
+Only the app registrations consume the store seam today, and nothing consumes the registrations.
+`IdentityHub.Hosting` still keeps its device authorizations, signing key, and clients in its own
+internal types and issues tokens from `AddClient`: a registration defined with
+`IdentityClient.Create` is not yet a client the token endpoint knows. The builder has no verb for
+a store or a registry, no web API manages stored registrations, and durable stores are separate
+packages that do not exist yet. Each is tracked as a follow-up work item, and DESIGN.md lists the
+decisions that are still open, tenancy in the record address first among them.
 
 ## Hosting-free application contract (O34)
 

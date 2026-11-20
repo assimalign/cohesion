@@ -6,6 +6,8 @@ The application builder configures a minimal code-first OpenID Connect issuer wi
 
 The hub keeps its state behind one contract, `IIdentityHubStore`, which the area root defines. The hub depends on no concrete store: a store package implements the contract for one medium, and the root ships an in-memory store for tests and single-node use. The issuer in `IdentityHub.Hosting` does not run on the store yet; that is the next increment.
 
+IdentityHub is code-first: its identity objects are defined in code, and the same objects can be created at run time through an API. An object defined in code is locked, which means it is read like any other and changes only in the code. App registrations are the first such object. The root defines `IIdentityClient`, one application as a client, an API, or both, in the shape of a Microsoft Entra app registration, and `IIdentityClientRegistry`, which serves the registrations defined in code over the ones kept in the store. The issuer does not read the registry yet either.
+
 The old application model's integration, `IdentityHub.Hosting.ApplicationModel` (`builder.Services.AddResource(...)`), was removed with the old model. Its replacement is the resource-provider design in `fabric/`.
 
 ## Project map
@@ -45,7 +47,7 @@ collapsed above, is in [docs/DEPENDENCIES.md](../../docs/DEPENDENCIES.md).
 
 ## Projects
 
-- `Assimalign.Cohesion.IdentityHub` is the area root. It defines the application and builder contracts, the store seam (`IIdentityHubStore`, the record vocabulary, the typed record set, the in-memory store), and the area's exception root, alongside the earlier identity domain contracts.
+- `Assimalign.Cohesion.IdentityHub` is the area root. It defines the application and builder contracts, the store seam (`IIdentityHubStore`, the record vocabulary, the typed record set, the in-memory store), app registrations and their registry (`IIdentityClient`, `IIdentityClientRegistry`), and the area's exception root, alongside the earlier identity domain contracts.
 - `Assimalign.Cohesion.IdentityHub.Hosting` provides the concrete creation entry point, issuer endpoints, key persistence, and host lifecycle.
 - `Assimalign.Cohesion.IdentityHub.Models` retains the existing tenant-directory DTO shapes while linking principals and credentials to the canonical `Assimalign.Cohesion.IdentityModel` contracts.
 - `Assimalign.Cohesion.IdentityHub.Client` is a placeholder project with no types yet.
@@ -58,12 +60,12 @@ reference the root and never each other, so a feature does not know which store 
 
 As an L3 service platform, IdentityHub composes the L2 `Assimalign.Cohesion.Hosting` runtime, which is built on the L1 `Assimalign.Cohesion.Core` foundation. The root and Models projects consume the L1 `Assimalign.Cohesion.IdentityModel` contracts; Models also retains Core for its generated ULID identifiers, and the root uses Core for its generated value objects. The Hosting project publicly depends only on the area root, DependencyInjection, and the shared Hosting runtime; its Web, HTTP, Connections, and IdentityModel references are private.
 
-Applications declare audiences and clients in code with `AddAudience` and `AddClient` on `IIdentityHubApplicationBuilder`.
+Applications declare audiences and clients in code with `AddAudience` and `AddClient` on `IIdentityHubApplicationBuilder`. Those two verbs are transitional: they are what the issuer runs on until it adopts the app registration model.
 
 ## Project documentation
 
 - [Root overview](./Assimalign.Cohesion.IdentityHub/docs/OVERVIEW.md)
-- [Root design](./Assimalign.Cohesion.IdentityHub/docs/DESIGN.md), including the store seam's contract, its security rules, and its open decisions
+- [Root design](./Assimalign.Cohesion.IdentityHub/docs/DESIGN.md), including the store seam's contract, app registrations and the locked rule for code-first objects, the security rules, and the open decisions
 - [Hosting overview](./Assimalign.Cohesion.IdentityHub.Hosting/docs/OVERVIEW.md)
 - [Hosting design](./Assimalign.Cohesion.IdentityHub.Hosting/docs/DESIGN.md)
 - [Models overview](./Assimalign.Cohesion.IdentityHub.Models/docs/OVERVIEW.md)

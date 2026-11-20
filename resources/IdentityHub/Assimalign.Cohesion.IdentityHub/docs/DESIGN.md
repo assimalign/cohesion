@@ -2,8 +2,9 @@
 
 ## Design intent
 
-The area root holds the two seams every other IdentityHub package builds against, and nothing
-that belongs to one feature:
+IdentityHub is a code-first identity server: its identity objects are defined in code, and the
+same objects can be created and changed at run time through an API. The area root holds the two
+seams every other IdentityHub package builds against, and the first of those identity objects:
 
 - **The application seam.** `IIdentityHubApplicationBuilder`, `IIdentityHubApplication`, and
   `IIdentityHubApplicationContext` are what an application composes. `IdentityHub.Hosting`
@@ -11,6 +12,15 @@ that belongs to one feature:
 - **The store seam.** `IIdentityHubStore` is the one contract between the hub and the data layer
   that keeps its state. The hub reads and writes every durable fact through it and depends on no
   concrete store, so the same hub runs on memory, on an embedded database, or on a managed service.
+- **App registrations.** `IIdentityClient` is an application the hub knows, as a client, as an
+  API, or as both, and `IIdentityClientRegistry` serves them: the ones defined in code, which are
+  locked, over the ones kept in the store. Every later identity object follows the same rule
+  (*Code-first objects are locked*).
+
+The registration model sits in the root, and not in a feature package, because every other part
+of the hub reads it: the token endpoint, the authorization endpoint, the management API, and each
+flow all start from "which application is this". It references nothing the root did not already
+reference.
 
 The root references Core, IdentityModel, and IdentityHub.Models. It references no
 `Assimalign.Cohesion.Hosting*` library (COHRES004) and never its own runtime module (COHRES001).
@@ -41,7 +51,7 @@ rejects: the root may not reference its area's runtime module.
 
 | Package | Role | References in the area |
 | --- | --- | --- |
-| `Assimalign.Cohesion.IdentityHub` | Area root: application seam, store seam, record vocabulary, error model, in-memory store | `IdentityHub.Models` |
+| `Assimalign.Cohesion.IdentityHub` | Area root: application seam, store seam, record vocabulary, error model, in-memory store, app registrations and their registry | `IdentityHub.Models` |
 | `Assimalign.Cohesion.IdentityHub.Models` | Tenant-directory data contracts | none |
 | `Assimalign.Cohesion.IdentityHub.Hosting` | Runtime module: issuer endpoints and host lifecycle | the root |
 | Planned: a store package per medium | Implements `IIdentityHubStore` and passes the store contract tests | the root |
@@ -313,11 +323,262 @@ root does not already have.
 5. Write the codec with a reflection-free serializer and a layout that can be read back after the
    next change.
 
+## App registrations
+
+### What a registration is
+
+An app registration is the hub's first identity object: one application the hub knows, and
+everything the hub needs to issue a token to it or for it. `IIdentityClient` is the contract,
+`IdentityClient` the implementation, and `IIdentityClientRegistry` what serves and changes them.
+
+The shape follows the app registration of Microsoft Entra: one object is a client, an API, or
+both. It is that one feature and not a copy of Entra (see *What it leaves out*).
+
+| A registration holds | Meaning | Limit |
+| --- | --- | --- |
+| `Id` | The OAuth `client_id` | 128 characters |
+| `DisplayName`, `Description` | What a person is shown. The display name defaults to the identifier | 128 and 256 characters |
+| `Grants` | The grants the application may use: authorization code, client credentials, device code, refresh token | Flags |
+| `AccessTokenLifetime` | How long an access token issued to it is valid. One hour unless set | 24 hours |
+| `Redirects` | Where a user may be sent back to, each with its platform: web, single-page, or native | 64 |
+| `Credentials` | What the application proves its identity with: a secret, a certificate, or a federated token. A registration with none is a public client (`IsConfidential` is false) | 16 |
+| `Audiences` | The `aud` values of the API the registration exposes. No other registration exposes any of them | 8 |
+| `Scopes` | The delegated permissions its API exposes, issued in the `scp` claim | 64 |
+| `Roles` | The roles its API exposes to users, to applications, or to both, issued in the `roles` claim | 64 |
+| `Permissions` | The scopes and roles, of another registration or its own, that it may be issued | 128 |
+| `IsLocked`, `Version` | Set by the registry that served it: whether it is defined in code, and the stored state it was read from | |
+
+A registration is defined with one object initializer and is immutable from then on:
+
+```csharp
+IdentityClient api = IdentityClient.Create(new()
+{
+    Id = "orders-api",
+    DisplayName = "Orders API",
+    Audiences = { "api://orders" },
+    Scopes = { IdentityClientScope.Create("orders.read", "Read orders") },
+    Roles = { IdentityClientRole.Create("orders.process", IdentityClientRoleMembers.Applications) },
+});
+
+IdentityClient web = IdentityClient.Create(new()
+{
+    Id = "orders-web",
+    Grants = IdentityClientGrants.AuthorizationCode | IdentityClientGrants.RefreshToken,
+    Redirects = { IdentityClientRedirect.Web("https://orders.example/signin") },
+    Permissions = { IdentityClientPermission.Delegated("orders-api", "orders.read") },
+});
+
+IdentityClient daemon = IdentityClient.Create(new()
+{
+    Id = "orders-daemon",
+    Grants = IdentityClientGrants.ClientCredentials,
+    Credentials = { IdentityClientCertificateCredential.Create("deploy-2026", certificate) },
+    Permissions = { IdentityClientPermission.Application("orders-api", "orders.process") },
+});
+
+IdentityClientRegistry registry = IdentityClientRegistry.Create(store, [api, web, daemon]);
+```
+
+`IdentityClientDescriptor` is the only mutable type in the model. `IdentityClient.Create` copies it,
+checks every rule in the next section, and refuses the whole descriptor with an `ArgumentException`
+that names the registration and the rule. Nothing constructs a registration any other way: a
+registration read back from a store goes through the same `Create`, so a stored record that breaks
+a rule is reported as corrupt and is never served.
+
+### Code-first objects are locked
+
+The hub is a code-first identity server: its identity objects are defined in code, and the same
+objects can also be created at run time through an API. The rule that keeps the two apart is the
+same for every identity object the hub will hold, and app registrations are the first to follow it:
+
+> **An object defined in code is locked.** It is read like any other object. It changes only where
+> it is defined, in the code, and never through an API.
+
+For registrations the registry enforces it. The diagram shows how a call is answered; an arrow
+means "leads to".
+
+```mermaid
+flowchart TD
+    Code["Registrations defined in code"] -->|"checked once, in Create"| Held["Locked set, held by the registry"]
+    Read["FindAsync, FindByAudienceAsync, ListAsync"] --> InCode{"Defined in code?"}
+    InCode -->|"yes"| Served["Served with IsLocked = true"]
+    InCode -->|"no"| Store["clients record set in IIdentityHubStore"]
+    Write["TryAddAsync, TryReplaceAsync, TryRemoveAsync"] --> Claims{"Claims what code defines?"}
+    Claims -->|"its identifier"| Locked["Refused: Locked"]
+    Claims -->|"one of its audiences"| Audience["Refused: AudienceConflict"]
+    Claims -->|"neither"| Store
+```
+
+- **A locked registration never reaches the store.** The registry holds the set it was created
+  with. Every node that runs the same code serves the same set, and a registration is gone when
+  the code that defines it is.
+- **Every write that names a locked identifier is answered `Locked`**: add, replace, and remove
+  alike. That includes its credentials. A locked registration's secret or certificate rotates by
+  changing the code or the configuration the code reads, and deploying.
+- **Code wins.** A stored registration with the identifier of a locked one is not served by any
+  read, and a write may not claim an audience a locked registration exposes.
+- **Locked is where the object is defined, not a flag on it.** `IsLocked` is set by the registry
+  that serves a registration, never by the descriptor, and the stored layout has no such field.
+
+Why not write code-first registrations to the store with a locked flag, which is what a seeding
+step would do: the flag would then be a stored byte that anyone who can write the store can clear,
+a restart would have to reconcile what the code says with what the store holds, and a registration
+removed from the code would live on as a stored record that nothing defines. Holding the locked
+set outside the store makes all three impossible. The cost is accepted: the locked set is in
+memory on every node, and it must be small enough to define in code.
+
+A stored registration that code shadows is left in the store. It is served again if the code that
+shadows it is removed, which keeps a deployment reversible, and until then its audiences stay
+taken among stored registrations. Nothing reports or removes such a record today (#1925).
+
+### The rules a registration keeps
+
+`IdentityClient.Create` refuses a descriptor that breaks any of these, so no other code has to
+ask whether a registration it was handed makes sense.
+
+| Rule | Why |
+| --- | --- |
+| The authorization code grant needs at least one redirect, and a redirect needs that grant | A grant with nowhere to return to cannot complete, and a redirect no grant uses is a mistake waiting to be enabled |
+| The client credentials grant needs at least one credential | The grant is the application authenticating as itself |
+| The refresh token grant needs the authorization code or the device code grant | Nothing else issues a refresh token |
+| Scopes or roles need at least one audience | A permission is issued in a token, and the token needs an `aud` |
+| A permission on the registration's own identifier names a scope it exposes, or a role it opens to applications | The one case that can be checked without another registration |
+| No identifier, redirect URI, audience, scope name, role name, or permission appears twice | Each is a name something is looked up by. A scope and a role may share a name: they are issued in different claims |
+| The lifetime is positive and at most 24 hours | An access token cannot be revoked, so its lifetime is the exposure |
+
+A permission on another registration is not checked against that registration when it is
+created, because the other one may be stored and may change. Among the registrations defined in
+code it is checked once, in `IdentityClientRegistry.Create`, so a typo in code stops the hub from
+starting. Everywhere else a permission is a ceiling: the hub issues at most what a registration
+holds, and only what the resource exposes at the moment of issue.
+
+### Identifiers, audiences, and redirects
+
+Each single-valued input is a value object with one rule (`general-rules.md`).
+
+| Type | Rule | Why |
+| --- | --- | --- |
+| `IdentityClientId`, `IdentityClientCredentialId` | The unreserved characters of RFC 3986 section 2.3, starting and ending with a letter or digit. Ordinal | It needs no escaping in a URL path, a form body, or HTTP Basic authentication, and it is the record key |
+| `IdentityClientPermissionName` | A scope token of RFC 6749 section 3.3. Ordinal | It is one entry of a space-delimited `scope` parameter |
+| `IdentityClientAudience` | The StringOrURI of RFC 7519 section 2, in visible ASCII, with no fragment. Ordinal | It is compared with the `aud` claim as a string |
+| `IdentityClientRedirect` | A URI in RFC 3986 characters and a platform. `https`, or `http` to a host written as `localhost` or a loopback address; a native application may use a private scheme that holds a `.` (RFC 8252 section 7.1). No wildcard, fragment, or user information | It is where an authorization code is sent |
+
+A redirect URI is kept exactly as it was written and is matched character for character, as
+OAuth 2.1 requires. Three refusals exist because a parser and a browser can read one string two
+ways: a backslash, which a browser reads as a slash and other parsers do not; an authority not
+introduced by `//`; and the host name `loopback`, which .NET's `Uri` reports as `localhost`. The
+host is therefore read from the string as written, not from the parser.
+
+### Credentials
+
+`IdentityClientCredential` is an abstract base with three sealed leaves, and no interface beside
+it: the set of credential kinds is closed, because the hub must know how to verify each one.
+
+| Credential | Holds | Verified by |
+| --- | --- | --- |
+| `IdentityClientSecretCredential` | A salt, a PBKDF2-HMAC-SHA256 verifier, and the iteration count. Never the secret | `Verify(secret, at)`, in fixed time |
+| `IdentityClientCertificateCredential` | A public X.509 certificate and its SHA-256 thumbprint | A client assertion signed with the private key (the hub service, #1917) |
+| `IdentityClientFederatedCredential` | An issuer, a subject, and the audiences a foreign token must carry | A token another issuer signed (the hub service, #1917) |
+
+Every credential has an identifier, unique in its registration, and an optional validity window.
+
+- **A secret is derived, never stored.** `Create` takes a secret an operator chose and derives it
+  with 600,000 iterations, the OWASP figure for PBKDF2-HMAC-SHA256. `Generate` makes a 256-bit
+  secret, hands it back once, and derives it with one iteration, because a secret with that much
+  entropy gains nothing from more. PBKDF2 was chosen over Argon2 and scrypt because it is in the
+  base class library and neither of the others is; the iteration count is stored with each
+  credential, so the figure can rise without invalidating what exists.
+- **A secret defined in code is read from configuration.** It costs one derivation when the
+  process starts, and the secret is in the process. A certificate or a federated credential puts
+  no secret there, and is the better choice for a locked registration.
+- **Verification is not rate limited here.** A chosen secret costs 600,000 iterations to verify,
+  which is the point of it and also a cost a caller can impose. The endpoint that verifies
+  secrets limits attempts (#1913).
+
+### The registry
+
+`IIdentityClientRegistry` is what the rest of the hub reads registrations through.
+`IdentityClientRegistry.Create(store, clients)` makes one over a store and the registrations
+defined in code. Its own `Locked` property lists the locked set without a call to the store.
+
+| Call | Answers |
+| --- | --- |
+| `FindAsync(id)` | The registration, locked or stored, or nothing |
+| `FindByAudienceAsync(audience)` | The one registration that exposes the audience |
+| `ListAsync(limit, continuation)` | A page: the locked registrations first, in the order of their identifiers, then the stored ones in the store's order |
+| `TryAddAsync(client)` | `Written`, `Locked`, `IdConflict`, or `AudienceConflict` |
+| `TryReplaceAsync(client, expectedVersion)` | `Written`, `Locked`, `VersionConflict`, or `AudienceConflict` |
+| `TryRemoveAsync(id, expectedVersion)` | `Removed`, `Locked`, or `VersionConflict` |
+
+A refused write is an `IdentityClientWriteResult`, never an exception, on the same terms as the
+store seam: `Locked` and the conflicts are outcomes a caller acts on. `AudienceConflict` names the
+audience when the registry can tell which one was taken. A store failure is an
+`IdentityHubStoreException`. To change a stored registration, a caller reads it, copies it with
+`IdentityClientDescriptor.From`, edits the copy, creates the replacement, and replaces at the
+version it read, so two concurrent edits cannot both win.
+
+A page may hold fewer registrations than the limit, or none, while a continuation remains: the
+registry drops a stored registration that code shadows after the store has counted it. A listing
+ends when the continuation is null. The registry's continuation wraps the store's, and a token it
+did not issue is answered with `StoreContinuationInvalid`.
+
+A registry does not trust an `IIdentityClient` it did not create. An implementation other than
+`IdentityClient` is copied through `IdentityClient.Create` before it is kept or stored, so a
+foreign implementation cannot carry a rule violation, or an `IsLocked` it set itself, into the hub.
+
+### The stored layout
+
+Stored registrations are the first record set built on the store seam.
+
+| Part | Value |
+| --- | --- |
+| Record set | `clients` |
+| Key | The registration's identifier |
+| Index entries | One unique `audience` entry per audience, which is what keeps an audience with one registration |
+| Payload | UTF-8 JSON with a layout version, `"v": 1` |
+| Expiry | None |
+
+The payload is written and read through a source-generated context, with no reflection. An
+unknown member is fatal, and so is a layout version other than 1: a registration a newer hub
+wrote is refused by an older one, not half read. Empty lists are left out. A maximal registration
+is under half of the store's 1 MiB payload limit, and a test holds it there. A payload never holds
+a secret: a secret credential is stored as its salt, verifier, and iteration count.
+
+### What it leaves out
+
+Non-goals, each a decision and not an omission:
+
+- **No consent and no pre-authorized applications.** A permission a registration holds is granted.
+  Entra's admin and user consent is a product of its own.
+- **No owners, branding, optional claims, or sign-out URLs.** They describe an Entra portal, not
+  what a token needs.
+- **No tenancy.** A registration belongs to the hub. Tenancy is an open decision of the store
+  seam (#1914) and of the tenancy contracts (#826).
+- **No wildcard redirect, no implicit grant, no resource owner password grant.** OAuth 2.1 removes
+  all three.
+- **No enabled flag.** A registration that should not be used is removed, or loses its grants.
+- **No separate client and API types.** One object can be both, as in Entra. The alternative, one
+  type per role as in Duende IdentityServer's `Client`, `ApiResource`, and `ApiScope`, makes a
+  web application that also exposes an API two objects that must be kept in agreement.
+
+### What does not use it yet
+
+The model, the registry, and the stored layout are in the root, and nothing calls them yet:
+
+- `IdentityHub.Hosting` still issues tokens from `IIdentityHubApplicationBuilder.AddClient` and
+  `IdentityHubClientOptions`. A registration defined with `IdentityClient.Create` is not a client
+  the token endpoint knows until Hosting adopts the registry (#1913).
+- No web API manages stored registrations (#1924).
+- `IdentityHub.Models` holds older application DTOs with a different shape. They are untouched
+  and are reconciled with this model when the web API is designed (#1924).
+- `IIdentityClient` shares the word "client" with the `IdentityHub.Client` package, which is the
+  library an application uses to call a hub. The interface kept the name it had as a placeholder.
+
 ## The application seam
 
 The area root owns the public contracts composed by an IdentityHub resource. `IIdentityHubApplicationBuilder` declares token audiences with `AddAudience`, registers OAuth clients with `AddClient`, and builds `IIdentityHubApplication`. The public concrete application, builder, and context live in `Assimalign.Cohesion.IdentityHub.Hosting`.
 
-Client registration is intentionally code-first. A non-empty `ClientSecret` enables `client_credentials`; `AllowDeviceAuthorization` enables the device grant. Clients explicitly list the audiences they may request, and build fails if a client names an undeclared audience or enables no grant.
+`AddClient` and `IdentityHubClientOptions` predate the app registration model and still drive Hosting: a non-empty `ClientSecret` enables `client_credentials`, `AllowDeviceAuthorization` enables the device grant, clients list the audiences they may request, and build fails if a client names an undeclared audience or enables no grant. They are transitional. When Hosting adopts the registry (#1913), the builder takes registrations defined with `IdentityClient.Create`, and `AddAudience`, `AddClient`, and `IdentityHubClientOptions` are reshaped onto that model or retired.
 
 The builder has no verb for a store yet. `IdentityHub.Hosting` still keeps its device
 authorizations, signing key, and clients in its own internal types, and moving them onto
@@ -325,7 +586,7 @@ authorizations, signing key, and clients in its own internal types, and moving t
 
 ## Security boundary
 
-The public options carry a client secret only during composition. Hosting snapshots options and retains only a SHA-256 digest, compared in fixed time. Access-token lifetimes are positive and capped at 24 hours. IdentityHub builds protocol tokens on the shared IdentityModel and JWT contracts instead of defining competing token, claim, subject, credential, or session primitives.
+A registration never holds a client secret: `IdentityClientSecretCredential` keeps a salted PBKDF2 verifier and compares in fixed time, and no exception message, `ToString`, debugger view, or stored payload carries the secret. The transitional `IdentityHubClientOptions` carry a client secret only during composition; Hosting snapshots them and retains only a SHA-256 digest, compared in fixed time, until it adopts the registry (#1913). Access-token lifetimes are positive and capped at 24 hours. IdentityHub builds protocol tokens on the shared IdentityModel and JWT contracts instead of defining competing token, claim, subject, credential, or session primitives.
 
 ## Hosting isolation and AOT
 
@@ -350,10 +611,11 @@ task through `build/Targets/Build.ErrorMessages.targets`. The generated source s
 
 ## Placeholder contracts
 
-Seven interfaces in `Abstractions/` are empty or nearly so and predate both seams: `IIdentityHub`,
-`IIdentityClient`, `IIdentityClientAdapter`, `IIdentityClientContext`, `IIdentityContext`,
-`IIdentityProvider`, and `IIdentityResult`. Nothing implements or consumes them.
-`docs/SERVICE_LAYER_DESIGN.md` names them as the future hub service contracts, so they are left
+Six interfaces in `Abstractions/` are empty or nearly so and predate both seams: `IIdentityHub`,
+`IIdentityClientAdapter`, `IIdentityClientContext`, `IIdentityContext`, `IIdentityProvider`, and
+`IIdentityResult`. Nothing implements or consumes them. A seventh, `IIdentityClient`, was an
+empty placeholder for an app registration and is now defined (*App registrations*).
+`docs/SERVICE_LAYER_DESIGN.md` names the six as the future hub service contracts, so they are left
 untouched here. One of them is already wrong for that role: `IIdentityProvider.Authenticate`
 returns a `ClaimsPrincipal`, while the area builds on IdentityModel's subject and claim contracts.
 Defining or retiring them is its own increment, the one in which the issuer logic leaves
@@ -381,14 +643,20 @@ Non-goals of the store seam:
   staleness bound.
 - **No schema or migration in the store.** The payload layout is the codec's.
 
-Decisions that are still open, and what each one waits for. The work is tracked under #1911:
+Decisions that are still open, and what each one waits for. The store work is tracked under #1911
+and the app registration work under #69 (delivered here as #1923):
 
 | Decision | Today | Waits for |
 | --- | --- | --- |
 | Tenancy in the record address | A record is addressed by set and key. A tenant is carried inside composed keys and index values | #1914, which waits for the tenancy contracts (#826). A first-class partition would change every signature here, so it must be settled before the first durable store ships |
 | Limits (key 512, name 64, payload 1 MiB, 16 index entries) | Provisional | The first durable store (#1916) |
 | Builder verb for a store, and Hosting on the store | None; Hosting keeps internal state | The next increment (#1913) |
-| Code-first clients versus stored clients | Clients are code-first only | #1913: whether registered clients are written to the store or stay composition-time values |
+| Code-first clients versus stored clients | Decided 2026-11-19: both. A registration defined in code is locked and never stored; one created at run time is stored (*App registrations*) | Hosting adopting the registry (#1913) |
+| Where the registration model lives | In the root, because every part of the hub reads it | The owner's confirmation. `resource-areas.md` keeps feature abstractions out of an area root; the alternative is an `IdentityHub.Clients` feature package that the root's builder contract could then not name |
+| What "locked" covers | The whole registration, credentials included | The owner's confirmation. Letting a locked registration's credentials rotate through the API would need a stored credential record beside the locked definition |
+| The cost of a chosen secret | PBKDF2-HMAC-SHA256, 600,000 iterations; 1 for a generated secret | The owner's confirmation, and the rate limit on the endpoint that verifies secrets (#1913) |
+| A stored registration that code shadows | Left in the store, not served, not reported | #1925 |
+| The management web API and the `IdentityHub.Models` application DTOs | Neither exists on this model | #1924 |
 | Which medium the first durable store uses | No durable store exists | #1916 |
 | Shipping the contract tests | In this project's tests | #1915, likely as an `IdentityHub.Testing` package |
 | The placeholder contracts | Left as they are | The hub service increment (#1917) |
