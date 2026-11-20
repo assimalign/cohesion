@@ -10,6 +10,10 @@
 	<Folder Name="/Amqp/Assimalign.Cohesion.Amqp/">
 		<File Path="Assimalign.Cohesion.Amqp/README.md" />
 	</Folder>
+	<Folder Name="/Amqp/Assimalign.Cohesion.Amqp/docs/">
+		<File Path="Assimalign.Cohesion.Amqp/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.Amqp/docs/OVERVIEW.md" />
+	</Folder>
 	<Folder Name="/Amqp/Assimalign.Cohesion.Amqp/src/">
 		<Project Path="Assimalign.Cohesion.Amqp/src/Assimalign.Cohesion.Amqp.csproj" />
 	</Folder>

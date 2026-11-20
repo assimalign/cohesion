@@ -15,6 +15,10 @@
 	<Folder Name="/libraries/Amqp/Assimalign.Cohesion.Amqp/">
 		<File Path="Amqp/Assimalign.Cohesion.Amqp/README.md" />
 	</Folder>
+	<Folder Name="/libraries/Amqp/Assimalign.Cohesion.Amqp/docs/">
+		<File Path="Amqp/Assimalign.Cohesion.Amqp/docs/DESIGN.md" />
+		<File Path="Amqp/Assimalign.Cohesion.Amqp/docs/OVERVIEW.md" />
+	</Folder>
 	<Folder Name="/libraries/Amqp/Assimalign.Cohesion.Amqp/src/">
 		<Project Path="Amqp/Assimalign.Cohesion.Amqp/src/Assimalign.Cohesion.Amqp.csproj" />
 	</Folder>

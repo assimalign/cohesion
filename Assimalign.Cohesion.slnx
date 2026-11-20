@@ -225,6 +225,10 @@
 	<Folder Name="/cohesion/libraries/Amqp/Assimalign.Cohesion.Amqp/">
 		<File Path="libraries/Amqp/Assimalign.Cohesion.Amqp/README.md" />
 	</Folder>
+	<Folder Name="/cohesion/libraries/Amqp/Assimalign.Cohesion.Amqp/docs/">
+		<File Path="libraries/Amqp/Assimalign.Cohesion.Amqp/docs/DESIGN.md" />
+		<File Path="libraries/Amqp/Assimalign.Cohesion.Amqp/docs/OVERVIEW.md" />
+	</Folder>
 	<Folder Name="/cohesion/libraries/Amqp/Assimalign.Cohesion.Amqp/src/">
 		<Project Path="libraries/Amqp/Assimalign.Cohesion.Amqp/src/Assimalign.Cohesion.Amqp.csproj" />
 	</Folder>
