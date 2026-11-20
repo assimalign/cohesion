@@ -99,6 +99,42 @@ public sealed class HttpForwarderPathTests
             .ParamName.ShouldBe("destinationPrefix");
     }
 
+    [Theory(DisplayName = "Cohesion Test [Http.Proxy] - IsValidDestinationPrefix: Should accept a bare HTTP base")]
+    [InlineData("http://backend")]
+    [InlineData("https://backend:8443/v1/")]
+    [InlineData("HTTP://backend/base")]
+    [InlineData("http://[::1]:8080")]
+    public void IsValidDestinationPrefix_HttpBase_ShouldAccept(string prefix)
+    {
+        // Arrange / Act
+        bool valid = HttpForwarder.IsValidDestinationPrefix(new Uri(prefix));
+
+        // Assert
+        valid.ShouldBeTrue();
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Http.Proxy] - IsValidDestinationPrefix: Should refuse what CreateDestination refuses")]
+    [InlineData("ftp://backend/")]
+    [InlineData("http://backend/?q=1")]
+    [InlineData("http://backend/#fragment")]
+    [InlineData("http://user:secret@backend/")]
+    public void IsValidDestinationPrefix_NotBareHttpBase_ShouldRefuse(string prefix)
+    {
+        // Arrange / Act
+        bool valid = HttpForwarder.IsValidDestinationPrefix(new Uri(prefix));
+
+        // Assert
+        valid.ShouldBeFalse();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Proxy] - IsValidDestinationPrefix: Should refuse a relative or missing prefix")]
+    public void IsValidDestinationPrefix_RelativeOrNull_ShouldRefuse()
+    {
+        // Arrange / Act / Assert
+        HttpForwarder.IsValidDestinationPrefix(new Uri("/base", UriKind.Relative)).ShouldBeFalse();
+        HttpForwarder.IsValidDestinationPrefix(null).ShouldBeFalse();
+    }
+
     [Fact(DisplayName = "Cohesion Test [Http.Proxy] - CreateDestination: Should reject a relative prefix")]
     public void CreateDestination_RelativePrefix_ShouldThrow()
     {

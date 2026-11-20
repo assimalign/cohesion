@@ -323,11 +323,13 @@ the registrations the host enumerates.
 
 ## Ordering
 
-`UseRewrite` runs ahead of everything that reads the path: `UseStaticFiles`, `UseRouting` and the endpoint.
+`UseRewrite` runs ahead of everything after it that reads the path: `UseStaticFiles`, `UseRouting` and the
+endpoint. `UseReverseProxy` runs ahead of it, so proxy routes match the client's path and a forwarded request
+is never rewritten.
 It runs after `UseForwardedHeaders` and `UseHostFiltering`, so the helpers read the client's scheme and a
 validated host, and after `UseHttpsRedirection` and `UseHsts`. It sits inside the exception boundary and after
 `UseStatusCodePages`, so a fault in a rule becomes a problem-details response and its `400` gets a body:
-row 9 of [`MIDDLEWARE_ORDER.md`](../../../../docs/resources/Web/MIDDLEWARE_ORDER.md).
+row 11 of [`MIDDLEWARE_ORDER.md`](../../../../docs/resources/Web/MIDDLEWARE_ORDER.md).
 
 Rules see the URL as the rules before them left it, so register redirects, the helpers included, ahead of
 internal rewrites. A redirect evaluated after a rewrite sends the client to the rewritten URL, exposing an

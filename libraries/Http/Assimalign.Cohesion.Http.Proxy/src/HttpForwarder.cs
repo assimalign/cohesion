@@ -1,6 +1,7 @@
 using System;
 using System.Buffers;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.IO;
 using System.Net;
@@ -156,10 +157,7 @@ public sealed class HttpForwarder : IHttpForwarder
         ArgumentNullException.ThrowIfNull(destinationPrefix);
         ArgumentNullException.ThrowIfNull(query);
 
-        if (!IsHttpUri(destinationPrefix)
-            || destinationPrefix.Query.Length != 0
-            || destinationPrefix.Fragment.Length != 0
-            || destinationPrefix.UserInfo.Length != 0)
+        if (!IsValidDestinationPrefix(destinationPrefix))
         {
             throw new ArgumentException(ErrorMessages.DestinationPrefixInvalid, nameof(destinationPrefix));
         }
@@ -184,6 +182,27 @@ public sealed class HttpForwarder : IHttpForwarder
             queryText);
 
         return new Uri(text, new UriCreationOptions { DangerousDisablePathAndQueryCanonicalization = true });
+    }
+
+    /// <summary>
+    /// Determines whether a URI can be the destination prefix of <see cref="CreateDestination"/>.
+    /// </summary>
+    /// <param name="destinationPrefix">The URI to test.</param>
+    /// <returns>
+    /// <see langword="true"/> when <paramref name="destinationPrefix"/> is an absolute <c>http</c> or
+    /// <c>https</c> URI with no query, fragment or user information; otherwise, <see langword="false"/>.
+    /// </returns>
+    /// <remarks>
+    /// A proxy that configures its destinations ahead of time checks each one here, so a destination
+    /// that cannot be used fails the configuration instead of every request routed to it.
+    /// </remarks>
+    public static bool IsValidDestinationPrefix([NotNullWhen(true)] Uri? destinationPrefix)
+    {
+        return destinationPrefix is not null
+            && IsHttpUri(destinationPrefix)
+            && destinationPrefix.Query.Length == 0
+            && destinationPrefix.Fragment.Length == 0
+            && destinationPrefix.UserInfo.Length == 0;
     }
 
     /// <inheritdoc />

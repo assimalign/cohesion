@@ -29,7 +29,7 @@ implementation.
     `HttpProxyResult`.
 - `HttpForwarder.TryNormalizePath` and `HttpForwarder.CreateDestination` build the destination URI
   without letting a dot segment or an encoded slash route a request somewhere its route did not
-  allow.
+  allow; `HttpForwarder.IsValidDestinationPrefix` checks a configured destination ahead of time.
 - `IHttpTunnel` / `HttpTunnel.Create(options)` serves an HTTP/1.1 `CONNECT`: connects first (so a
   failure is a 502 or 504, not a tunnel that closes at once), accepts through the exchange's
   protocol upgrade, and relays with half-close.

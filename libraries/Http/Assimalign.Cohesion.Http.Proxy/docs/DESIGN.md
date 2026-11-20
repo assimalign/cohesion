@@ -151,6 +151,11 @@ with `UriCreationOptions.DangerousDisablePathAndQueryCanonicalization`, so `Syst
 canonicalize again what the proxy already normalized. `CreateDestination` refuses a path that
 `TryNormalizePath` would change, so skipping normalization fails loudly.
 
+`IsValidDestinationPrefix` is the prefix rule `CreateDestination` enforces (an absolute `http` or
+`https` URI with no query, fragment or user information), public so a proxy that configures its
+destinations ahead of time refuses a bad one when it is configured rather than on each request. The
+rule lives in one place; `CreateDestination` calls it.
+
 ## Bodies
 
 **Request.** The body is streamed as it arrives (`StreamingRequestContent`), flushing after each
@@ -332,8 +337,9 @@ requires: the hash is a protocol checksum, not a security boundary.
 ## Known constraints
 
 - The server's path decoder refuses a request whose decoded path holds a space, `?`, `#` or a
-  control character (Http.Connections answers 400). A path such as `/files/my%20doc.pdf` therefore
-  never reaches a proxy route. This is a property of `HttpPath`, not of this package; #1922 tracks
+  control character: HTTP/1.1 closes the connection without a response (#1926), and HTTP/2 and
+  HTTP/3 reset the stream. A path such as `/files/my%20doc.pdf` therefore never reaches a proxy
+  route. This is a property of `HttpPath`, not of this package; #1922 tracks
   accepting it.
 - Request bodies over HTTP/2 and HTTP/3 are detected by the method heuristic above until the
   transport exposes end-of-stream (#1921).

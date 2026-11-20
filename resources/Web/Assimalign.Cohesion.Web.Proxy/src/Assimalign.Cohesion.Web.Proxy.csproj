@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.Web.Proxy</RootNamespace>
+		<Description>Reverse and forward proxies for the Cohesion Web pipeline, over the Http.Proxy forwarder and CONNECT tunnel. builder.Services.AddReverseProxy registers the reverse-proxy setting, whose routes (host patterns, a path prefix matched on segment boundaries, round-robin destinations, prefix stripping and Host preservation) UseReverseProxy applies: the most specific route forwards the request and an unmatched request goes to the next middleware. builder.Services.AddForwardProxy registers the forward-proxy setting, whose rules (host patterns and ports) UseForwardProxy enforces for absolute-form requests and CONNECT tunnels: no rule, no access, and a destination reached only through a wildcard pattern may not resolve to a loopback, link-local or unspecified address. Each setting owns its connection pool, and an operator can replace its routes or rules while the application runs.</Description>
+	</PropertyGroup>
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Server" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http.ExtendedConnect" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Forwarded" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Proxy" />
+	</ItemGroup>
+	<ItemGroup>
+		<CohesionSharedSource Include="Assimalign.Cohesion.Core" Module="ComponentIntegration" />
+	</ItemGroup>
+</Project>
