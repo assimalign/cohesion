@@ -365,7 +365,7 @@ silently. Rules that record a leniency say so.
 | Message format | `AmqpMessageFormatComplianceTests` over `AmqpMessageFormatCorpus` | MF1 to MF9 | section order, repetition and body kinds, descriptors, message ids, annotation and property keys |
 | Termini | `AmqpTerminusComplianceTests` over `AmqpTerminusCorpus` | T1 to T10 | terminus defaults, dynamic nodes and their owner, node properties, filters, durability, expiry, default outcomes |
 | Transactions | `AmqpTransactionComplianceTests` | T1 to T14 | declare and discharge, transactional work on transfers and dispositions, acquisition, identifiers, capabilities |
-| Transfer | `AmqpTransferComplianceTests` | F1 to F17 | splitting and reassembly, settlement on frames, aborts, malformed fragmentation, terminal outcomes |
+| Transfer | `AmqpTransferComplianceTests` | F1 to F20 | splitting and reassembly, settlement on frames, aborts, malformed fragmentation, terminal outcomes, credit and drains |
 | Resume | `AmqpResumeComplianceTests` | R1 to R11 | unsettled-map comparison at both ends, resuming and aborting, the `received` state, new deliveries while maps are incomplete, the Part 3 §3.4.6 example end to end |
 
 The leniencies, each accepted because the meaning is clear and nothing is at risk:
@@ -385,8 +385,55 @@ The leniencies, each accepted because the meaning is clear and nothing is at ris
 - **F13:** a first frame without a message format is read as format 0.
 - **F17:** a receiver does not check that a new delivery's tag differs from its unsettled
   deliveries' tags, since deliveries settle by delivery-id.
+- **F20:** a receiver ignores the `drain` field of the sender's `flow`, which should repeat the
+  receiver's own: the delivery-count already says whether a drain ended.
 - **R11:** a later frame of a delivery that is not resumed may set `resume`; only the first frame
   decides.
+
+## Interoperability (#432)
+
+The engine is tested against an independent implementation, AMQPNetLite.Core 2.5.5, in both
+directions over TCP loopback. The tests sit in `tests/Interop/` beside the unit tests, carry
+`[Trait("Category", "Interop")]`, need nothing but `dotnet test`, and run in one collection without
+parallelism, because AMQPNetLite's frame trace is process-wide. `--filter "Category=Interop"` runs
+them alone and `--filter "Category!=Interop"` leaves them out; CI runs both.
+
+| Direction | Tests | Scenarios |
+|---|---|---|
+| AMQPNetLite client, Cohesion listener | `AmqpNetLiteClientInteropTests` (20) | SASL PLAIN and ANONYMOUS; a refused password while the listener keeps accepting; each outcome and pre-settled transfers both ways; every type AMQPNetLite encodes, through both codecs; every message section both ways; messages split across frames both ways; order across sessions and links; a refused link; a close with an error both ways; a committed and an abandoned `TransactionScope` through the broker's coordinator; drain; idle timeout kept with empty frames |
+| Cohesion client, AMQPNetLite `ContainerHost` | `AmqpNetLiteHostInteropTests` (11) | SASL PLAIN and ANONYMOUS; a refused password; close; each outcome from a message processor; 50 sends within a credit of 5, in order; split sends; settlements reported to a message source; 300 messages within a prefetch of 50, in order; split receives; a link refused with `amqp:not-found` |
+
+**Reading a failure.** Each test prints every frame AMQPNetLite sent and received. A failure is
+Cohesion's when its frames break a rule, which the compliance maps name; it is the peer's when
+AMQPNetLite's frames break one or it lacks the feature. A peer's failure moves the scenario to the
+list below with the evidence: no test is skipped. Two harness rules follow from how AMQPNetLite
+works. It completes sends on its I/O thread, so a test never blocks a continuation (a blocking
+`TransactionScope` commit there deadlocks the peer; the tests commit with
+`CommittableTransaction.BeginCommit`). And its `CloseAsync(timeout, error)` fails with the error it
+sent even when the answering `close` carries none, so the tests read the `close` they received
+through a protocol handler (`AmqpNetLiteConnectionEvents`).
+
+What the suite does not cover, and why:
+
+- **Drain by an AMQPNetLite receiver in `CreditMode.Drain`, more than once.** AMQPNetLite leaves
+  drain mode only on a sender `flow` that clears `drain`, or once deliveries use up its credit, and
+  until then ignores a new drain. Cohesion's `flow` keeps the receiver's value, as Part 2 §2.6.7
+  says (rule F18), and so do Microsoft.Azure.Amqp, Qpid Proton-C and Qpid Proton-J. rhea, the
+  Node.js library, sees a drain end only in a `flow` that keeps the flag, so clearing it would trade
+  one client for another. An AMQPNetLite receiver calls `SetCredit(0, CreditMode.Manual)` before
+  its next drain, which the drain test does.
+- **Drain by Cohesion against an AMQPNetLite listener.** AMQPNetLite's `ListenerLink` reads a
+  drain `flow` that keeps the delivery limit as reduced credit: it zeroes its credit and answers
+  without advancing its delivery-count. By rule F19 the drain has not ended, so `DrainAsync` waits;
+  a `flow` the sender wrote before it read the drain looks the same, so the engine does not guess.
+  AMQPNetLite's `SenderLink` does not answer a drain at all.
+- **`decimal32`, `decimal64` and `decimal128`.** AMQPNetLite cannot encode `System.Decimal`; the
+  type corpus pins these encodings against byte vectors instead.
+- **A list that ends in `null`.** AMQPNetLite drops the trailing nulls of every list it encodes,
+  which shortens a plain list; the type test puts the null inside.
+- **Not exercised here:** resuming a link (AMQPNetLite keeps no unsettled map), Cohesion as a
+  transaction controller (`ContainerHost` has no coordinator), multiplexed carriers, TLS and SASL
+  EXTERNAL.
 
 ## Framing and the codec
 

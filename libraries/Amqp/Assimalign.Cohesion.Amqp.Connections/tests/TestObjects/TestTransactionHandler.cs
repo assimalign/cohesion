@@ -17,6 +17,7 @@ internal sealed class TestTransactionHandler : IAmqpTransactionHandler
     private readonly List<AmqpDeclare> _declares = [];
     private readonly List<(byte[] TransactionId, bool Fail)> _discharges = [];
     private readonly TaskCompletionSource _rolledBack = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly TaskCompletionSource _committed = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private int _next;
 
     /// <summary>
@@ -49,6 +50,11 @@ internal sealed class TestTransactionHandler : IAmqpTransactionHandler
     /// Gets a task that completes once <see cref="ExpectedRollbacks"/> rollbacks happened.
     /// </summary>
     public Task RolledBack => _rolledBack.Task;
+
+    /// <summary>
+    /// Gets a task that completes once a transaction committed.
+    /// </summary>
+    public Task Committed => _committed.Task;
 
     public IReadOnlyList<AmqpDeclare> Declares
     {
@@ -98,6 +104,11 @@ internal sealed class TestTransactionHandler : IAmqpTransactionHandler
             if (!fail && CommitFailure is not null)
             {
                 throw CommitFailure;
+            }
+
+            if (!fail)
+            {
+                _committed.TrySetResult();
             }
 
             if (fail && _discharges.FindAll(static entry => entry.Fail).Count >= ExpectedRollbacks)

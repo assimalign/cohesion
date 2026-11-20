@@ -98,5 +98,5 @@ src/
 └── *.cs               AmqpConnectionListener, AmqpConnectionFactory, their options, AmqpMessageCodec
 ```
 
-The design record, including the compliance maps and the breaking changes from 10.0.0-preview.1,
-is [DESIGN.md](DESIGN.md).
+The design record, including the compliance maps, the interoperability tests against AMQPNetLite
+(`tests/Interop/`) and the breaking changes from 10.0.0-preview.1, is [DESIGN.md](DESIGN.md).

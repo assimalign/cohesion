@@ -29,7 +29,7 @@ not an edge.
 
 | | Count |
 | --- | --- |
-| Projects indexed | 560 |
+| Projects indexed | 561 |
 | Shipped library/resource projects | 224 |
 | Library areas | 21 |
 | Resource areas | 18 |
@@ -1058,8 +1058,8 @@ warning, not a problem in itself: these are the assemblies whose contracts cost 
 | `Assimalign.Cohesion.Web` | 62 | Assimalign.Cohesion.ConfigurationStore.Hosting.Tests, Assimalign.Cohesion.Database, Assimalign.Cohesion.Database.Hosting.Tests, Assimalign.Cohesion.IdentityHub.Hosting, … |
 | `Assimalign.Cohesion.Connections` | 45 | Assimalign.Cohesion.Amqp, Assimalign.Cohesion.Amqp.Connections, Assimalign.Cohesion.Amqp.Connections.Tests, Assimalign.Cohesion.Connections.InMemory, … |
 | `Assimalign.Cohesion.Web.Routing` | 37 | Assimalign.Cohesion.IntegrationCheck, Assimalign.Cohesion.SourceGeneration.Web.Tests, Assimalign.Cohesion.Web.Antiforgery, Assimalign.Cohesion.Web.Antiforgery.Tests, … |
+| `Assimalign.Cohesion.Connections.Tcp` | 33 | Assimalign.Cohesion.Amqp.Connections.AotSample, Assimalign.Cohesion.Amqp.Connections.Tests, Assimalign.Cohesion.Connections.Tcp.Tests, Assimalign.Cohesion.Database, … |
 | `Assimalign.Cohesion.Connections.InMemory` | 31 | Assimalign.Cohesion.Amqp.Connections.Tests, Assimalign.Cohesion.Amqp.Tests, Assimalign.Cohesion.Connections.InMemory.Tests, Assimalign.Cohesion.Connections.Security.Tests, … |
-| `Assimalign.Cohesion.Connections.Tcp` | 31 | Assimalign.Cohesion.Connections.Tcp.Tests, Assimalign.Cohesion.Database, Assimalign.Cohesion.Database.Blob.Client.Tests, Assimalign.Cohesion.Database.Blob.Tests, … |
 | `Assimalign.Cohesion.Web.Hosting` | 29 | Assimalign.Cohesion.ConfigurationStore.Hosting, Assimalign.Cohesion.Database.Hosting, Assimalign.Cohesion.IdentityHub.Hosting, Assimalign.Cohesion.LogSpace.Hosting, … |
 | `Assimalign.Cohesion.Hosting` | 27 | Assimalign.Cohesion.ApiManager.Hosting, Assimalign.Cohesion.ApplicationModel.Gateway.InProcess.Tests, Assimalign.Cohesion.ApplicationModel.Hosting, Assimalign.Cohesion.ConfigurationStore.Hosting, … |
 | `Assimalign.Cohesion.Http.Streaming` | 25 | Assimalign.Cohesion.Http.Connections.Tests, Assimalign.Cohesion.Http.ServerSentEvents, Assimalign.Cohesion.Http.ServerSentEvents.Examples.Sse, Assimalign.Cohesion.Http.ServerSentEvents.Tests, … |
@@ -1081,7 +1081,7 @@ warning, not a problem in itself: these are the assemblies whose contracts cost 
 
 ## Harnesses
 
-257 test, sample, example, and fixture projects are indexed for fan-in but excluded from the
+258 test, sample, example, and fixture projects are indexed for fan-in but excluded from the
 area graphs above: they consume the shipped assemblies rather than forming part of the product
 graph, and the dependency guards exempt them by path.
 
@@ -1095,13 +1095,14 @@ membership is an item list, not a project reference: App's kernel roots in
 | --- | --- |
 | `examples/` | 5 |
 | `fixtures/` | 16 |
-| `samples/` | 10 |
+| `samples/` | 11 |
 | `tests/` | 226 |
 
 Samples, which live in the repository-root `samples/` tree:
 
 | Sample | Path | References |
 | --- | --- | --- |
+| `Assimalign.Cohesion.Amqp.Connections.AotSample` | `libraries/Amqp/Assimalign.Cohesion.Amqp.Connections/samples/Assimalign.Cohesion.Amqp.Connections.AotSample/Assimalign.Cohesion.Amqp.Connections.AotSample.csproj` | `Assimalign.Cohesion.Amqp`<br>`Assimalign.Cohesion.Amqp.Connections`<br>`Assimalign.Cohesion.Connections.Tcp` |
 | `Assimalign.Cohesion.Database.Client.AotSample` | `resources/Database/Assimalign.Cohesion.Database.Client/samples/Assimalign.Cohesion.Database.Client.AotSample/Assimalign.Cohesion.Database.Client.AotSample.csproj` | `Assimalign.Cohesion.Connections.InMemory`<br>`Assimalign.Cohesion.Database.Blob.Client`<br>`Assimalign.Cohesion.Database.Documents.Client`<br>`Assimalign.Cohesion.Database.Graph.Client`<br>`Assimalign.Cohesion.Database.KeyValuePair.Client`<br>`Assimalign.Cohesion.Database.Sql.Client` |
 | `Assimalign.Cohesion.Database.Documents.AotSample` | `resources/Database/Assimalign.Cohesion.Database.Documents.Client/samples/Assimalign.Cohesion.Database.Documents.AotSample/Assimalign.Cohesion.Database.Documents.AotSample.csproj` | `Assimalign.Cohesion.Connections.InMemory`<br>`Assimalign.Cohesion.Connections.Tcp`<br>`Assimalign.Cohesion.Database.Documents`<br>`Assimalign.Cohesion.Database.Documents.Client` |
 | `Assimalign.Cohesion.Database.Graph.AotSample` | `resources/Database/Assimalign.Cohesion.Database.Graph/samples/Assimalign.Cohesion.Database.Graph.AotSample/Assimalign.Cohesion.Database.Graph.AotSample.csproj` | `Assimalign.Cohesion.Database.Graph` |

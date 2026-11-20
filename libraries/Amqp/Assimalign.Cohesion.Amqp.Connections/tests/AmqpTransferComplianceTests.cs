@@ -16,8 +16,9 @@ namespace Assimalign.Cohesion.Amqp.Connections.Tests;
 
 /// <summary>
 /// Drives the engine's links with a scripted peer through the rules of AMQP 1.0 Part 2 for moving one delivery:
-/// splitting it into <c>transfer</c> frames and joining them, aborting it, settling it across its frames, and
-/// holding the sender's terminal outcome. Each rule in <see cref="Rules"/> names the tests that pin it.
+/// splitting it into <c>transfer</c> frames and joining them, aborting it, settling it across its frames, holding
+/// the sender's terminal outcome, and the credit it spends, including a drain's. Each rule in <see cref="Rules"/>
+/// names the tests that pin it.
 /// </summary>
 public class AmqpTransferComplianceTests
 {
@@ -113,6 +114,20 @@ public class AmqpTransferComplianceTests
         new("F17", "A receiver does not check that a new delivery's tag differs from those of its unsettled deliveries: deliveries settle by delivery-id, so a repeated tag puts nothing at risk until the link is resumed, and the application builds the unsettled map it resumes with.", "Part 2, section 2.6.12", Forbids: false,
         [
             nameof(OnTransfer_OnTagOfUnsettledDelivery_ShouldAcceptIt)
+        ], Leniency: true),
+        new("F18", "A sender that drains uses up the credit it cannot use: it advances its delivery-count by that credit, sets its link-credit to zero, and sends a flow whose drain field keeps the receiver's last value, since only the receiver changes it.", "Part 2, sections 2.6.7 and 2.7.4", Forbids: false,
+        [
+            nameof(OnFlow_OnDrainWithNothingToSend_ShouldAdvanceDeliveryCountAndKeepDrain),
+            nameof(AmqpConnectionTests.DrainAsync_OnIdleSender_ShouldReturnCredit)
+        ]),
+        new("F19", "A receiver's drain ends once the sender's delivery-count reaches the delivery limit: a flow that reports no credit without advancing the delivery-count does not end it, because a flow the sender wrote before it read the drain reads the same way.", "Part 2, section 2.6.7", Forbids: false,
+        [
+            nameof(DrainAsync_OnSenderReportingNoCreditWithoutAdvancing_ShouldKeepDraining),
+            nameof(AmqpConnectionTests.DrainAsync_OnIdleSender_ShouldReturnCredit)
+        ]),
+        new("F20", "A receiver ignores the drain field of the sender's flow, which should repeat the receiver's own: some libraries clear it in the flow that ends a drain, and the delivery-count already says the drain ended.", "Part 2, sections 2.6.7 and 2.7.4", Forbids: false,
+        [
+            nameof(DrainAsync_OnSenderUsingUpCreditWithDrainCleared_ShouldEnd)
         ], Leniency: true)
     ];
 
@@ -746,6 +761,134 @@ public class AmqpTransferComplianceTests
         first.IsSettled.ShouldBeFalse();
         second.IsSettled.ShouldBeFalse();
         receiver.LinkDetached.IsCancellationRequested.ShouldBeFalse();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - OnFlow: Should use up a drain's credit when nothing waits to send, keeping the receiver's drain flag")]
+    public async Task OnFlow_OnDrainWithNothingToSend_ShouldAdvanceDeliveryCountAndKeepDrain()
+    {
+        // Arrange
+        using CancellationTokenSource timeout = new(_testTimeout);
+        await using AmqpScriptedHost host = await AmqpScriptedHost.AcceptAsync(cancellationToken: timeout.Token);
+        AmqpTestPeer peer = host.Peer;
+        AmqpBeginPerformative engineBegin = await peer.BeginAsync(null, timeout.Token);
+        IAmqpSession session = await host.Connection.AcceptSessionAsync(timeout.Token);
+        IAmqpSender sender = await AttachPeerReceiverAsync(peer, session, null, timeout.Token);
+        AmqpFlowPerformative drain = CreateLinkFlow(engineBegin, credit: 5);
+        drain.Drain = true;
+
+        // Act
+        await peer.WriteFrameAsync(0, drain, timeout.Token);
+        AmqpFlowPerformative answer = await ReadLinkFlowAsync(peer, timeout.Token);
+
+        // Assert: rhea's receiver sees a drain end only in a flow that keeps the flag, and AMQPNetLite's only in one
+        // that clears it. The specification decides (docs/DESIGN.md, "Interoperability").
+        answer.DeliveryCount.ShouldBe(5u);
+        answer.LinkCredit.ShouldBe(0u);
+        answer.Drain.ShouldBeTrue();
+        sender.Credit.ShouldBe(0u);
+        sender.IsDraining.ShouldBeTrue();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - DrainAsync: Should keep draining when the sender reports no credit without advancing its delivery-count")]
+    public async Task DrainAsync_OnSenderReportingNoCreditWithoutAdvancing_ShouldKeepDraining()
+    {
+        // Arrange
+        using CancellationTokenSource timeout = new(_testTimeout);
+        await using AmqpScriptedHost host = await AmqpScriptedHost.AcceptAsync(cancellationToken: timeout.Token);
+        (IAmqpReceiver receiver, AmqpBeginPerformative engineBegin, Task drain, _) = await StartDrainAsync(host, timeout.Token);
+        AmqpFlowPerformative stale = CreateSenderFlow(engineBegin, deliveryCount: 0, drain: false);
+        stale.Echo = true;
+
+        // Act: a flow the sender wrote before it read the drain reads like this, and so does AMQPNetLite's answer to a
+        // drain that keeps the delivery limit. The echo carries the engine's state once it applied the flow.
+        await host.Peer.WriteFrameAsync(0, stale, timeout.Token);
+        AmqpFlowPerformative echo = await ReadLinkFlowAsync(host.Peer, timeout.Token);
+        uint creditAfterStaleFlow = receiver.Credit;
+        await host.Peer.WriteFrameAsync(0, CreateSenderFlow(engineBegin, deliveryCount: 5, drain: true), timeout.Token);
+        await drain.WaitAsync(timeout.Token);
+
+        // Assert
+        echo.LinkCredit.ShouldBe(5u);
+        echo.Drain.ShouldBeTrue();
+        creditAfterStaleFlow.ShouldBe(5u);
+        receiver.Credit.ShouldBe(0u);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - DrainAsync: Should end once the sender's delivery-count reaches the limit, though its flow clears the drain flag")]
+    public async Task DrainAsync_OnSenderUsingUpCreditWithDrainCleared_ShouldEnd()
+    {
+        // Arrange
+        using CancellationTokenSource timeout = new(_testTimeout);
+        await using AmqpScriptedHost host = await AmqpScriptedHost.AcceptAsync(cancellationToken: timeout.Token);
+        (IAmqpReceiver receiver, AmqpBeginPerformative engineBegin, Task drain, AmqpFlowPerformative request) = await StartDrainAsync(host, timeout.Token);
+
+        // Act: AMQPNetLite's sender clears the flag in the flow that ends a drain.
+        await host.Peer.WriteFrameAsync(0, CreateSenderFlow(engineBegin, deliveryCount: 5, drain: false), timeout.Token);
+        await drain.WaitAsync(timeout.Token);
+
+        // Assert
+        request.LinkCredit.ShouldBe(5u);
+        receiver.Credit.ShouldBe(0u);
+    }
+
+    /// <summary>
+    /// The peer attaches a sending link to a queue; the engine accepts it without prefetch, grants it five credits
+    /// and asks it to drain. Returns the engine's <c>begin</c>, the wait for the drain to end and the <c>flow</c>
+    /// that asked for it.
+    /// </summary>
+    private static async Task<(IAmqpReceiver Receiver, AmqpBeginPerformative EngineBegin, Task Drain, AmqpFlowPerformative Request)> StartDrainAsync(
+        AmqpScriptedHost host,
+        CancellationToken cancellationToken)
+    {
+        AmqpBeginPerformative engineBegin = await host.Peer.BeginAsync(null, cancellationToken);
+        IAmqpSession session = await host.Connection.AcceptSessionAsync(cancellationToken);
+        IAmqpReceiver receiver = await AttachPeerSenderAsync(host.Peer, session, new AmqpTarget { Address = "queue" }, new AmqpReceiverOptions { Prefetch = 0 }, cancellationToken);
+
+        receiver.AddCredit(5);
+        Task drain = receiver.DrainAsync(cancellationToken).AsTask();
+        AmqpFlowPerformative request;
+
+        do
+        {
+            request = await ReadLinkFlowAsync(host.Peer, cancellationToken);
+        }
+        while (!request.Drain);
+
+        return (receiver, engineBegin, drain, request);
+    }
+
+    /// <summary>
+    /// Creates a <c>flow</c> from the peer's sender on handle 0 that reports no credit left.
+    /// </summary>
+    private static AmqpFlowPerformative CreateSenderFlow(AmqpBeginPerformative engineBegin, uint deliveryCount, bool drain)
+    {
+        return new AmqpFlowPerformative
+        {
+            NextIncomingId = engineBegin.NextOutgoingId,
+            IncomingWindow = 100,
+            NextOutgoingId = 1,
+            OutgoingWindow = 100,
+            Handle = 0,
+            DeliveryCount = deliveryCount,
+            LinkCredit = 0,
+            Drain = drain
+        };
+    }
+
+    /// <summary>
+    /// Reads frames until the engine sends a link's <c>flow</c>, skipping the session's.
+    /// </summary>
+    private static async Task<AmqpFlowPerformative> ReadLinkFlowAsync(AmqpTestPeer peer, CancellationToken cancellationToken)
+    {
+        while (true)
+        {
+            AmqpFlowPerformative flow = await ReadUntilAsync<AmqpFlowPerformative>(peer, cancellationToken);
+
+            if (flow.Handle is not null)
+            {
+                return flow;
+            }
+        }
     }
 
     /// <summary>
