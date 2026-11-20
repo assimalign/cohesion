@@ -142,7 +142,8 @@ public sealed class HttpForwarder : IHttpForwarder
     /// </param>
     /// <param name="query">
     /// The request's query. The query text the client sent is forwarded unchanged when the collection
-    /// still holds it (<see cref="HttpQueryCollection.Source"/>); otherwise the collection is encoded.
+    /// still holds it (<see cref="IHttpQueryCollection.Source"/>) and it is valid query text; otherwise
+    /// the collection is encoded.
     /// </param>
     /// <returns>The destination URI, whose path and query are not canonicalized again.</returns>
     /// <exception cref="ArgumentNullException">
@@ -928,7 +929,8 @@ public sealed class HttpForwarder : IHttpForwarder
 
     private static string GetQueryText(IHttpQueryCollection query)
     {
-        if (query is HttpQueryCollection { Source: { } source } && IsQueryText(source.Value))
+        // Any implementation may supply Source, so text that is not a valid query is still refused.
+        if (query.Source is { } source && IsQueryText(source.Value))
         {
             return source.Value ?? string.Empty;
         }

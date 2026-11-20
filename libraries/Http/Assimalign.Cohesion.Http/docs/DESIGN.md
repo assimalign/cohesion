@@ -582,8 +582,8 @@ rules they have to mirror:
   it, and writes an empty value as the bare name. `Parse` reads it back as the
   same collection. It is not the query the request carried: the collection
   keeps no order across keys and no percent-encoding, so both are rebuilt.
-- **`HttpQueryCollection.Source`** is the query the request carried (#1894).
-  `HttpQuery.Parse` records the `HttpQuery` it read on the collection it returns,
+- **`IHttpQueryCollection.Source`** is the query the request carried (#1894).
+  `HttpQuery.Parse` records the `HttpQuery` it read on the `HttpQueryCollection` it returns,
   and the collection forgets it on the first change: `Add`, the indexer's setter,
   `Clear`, or a `Remove` that removes an entry. A collection built in code has
   none. Rebuilding with `Create` is lossy in four ways: keys compare
@@ -596,6 +596,15 @@ rules they have to mirror:
   HTTP/2, HTTP/3) hands `HttpQuery` the raw query text of the request-target and
   parses through `HttpQuery.Parse`, so on a request `Source` is the query exactly
   as received, percent-encoding included.
+  The member is on the interface because consumers hold an `IHttpQueryCollection`
+  (`IHttpRequest.Query` returns one): a property only on `HttpQueryCollection`
+  would make each of them cast, and every other implementation, such as a wrapper
+  or a test double, would fall back to `Create` without a sign. Its default
+  implementation returns `null`, which is always safe: an implementation that never
+  considers `Source` gets a rebuilt query, never stale text. The one way to get it
+  wrong is a wrapper that changes the parameters it exposes and returns its inner
+  collection's `Source`; a proxy would then forward a parameter the wrapper removed,
+  so the member's documentation forbids it.
 
 A space, `?` or `#` never needs encoding in a path that came from a request:
 `HttpPath` rejects them, and the transports fail a request-target whose path

@@ -6,6 +6,8 @@ using Shouldly;
 
 using Xunit;
 
+using Assimalign.Cohesion.Http.Tests.TestObjects;
+
 namespace Assimalign.Cohesion.Http.Tests;
 
 public class HttpQueryCollectionTests
@@ -77,7 +79,7 @@ public class HttpQueryCollectionTests
             .Message.ShouldBe("The query collection cannot be modified because it is read-only.");
     }
 
-    [Fact]
+    [Fact(DisplayName = "Cohesion Test [Http] - HttpQueryCollection: Source returns the received query text")]
     public void Source_ParsedCollection_ShouldReturnTheReceivedQueryText()
     {
         // Arrange
@@ -91,7 +93,7 @@ public class HttpQueryCollectionTests
         collection.Source!.Value.Value.ShouldBe("q=hello+world&Id=1&id=2&a=1&b=2&a=3&=skipped");
     }
 
-    [Fact]
+    [Fact(DisplayName = "Cohesion Test [Http] - HttpQueryCollection: Source returns an empty received query")]
     public void Source_ParsedEmptyQuery_ShouldReturnTheEmptyQuery()
     {
         // Arrange
@@ -105,7 +107,7 @@ public class HttpQueryCollectionTests
         collection.Source.ShouldBe(query);
     }
 
-    [Fact]
+    [Fact(DisplayName = "Cohesion Test [Http] - HttpQueryCollection: Source is null for a collection built in code")]
     public void Source_CollectionBuiltInCode_ShouldBeNull()
     {
         // Arrange
@@ -122,7 +124,7 @@ public class HttpQueryCollectionTests
         wrapped.Source.ShouldBeNull();
     }
 
-    [Theory]
+    [Theory(DisplayName = "Cohesion Test [Http] - HttpQueryCollection: Source is cleared by a change")]
     [InlineData("add")]
     [InlineData("add-pair")]
     [InlineData("indexer")]
@@ -161,7 +163,7 @@ public class HttpQueryCollectionTests
         collection.Source.ShouldBeNull();
     }
 
-    [Fact]
+    [Fact(DisplayName = "Cohesion Test [Http] - HttpQueryCollection: Source survives a Remove that removes nothing")]
     public void Source_RemoveThatRemovesNothing_ShouldKeepTheSource()
     {
         // Arrange
@@ -179,7 +181,7 @@ public class HttpQueryCollectionTests
         collection.Source.ShouldBe(query);
     }
 
-    [Fact]
+    [Fact(DisplayName = "Cohesion Test [Http] - HttpQueryCollection: Source survives a refused change")]
     public void Source_ReadOnlyMutationThatThrows_ShouldKeepTheSource()
     {
         // Arrange
@@ -193,5 +195,33 @@ public class HttpQueryCollectionTests
         // Assert
         action.ShouldThrow<InvalidOperationException>();
         collection.Source.ShouldBe(query);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http] - IHttpQueryCollection: Source is reachable through the interface")]
+    public void Source_ThroughInterface_ShouldReturnTheReceivedQueryText()
+    {
+        // Arrange
+        HttpQuery query = new("?b=2&a=1&B=3");
+
+        // Act
+        IHttpQueryCollection collection = query.Parse();
+
+        // Assert
+        collection.Source.ShouldBe(query);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http] - IHttpQueryCollection: Source defaults to null for an implementation that does not track it")]
+    public void Source_ImplementationThatDoesNotTrackIt_ShouldDefaultToNull()
+    {
+        // Arrange
+        HttpQueryCollection parsed = new HttpQuery("a=1&b=2").Parse();
+
+        // Act
+        IHttpQueryCollection wrapper = new TestQueryCollection(parsed);
+
+        // Assert
+        parsed.Source.ShouldNotBeNull();
+        wrapper.Source.ShouldBeNull();
+        wrapper.Count.ShouldBe(2);
     }
 }

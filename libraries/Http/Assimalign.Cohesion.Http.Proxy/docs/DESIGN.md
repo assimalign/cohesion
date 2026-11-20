@@ -144,9 +144,11 @@ literally. An escaped unreserved character (`%41`) comes back as the character, 
 server that splits path parameters reads differently. Forwarding the raw path needs the transport
 to keep it; #1895 tracks that.
 
-The query is forwarded **as the client sent it**: since #1894, a parsed `HttpQueryCollection`
-keeps its source text (`Source`) until the application changes the collection. A rebuilt query would
-reorder parameters and change their encoding, which breaks signed URLs. The result is created
+The query is forwarded **as the client sent it**: since #1894, a query collection reports the text it
+was parsed from (`IHttpQueryCollection.Source`) until the application changes the collection. A rebuilt
+query would reorder parameters and change their encoding, which breaks signed URLs. Any implementation
+can supply `Source`, so the forwarder still refuses text that is not a valid RFC 3986 query and encodes
+the collection instead, as it does when `Source` is `null`, the interface's default. The result is created
 with `UriCreationOptions.DangerousDisablePathAndQueryCanonicalization`, so `System.Uri` does not
 canonicalize again what the proxy already normalized. `CreateDestination` refuses a path that
 `TryNormalizePath` would change, so skipping normalization fails loudly.

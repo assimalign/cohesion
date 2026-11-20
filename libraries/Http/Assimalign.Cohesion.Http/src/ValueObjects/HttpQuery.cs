@@ -81,9 +81,8 @@ public readonly struct HttpQuery : IEquatable<HttpQuery>
     /// </para>
     /// <para>
     /// The result is the query a redirect carries, not the bytes the request carried: the parsed collection
-    /// does not keep the original order and percent-encoding. When the collection is an
-    /// <see cref="HttpQueryCollection"/> that has not changed since it was parsed, its
-    /// <see cref="HttpQueryCollection.Source"/> holds the received text.
+    /// does not keep the original order and percent-encoding. While a parsed collection is unchanged, its
+    /// <see cref="IHttpQueryCollection.Source"/> holds the received text.
     /// </para>
     /// </remarks>
     /// <param name="query">The parsed query.</param>

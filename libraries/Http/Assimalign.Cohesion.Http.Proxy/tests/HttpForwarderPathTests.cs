@@ -3,6 +3,8 @@ using System;
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.Http.Tests.TestObjects;
+
 namespace Assimalign.Cohesion.Http.Tests;
 
 public sealed class HttpForwarderPathTests
@@ -85,6 +87,50 @@ public sealed class HttpForwarderPathTests
         // Assert
         query.Source.ShouldBeNull();
         destination.AbsoluteUri.ShouldBe("http://backend/s?q=a%20b%26c");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Proxy] - CreateDestination: Should forward the source text any query collection reports")]
+    public void CreateDestination_OtherCollectionWithSource_ShouldForwardSourceText()
+    {
+        // Arrange: the parameters carry no source of their own, so the text can only come from the wrapper.
+        HttpQueryCollection parameters = new();
+        parameters.Add("q", "hello+world");
+        parameters.Add("Id", "1");
+        parameters.Add("id", "2");
+        IHttpQueryCollection query = new TestQueryCollection(parameters, new HttpQuery("q=hello+world&Id=1&id=2"));
+
+        // Act
+        Uri destination = HttpForwarder.CreateDestination(new Uri("http://backend"), new HttpPath("/s"), query);
+
+        // Assert
+        destination.AbsoluteUri.ShouldBe("http://backend/s?q=hello+world&Id=1&id=2");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Proxy] - CreateDestination: Should encode a query collection that reports no source")]
+    public void CreateDestination_CollectionWithoutSource_ShouldEncodeCollection()
+    {
+        // Arrange
+        IHttpQueryCollection query = new TestQueryCollection(new HttpQuery("?q=hello+world").Parse(), source: null);
+
+        // Act
+        Uri destination = HttpForwarder.CreateDestination(new Uri("http://backend"), new HttpPath("/s"), query);
+
+        // Assert
+        destination.AbsoluteUri.ShouldBe("http://backend/s?q=hello%2Bworld");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Proxy] - CreateDestination: Should encode the collection when its source is not query text")]
+    public void CreateDestination_SourceNotQueryText_ShouldEncodeCollection()
+    {
+        // Arrange: forwarded as is, the '#' would end the query and start a fragment.
+        HttpQuery source = new("q=1#2");
+        IHttpQueryCollection query = new TestQueryCollection(source.Parse(), source);
+
+        // Act
+        Uri destination = HttpForwarder.CreateDestination(new Uri("http://backend"), new HttpPath("/s"), query);
+
+        // Assert
+        destination.AbsoluteUri.ShouldBe("http://backend/s?q=1%232");
     }
 
     [Theory(DisplayName = "Cohesion Test [Http.Proxy] - CreateDestination: Should reject a prefix that is not a bare HTTP base")]

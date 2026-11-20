@@ -44,7 +44,7 @@ internal static class ProxyTestBackend
         Append(text, "server", name);
         Append(text, "method", request.Method.ToString());
         Append(text, "path", request.Path.Value);
-        Append(text, "query", request.Query is HttpQueryCollection { Source: HttpQuery source } ? source.Value : string.Empty);
+        Append(text, "query", request.Query.Source?.Value ?? string.Empty);
         Append(text, "host", request.Host.Value);
         foreach (string header in _reportedHeaders)
         {
