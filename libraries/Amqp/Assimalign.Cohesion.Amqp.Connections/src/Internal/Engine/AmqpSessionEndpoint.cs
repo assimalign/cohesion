@@ -584,6 +584,9 @@ internal sealed class AmqpSessionEndpoint : IAmqpSession
             FailDeliveriesLocked(link, exception);
         }
 
+        // A link that stopped is no longer attached, so an attach of its name, here or on another of the listener's
+        // connections, resumes it or attaches it anew rather than stealing it.
+        _connection.LinkRegistry?.Remove(CreateLinkKey(link), link);
         _window.Signal();
     }
 
@@ -681,8 +684,32 @@ internal sealed class AmqpSessionEndpoint : IAmqpSession
 
     private void StartAttachLocked(AmqpLinkEndpoint link)
     {
-        // The attach is encoded first: one too large for the peer's frame size leaves nothing to undo.
-        link.AttachLocked();
+        AmqpLinkRegistry? registry = _connection.LinkRegistry;
+        AmqpLinkKey key = CreateLinkKey(link);
+
+        // The application holds a link attached on another of the listener's connections or sessions, so it closes
+        // that one first: its own attach never steals a link, as it never takes over a name on its own session.
+        if (registry is not null && !registry.TryAdd(key, link))
+        {
+            throw new InvalidOperationException(
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.LinkNameInUse, link.Name));
+        }
+
+        bool attached = false;
+
+        try
+        {
+            // The attach is encoded first: one too large for the peer's frame size leaves nothing to undo.
+            link.AttachLocked();
+            attached = true;
+        }
+        finally
+        {
+            if (!attached)
+            {
+                registry?.Remove(key, link);
+            }
+        }
 
         _localLinks.Add(link.Handle, link);
         _linksByName.Add((link.Name, link.Role), link);
@@ -899,15 +926,19 @@ internal sealed class AmqpSessionEndpoint : IAmqpSession
             }
 
             // Names identify links between the two containers, so a second link of the same name and
-            // direction is refused (AMQP 1.0 Part 2, section 2.6.1).
-            if (TryCreateRemoteLinkLocked(attach, role, out AmqpLinkEndpoint? duplicate))
+            // direction is refused (AMQP 1.0 Part 2, section 2.6.1), unless the listener lets it steal the first.
+            // A link that is detaching is no longer attached, so it is not stolen.
+            if (_connection.LinkRegistry is null || !link.CanBeStolenLocked)
             {
-                duplicate.RefuseLocked(new AmqpError(
-                    AmqpErrorCondition.NotAllowed,
-                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.LinkNameInUse, attach.Name)));
-            }
+                if (TryCreateRemoteLinkLocked(attach, role, out AmqpLinkEndpoint? duplicate))
+                {
+                    duplicate.RefuseLocked(new AmqpError(
+                        AmqpErrorCondition.NotAllowed,
+                        string.Format(CultureInfo.CurrentCulture, ErrorMessages.LinkNameInUse, attach.Name)));
+                }
 
-            return;
+                return;
+            }
         }
 
         if (TryCreateRemoteLinkLocked(attach, role, out link))
@@ -919,10 +950,42 @@ internal sealed class AmqpSessionEndpoint : IAmqpSession
                 return;
             }
 
-            _linksByName.Add((attach.Name, role), link);
+            _linksByName[(attach.Name, role)] = link;
+            TakeOverLocked(link);
             CarryOverDeliveriesLocked(link);
             _requests.Writer.TryWrite(new AmqpLinkRequest(this, link, attach));
         }
+    }
+
+    /// <summary>
+    /// Lists a link the peer attached in the listener's registry, when the listener allows link stealing, and
+    /// steals the link listed under its name and direction before: the earlier attachment closes with
+    /// <c>amqp:link:stolen</c> (AMQP 1.0 Part 2, sections 2.6.1 and 2.8.18).
+    /// </summary>
+    private void TakeOverLocked(AmqpLinkEndpoint link)
+    {
+        if (_connection.LinkRegistry is not AmqpLinkRegistry registry
+            || registry.Replace(CreateLinkKey(link), link) is not AmqpLinkEndpoint previous)
+        {
+            return;
+        }
+
+        // A link on this connection is stolen under the lock already held. One on another connection is stolen
+        // under that connection's lock, which is taken only after this one is released: two connections that
+        // steal from each other at once would otherwise each wait for the other's lock.
+        if (previous.Sync == _sync)
+        {
+            previous.StealLocked();
+        }
+        else
+        {
+            ThreadPool.UnsafeQueueUserWorkItem(static stolen => stolen.Steal(), previous, preferLocal: false);
+        }
+    }
+
+    private AmqpLinkKey CreateLinkKey(AmqpLinkEndpoint link)
+    {
+        return new AmqpLinkKey(_connection.RemoteContainerId, _connection.ContainerId, link.Name, link.Role);
     }
 
     private bool TryCreateRemoteLinkLocked(AmqpAttachPerformative attach, AmqpRole role, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out AmqpLinkEndpoint? link)

@@ -280,6 +280,9 @@
   <data name="LinkNameInUse" xml:space="preserve">
     <value>A link named '{0}' is already attached in this role.</value>
   </data>
+  <data name="LinkStolen" xml:space="preserve">
+    <value>The peer attached the link again on another connection or session, which took it over.</value>
+  </data>
   <data name="LinkRoleUnexpected" xml:space="preserve">
     <value>The peer sent a frame its role on the link does not allow.</value>
   </data>

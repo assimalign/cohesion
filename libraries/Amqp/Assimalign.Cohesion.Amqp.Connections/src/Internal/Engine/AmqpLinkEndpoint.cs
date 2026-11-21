@@ -40,6 +40,8 @@ namespace Assimalign.Cohesion.Amqp.Connections.Internal;
 [DebuggerTypeProxy(typeof(DebugView))]
 internal abstract class AmqpLinkEndpoint : IAmqpLink
 {
+    private static readonly string _linkStolenDescription = ErrorMessages.LinkStolen;
+
     private readonly AmqpSessionEndpoint _session;
     private readonly Lock _sync;
     private readonly string _name;
@@ -57,6 +59,7 @@ internal abstract class AmqpLinkEndpoint : IAmqpLink
     private bool _keepsDeliveries;
     private bool? _sentDetachClosed;
     private bool _closeWhenAttached;
+    private AmqpError? _stolenError;
     private AmqpSource? _localSource;
     private IAmqpTarget? _localTarget;
     private AmqpSenderSettleMode _senderSettleMode;
@@ -172,6 +175,12 @@ internal abstract class AmqpLinkEndpoint : IAmqpLink
     internal uint? RemoteHandle => _remoteHandle;
 
     /// <summary>
+    /// Gets a value indicating whether an attach of the link's name can steal it: the link is attached, or being
+    /// attached, and neither end has detached it (AMQP 1.0 Part 2, section 2.6.1).
+    /// </summary>
+    internal bool CanBeStolenLocked => !_stopped && _state is AmqpLinkState.RemoteAttached or AmqpLinkState.AttachSent or AmqpLinkState.Attached;
+
+    /// <summary>
     /// Gets a value indicating whether the link is a control link: either end's target is a transaction
     /// coordinator (AMQP 1.0 Part 4, section 4.2). The control link carries no transactional work (section 4.1).
     /// </summary>
@@ -191,7 +200,7 @@ internal abstract class AmqpLinkEndpoint : IAmqpLink
     /// <summary>
     /// Gets the lock that guards the connection and everything on it.
     /// </summary>
-    private protected Lock Sync => _sync;
+    internal Lock Sync => _sync;
 
     /// <summary>
     /// Gets the largest message, in bytes, the local endpoint accepts, or <see langword="null"/> for no limit.
@@ -314,9 +323,10 @@ internal abstract class AmqpLinkEndpoint : IAmqpLink
         ReconcileUnsettledLocked();
         OnRemoteAttachLocked(attach);
 
-        if (_closeWhenAttached)
+        // A link stolen or canceled while its attach was unanswered closes now that the peer answered it.
+        if (_closeWhenAttached || _stolenError is not null)
         {
-            DetachLocked(true, null);
+            DetachLocked(true, _stolenError);
         }
 
         _attached.TrySetResult();
@@ -350,6 +360,52 @@ internal abstract class AmqpLinkEndpoint : IAmqpLink
         }
 
         DetachLocked(true, error);
+    }
+
+    /// <summary>
+    /// Closes the link with <c>amqp:link:stolen</c>, because the peer attached a link of the same name and
+    /// direction on another connection or session of the listener, which took it over (AMQP 1.0 Part 2, sections
+    /// 2.6.1 and 2.8.18). What waits on the link fails with a <see cref="AmqpErrorCode.LinkDetached"/> error that
+    /// carries the condition.
+    /// </summary>
+    internal void StealLocked()
+    {
+        AmqpError error = new(AmqpErrorCondition.Stolen, _linkStolenDescription);
+
+        switch (_state)
+        {
+            case AmqpLinkState.RemoteAttached:
+                RefuseLocked(error);
+                break;
+            case AmqpLinkState.AttachSent:
+                // The attach cannot be unsent: the link closes once the peer answers it, and the application's
+                // attach fails now.
+                _stolenError = error;
+                StopLocked(AmqpException.LinkDetached(error), keepDeliveries: false);
+
+                if (_attached.TrySetException(_detachedException!))
+                {
+                    _ = _attached.Task.Exception;
+                }
+
+                break;
+            case AmqpLinkState.Attached:
+                DetachLocked(true, error);
+                break;
+        }
+    }
+
+    /// <summary>
+    /// Steals the link for an attach another connection received, on a thread-pool thread that holds no lock: takes
+    /// this connection's lock, closes the link with <c>amqp:link:stolen</c> and sends the frames.
+    /// </summary>
+    internal void Steal()
+    {
+        lock (_sync)
+        {
+            StealLocked();
+            _session.Writer.Schedule();
+        }
     }
 
     /// <summary>

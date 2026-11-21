@@ -117,6 +117,12 @@ internal sealed class AmqpConnectionSettings
     public IReadOnlyDictionary<AmqpSymbol, object?>? Properties { get; init; }
 
     /// <summary>
+    /// Gets the links every connection of a listener that allows link stealing holds, which those connections
+    /// share, or <see langword="null"/> when links are not stolen.
+    /// </summary>
+    public AmqpLinkRegistry? LinkRegistry { get; init; }
+
+    /// <summary>
     /// Creates the container identifier of a listener or factory that was given none.
     /// </summary>
     public static string CreateContainerId()

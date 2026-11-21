@@ -26,8 +26,6 @@ internal static partial class AmqpComplianceMatrix
     /// </summary>
     public static IReadOnlyList<AmqpComplianceGap> Gaps { get; } =
     [
-        new("G1", "A link attached elsewhere may be stolen: a second attach takes it over and the first is closed with amqp:link:stolen. The engine keeps no registry beyond the session and refuses a second attach of a name it holds on the session with amqp:not-allowed, so a host that lets a reconnecting client take over its link closes the old link with amqp:link:stolen itself.", "Part 2, section 2.6.1",
-            WorkItem: "#1930"),
         new("G2", "An attach of a link the engine detached with an error must resume it with an unsettled map, and a pipelined re-attach without one ends the session with amqp:session:errant-link. The engine accepts it as a new attach.", "Part 2, sections 2.6.5 and 2.8.17",
             WorkItem: "#1931"),
         new("G4", "A peer may open TLS in band, by sending the AMQP TLS header (protocol id 2) and starting the TLS handshake after it. The engine answers that header with the one it supports and closes (header-phase rule H3); TLS comes from the carrier instead, as the alternative establishment allows.", "Part 5, sections 5.2 and 5.2.1",

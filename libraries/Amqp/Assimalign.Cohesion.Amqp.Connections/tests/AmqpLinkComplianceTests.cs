@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -34,8 +35,12 @@ public class AmqpLinkComplianceTests
         new("L1", "A link attaches with an attach from each end, each naming the link and its own role and choosing its own handle: the engine answers a peer's attach with the opposite role on the lowest handle it has free, and reads the peer's frames by the peer's handle.", "Part 2, sections 2.6.2, 2.6.3 and 2.7.3",
             Tests: [nameof(OnAttach_FromPeer_ShouldAnswerOnItsOwnHandle)],
             Refusals: []),
-        new("L2", "A link's name identifies it among the links of its direction: the engine attaches a sender and a receiver that share a name, refuses a second attach of a name and direction it has attached on the session with amqp:not-allowed rather than stealing the link, and refuses one of its own before sending it.", "Part 2, section 2.6.1",
-            Tests: [nameof(AttachAsync_OnSameNameInBothDirections_ShouldAttachBoth)],
+        new("L2", "A link's name identifies it among the links of its direction: the engine attaches a sender and a receiver that share a name; unless its listener allows link stealing (L15), it keeps names per session, refuses a second attach of a name and direction it has attached on the session with amqp:not-allowed rather than stealing the link, leaves a link of the same name on another connection alone, and refuses one of its own before sending it.", "Part 2, section 2.6.1",
+            Tests:
+            [
+                nameof(AttachAsync_OnSameNameInBothDirections_ShouldAttachBoth),
+                nameof(OnAttach_OnLinkAttachedOnAnotherConnectionWithoutStealing_ShouldLeaveItAttached)
+            ],
             Refusals:
             [
                 nameof(OnAttach_OnNameInUse_ShouldRefuseWithNotAllowed),
@@ -113,7 +118,18 @@ public class AmqpLinkComplianceTests
                 nameof(AmqpNetLiteClientInteropTests.DetachAsync_OnNetLiteClientLink_ShouldEndItAndKeepTheConnection)
             ],
             Refusals: [],
-            Leniency: true)
+            Leniency: true),
+        new("L15", "With link stealing on, a listener holds one attachment of each link across its connections, identified by both container identifiers, the link's name and its direction: a peer's attach of a link attached on another connection or session takes the link over, and the engine closes the earlier attachment with amqp:link:stolen and fails what waits on it, closing one the application is still attaching once the peer answers its attach; of two attaches at once, the one the listener handles second keeps the link; a peer whose suspending detach crossed the closing one attaches the link again on its connection to close it (L12), which ends the close without stealing the link back; a suspended link is no longer attached, so attaching it again resumes it rather than stealing it; and the application's own attach of a link attached elsewhere is refused before it is sent.", "Part 2, sections 2.6.1, 2.6.6 and 2.8.18",
+            Tests:
+            [
+                nameof(OnAttach_OnLinkAttachedOnAnotherConnection_ShouldStealItWithLinkStolen),
+                nameof(OnAttach_OnNameInUseWithLinkStealing_ShouldStealTheLinkOnItsSession),
+                nameof(OnAttach_OnConcurrentAttachesWithLinkStealing_ShouldKeepOneAttachment),
+                nameof(OnAttach_OnStolenLinkThePeerSuspendsMeanwhile_ShouldEndTheCloseWithoutStealingItBack),
+                nameof(OnAttach_OnSuspendedLinkWithLinkStealing_ShouldResumeItWithoutStealing),
+                nameof(OnAttach_OnLinkTheApplicationIsAttachingElsewhere_ShouldFailItsAttachAndCloseItOnceAnswered)
+            ],
+            Refusals: [nameof(AttachSenderAsync_OnLinkAttachedOnAnotherConnection_ShouldThrowBeforeSending)])
     ];
 
     [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - OnAttach: Should answer a peer's attach in the opposite role on a handle of its own")]
@@ -588,6 +604,363 @@ public class AmqpLinkComplianceTests
         next.ShouldBeOfType<AmqpFlowPerformative>().Handle.ShouldBeNull();
         sender.LinkDetached.IsCancellationRequested.ShouldBeTrue();
         session.SessionEnded.IsCancellationRequested.ShouldBeFalse();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - OnAttach: Should leave a link attached on another connection alone when the listener does not allow link stealing")]
+    public async Task OnAttach_OnLinkAttachedOnAnotherConnectionWithoutStealing_ShouldLeaveItAttached()
+    {
+        // Arrange
+        using CancellationTokenSource timeout = new(_testTimeout);
+        (AmqpScriptedHost firstHost, AmqpScriptedHost secondHost) = await AmqpScriptedHost.AcceptPairAsync(null, timeout.Token);
+        await using AmqpScriptedHost first = firstHost;
+        await using AmqpScriptedHost second = secondHost;
+        IAmqpSession firstSession = await BeginAsync(first, timeout.Token);
+        IAmqpSession secondSession = await BeginAsync(second, timeout.Token);
+        AmqpAttachPerformative attach = CreateSenderAttach(new AmqpTarget { Address = "queue" });
+        attach.Name = "orders";
+        IAmqpReceiver earlier = await AttachPeerSenderAsync(first.Peer, firstSession, attach, null, timeout.Token);
+
+        // Act
+        IAmqpReceiver later = await AttachPeerSenderAsync(second.Peer, secondSession, attach, null, timeout.Token);
+        List<string> firstFrames = await ReadThroughEchoAsync(first.Peer, timeout.Token);
+
+        // Assert
+        ((AmqpConnectionEndpoint)first.Connection).LinkRegistry.ShouldBeNull();
+        firstFrames.ShouldNotContain("detach");
+        earlier.LinkDetached.IsCancellationRequested.ShouldBeFalse();
+        later.LinkDetached.IsCancellationRequested.ShouldBeFalse();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - OnAttach: Should steal a link attached on another of the listener's connections, closing it with link-stolen")]
+    public async Task OnAttach_OnLinkAttachedOnAnotherConnection_ShouldStealItWithLinkStolen()
+    {
+        // Arrange
+        using CancellationTokenSource timeout = new(_testTimeout);
+        (AmqpScriptedHost firstHost, AmqpScriptedHost secondHost) = await AmqpScriptedHost.AcceptPairAsync(new AmqpConnectionListenerOptions { AllowLinkStealing = true }, timeout.Token);
+        await using AmqpScriptedHost first = firstHost;
+        await using AmqpScriptedHost second = secondHost;
+        AmqpLinkRegistry registry = ((AmqpConnectionEndpoint)first.Connection).LinkRegistry.ShouldNotBeNull();
+        IAmqpSession firstSession = await BeginAsync(first, timeout.Token);
+        IAmqpSession secondSession = await BeginAsync(second, timeout.Token);
+        AmqpAttachPerformative attach = CreateSenderAttach(new AmqpTarget { Address = "queue" });
+        attach.Name = "orders";
+        IAmqpReceiver stolen = await AttachPeerSenderAsync(first.Peer, firstSession, attach, null, timeout.Token);
+        Task<IAmqpDelivery> pendingReceive = stolen.ReceiveAsync(timeout.Token).AsTask();
+
+        // Act: the peer attaches the link again from its second connection, as a client that reconnected does.
+        IAmqpReceiver taker = await AttachPeerSenderAsync(second.Peer, secondSession, attach, null, timeout.Token);
+        AmqpDetachPerformative detach = await ReadUntilAsync<AmqpDetachPerformative>(first.Peer, timeout.Token);
+        AmqpException exception = await Should.ThrowAsync<AmqpException>(pendingReceive);
+        await first.Peer.WriteFrameAsync(0, new AmqpDetachPerformative { Handle = 0, Closed = true }, timeout.Token);
+        AmqpPerformative next = await ReadNextAfterEchoAsync(first.Peer, timeout.Token);
+        await second.Peer.WriteFrameAsync(0, CreateTransfer(deliveryId: 0, settled: true), timeout.Token, payload: _payload);
+        IAmqpDelivery delivery = await taker.ReceiveAsync(timeout.Token);
+
+        // Assert: the old attachment closed with the condition and nothing followed it; the new one carries the link.
+        detach.Handle.ShouldBe(stolen.Handle);
+        detach.Closed.ShouldBeTrue();
+        detach.Error.ShouldNotBeNull().Condition.ShouldBe(AmqpErrorCondition.Stolen);
+        exception.ErrorCode.ShouldBe(AmqpErrorCode.LinkDetached);
+        exception.Error.ShouldNotBeNull().Condition.ShouldBe(AmqpErrorCondition.Stolen);
+        stolen.LinkDetached.IsCancellationRequested.ShouldBeTrue();
+        next.ShouldBeOfType<AmqpFlowPerformative>().Handle.ShouldBeNull();
+        delivery.Payload.ToArray().ShouldBe(_payload);
+        registry.Count.ShouldBe(1);
+        firstSession.SessionEnded.IsCancellationRequested.ShouldBeFalse();
+        first.Connection.ConnectionClosed.IsCancellationRequested.ShouldBeFalse();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - OnAttach: Should steal a link of the same name and direction on its session when the listener allows link stealing")]
+    public async Task OnAttach_OnNameInUseWithLinkStealing_ShouldStealTheLinkOnItsSession()
+    {
+        // Arrange
+        using CancellationTokenSource timeout = new(_testTimeout);
+        await using AmqpScriptedHost host = await AmqpScriptedHost.AcceptAsync(new AmqpConnectionListenerOptions { AllowLinkStealing = true }, cancellationToken: timeout.Token);
+        AmqpTestPeer peer = host.Peer;
+        IAmqpSession session = await BeginAsync(host, timeout.Token);
+        IAmqpSender stolen = await AttachPeerReceiverAsync(peer, session, null, timeout.Token);
+        Task<AmqpDeliveryState?> pendingSend = stolen.SendAsync(_payload, cancellationToken: timeout.Token).AsTask();
+        AmqpAttachPerformative again = CreateReceiverAttach(new AmqpTarget { Address = "peer" });
+        again.Handle = 1;
+
+        // Act
+        await peer.WriteFrameAsync(0, again, timeout.Token);
+        AmqpDetachPerformative detach = await ReadUntilAsync<AmqpDetachPerformative>(peer, timeout.Token);
+        AmqpException exception = await Should.ThrowAsync<AmqpException>(pendingSend);
+        IAmqpLinkRequest request = await session.AcceptLinkAsync(timeout.Token);
+        IAmqpSender taker = await request.AcceptSenderAsync(cancellationToken: timeout.Token);
+        AmqpAttachPerformative answer = await ReadUntilAsync<AmqpAttachPerformative>(peer, timeout.Token);
+        await peer.WriteFrameAsync(0, new AmqpDetachPerformative { Handle = 0, Closed = true }, timeout.Token);
+        AmqpPerformative next = await ReadNextAfterEchoAsync(peer, timeout.Token);
+
+        // Assert
+        detach.Handle.ShouldBe(stolen.Handle);
+        detach.Closed.ShouldBeTrue();
+        detach.Error.ShouldNotBeNull().Condition.ShouldBe(AmqpErrorCondition.Stolen);
+        exception.ErrorCode.ShouldBe(AmqpErrorCode.LinkDetached);
+        exception.Error.ShouldNotBeNull().Condition.ShouldBe(AmqpErrorCondition.Stolen);
+        request.Name.ShouldBe("link");
+        answer.Name.ShouldBe("link");
+        answer.Handle.ShouldBe(taker.Handle);
+        taker.Handle.ShouldNotBe(stolen.Handle);
+        next.ShouldBeOfType<AmqpFlowPerformative>().Handle.ShouldBeNull();
+        taker.LinkDetached.IsCancellationRequested.ShouldBeFalse();
+        session.SessionEnded.IsCancellationRequested.ShouldBeFalse();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - OnAttach: Should keep one attachment of a link two connections attach at once, and steal the other")]
+    public async Task OnAttach_OnConcurrentAttachesWithLinkStealing_ShouldKeepOneAttachment()
+    {
+        // Arrange
+        using CancellationTokenSource timeout = new(_testTimeout);
+        (AmqpScriptedHost firstHost, AmqpScriptedHost secondHost) = await AmqpScriptedHost.AcceptPairAsync(new AmqpConnectionListenerOptions { AllowLinkStealing = true }, timeout.Token);
+        await using AmqpScriptedHost first = firstHost;
+        await using AmqpScriptedHost second = secondHost;
+        AmqpLinkRegistry registry = ((AmqpConnectionEndpoint)first.Connection).LinkRegistry.ShouldNotBeNull();
+        IAmqpSession firstSession = await BeginAsync(first, timeout.Token);
+        IAmqpSession secondSession = await BeginAsync(second, timeout.Token);
+        AmqpAttachPerformative attach = CreateSenderAttach(new AmqpTarget { Address = "queue" });
+        attach.Name = "orders";
+
+        // Act: both attaches race, and the application answers both requests.
+        await Task.WhenAll(first.Peer.WriteFrameAsync(0, attach, timeout.Token), second.Peer.WriteFrameAsync(0, attach, timeout.Token));
+        IAmqpLinkRequest firstRequest = await firstSession.AcceptLinkAsync(timeout.Token);
+        IAmqpLinkRequest secondRequest = await secondSession.AcceptLinkAsync(timeout.Token);
+        IAmqpReceiver?[] receivers =
+        [
+            await AcceptUnlessStolenAsync(firstRequest, timeout.Token),
+            await AcceptUnlessStolenAsync(secondRequest, timeout.Token)
+        ];
+        int stolenIndex = await WaitForStolenAsync(receivers, timeout.Token);
+        AmqpScriptedHost stolenHost = stolenIndex == 0 ? first : second;
+        AmqpScriptedHost keptHost = stolenIndex == 0 ? second : first;
+        AmqpDetachPerformative detach = await ReadUntilAsync<AmqpDetachPerformative>(stolenHost.Peer, timeout.Token);
+        List<string> keptFrames = await ReadThroughEchoAsync(keptHost.Peer, timeout.Token);
+
+        // Assert: exactly one attachment ended, with the condition, and the other kept the link.
+        detach.Closed.ShouldBeTrue();
+        detach.Error.ShouldNotBeNull().Condition.ShouldBe(AmqpErrorCondition.Stolen);
+        keptFrames.ShouldNotContain("detach");
+        IAmqpReceiver kept = receivers[1 - stolenIndex].ShouldNotBeNull();
+        kept.LinkDetached.IsCancellationRequested.ShouldBeFalse();
+        registry.Count.ShouldBe(1);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - OnAttach: Should end a stolen link's close on the attach and closing detach of a peer whose suspending detach crossed it, without stealing the link back")]
+    public async Task OnAttach_OnStolenLinkThePeerSuspendsMeanwhile_ShouldEndTheCloseWithoutStealingItBack()
+    {
+        // Arrange
+        using CancellationTokenSource timeout = new(_testTimeout);
+        (AmqpScriptedHost firstHost, AmqpScriptedHost secondHost) = await AmqpScriptedHost.AcceptPairAsync(new AmqpConnectionListenerOptions { AllowLinkStealing = true }, timeout.Token);
+        await using AmqpScriptedHost first = firstHost;
+        await using AmqpScriptedHost second = secondHost;
+        IAmqpSession firstSession = await BeginAsync(first, timeout.Token);
+        IAmqpSession secondSession = await BeginAsync(second, timeout.Token);
+        AmqpAttachPerformative attach = CreateSenderAttach(new AmqpTarget { Address = "queue" });
+        attach.Name = "orders";
+        IAmqpReceiver stolen = await AttachPeerSenderAsync(first.Peer, firstSession, attach, null, timeout.Token);
+        IAmqpReceiver taker = await AttachPeerSenderAsync(second.Peer, secondSession, attach, null, timeout.Token);
+        AmqpDetachPerformative stolenClose = await ReadUntilAsync<AmqpDetachPerformative>(first.Peer, timeout.Token);
+
+        // Act: the peer had suspended the old attachment meanwhile, so it attaches the link again there to close it.
+        await first.Peer.WriteFrameAsync(0, new AmqpDetachPerformative { Handle = 0, Closed = false }, timeout.Token);
+        await first.Peer.WriteFrameAsync(0, attach, timeout.Token);
+        AmqpAttachPerformative answer = await ReadUntilAsync<AmqpAttachPerformative>(first.Peer, timeout.Token);
+        AmqpDetachPerformative close = await ReadUntilAsync<AmqpDetachPerformative>(first.Peer, timeout.Token);
+        await first.Peer.WriteFrameAsync(0, new AmqpDetachPerformative { Handle = 0, Closed = true }, timeout.Token);
+        IAmqpLinkRequest probe = await AcceptProbeAsync(first.Peer, firstSession, timeout.Token);
+        List<string> takerFrames = await ReadThroughEchoAsync(second.Peer, timeout.Token);
+
+        // Assert: the attach ended the old close and raised no request, and the new attachment keeps the link.
+        stolenClose.Error.ShouldNotBeNull().Condition.ShouldBe(AmqpErrorCondition.Stolen);
+        answer.Name.ShouldBe("orders");
+        answer.Handle.ShouldBe(stolen.Handle);
+        close.Closed.ShouldBeTrue();
+        probe.Name.ShouldBe("probe");
+        takerFrames.ShouldNotContain("detach");
+        taker.LinkDetached.IsCancellationRequested.ShouldBeFalse();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - OnAttach: Should resume, not steal, a link the peer suspended before attaching it again on another connection")]
+    public async Task OnAttach_OnSuspendedLinkWithLinkStealing_ShouldResumeItWithoutStealing()
+    {
+        // Arrange
+        using CancellationTokenSource timeout = new(_testTimeout);
+        (AmqpScriptedHost firstHost, AmqpScriptedHost secondHost) = await AmqpScriptedHost.AcceptPairAsync(new AmqpConnectionListenerOptions { AllowLinkStealing = true }, timeout.Token);
+        await using AmqpScriptedHost first = firstHost;
+        await using AmqpScriptedHost second = secondHost;
+        AmqpLinkRegistry registry = ((AmqpConnectionEndpoint)first.Connection).LinkRegistry.ShouldNotBeNull();
+        IAmqpSession firstSession = await BeginAsync(first, timeout.Token);
+        IAmqpSession secondSession = await BeginAsync(second, timeout.Token);
+        AmqpAttachPerformative attach = CreateSenderAttach(new AmqpTarget { Address = "queue" });
+        attach.Name = "orders";
+        IAmqpReceiver suspended = await AttachPeerSenderAsync(first.Peer, firstSession, attach, null, timeout.Token);
+        await first.Peer.WriteFrameAsync(0, new AmqpDetachPerformative { Handle = 0, Closed = false }, timeout.Token);
+        AmqpDetachPerformative answer = await ReadUntilAsync<AmqpDetachPerformative>(first.Peer, timeout.Token);
+        int listedWhileSuspended = registry.Count;
+        AmqpAttachPerformative resume = CreateSenderAttach(new AmqpTarget { Address = "queue" });
+        resume.Name = "orders";
+        resume.Unsettled = new Dictionary<AmqpDeliveryTag, AmqpDeliveryState?>();
+
+        // Act
+        await second.Peer.WriteFrameAsync(0, resume, timeout.Token);
+        IAmqpLinkRequest request = await secondSession.AcceptLinkAsync(timeout.Token);
+        IAmqpReceiver resumed = await request.AcceptReceiverAsync(cancellationToken: timeout.Token);
+        AmqpPerformative next = await ReadNextAfterEchoAsync(first.Peer, timeout.Token);
+
+        // Assert: nothing reached the first connection, and the suspension, not a steal, ended the first attachment.
+        answer.Closed.ShouldBeFalse();
+        listedWhileSuspended.ShouldBe(0);
+        request.Unsettled.ShouldNotBeNull().ShouldBeEmpty();
+        next.ShouldBeOfType<AmqpFlowPerformative>().Handle.ShouldBeNull();
+        suspended.LinkDetached.IsCancellationRequested.ShouldBeTrue();
+        resumed.LinkDetached.IsCancellationRequested.ShouldBeFalse();
+        AmqpException reason = await Should.ThrowAsync<AmqpException>(async () => await suspended.ReceiveAsync(timeout.Token));
+        reason.Error.ShouldBeNull();
+        registry.Count.ShouldBe(1);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - OnAttach: Should fail the application's unanswered attach of a link the peer attaches on another connection, and close that link with link-stolen once the peer answers")]
+    public async Task OnAttach_OnLinkTheApplicationIsAttachingElsewhere_ShouldFailItsAttachAndCloseItOnceAnswered()
+    {
+        // Arrange
+        using CancellationTokenSource timeout = new(_testTimeout);
+        (AmqpScriptedHost firstHost, AmqpScriptedHost secondHost) = await AmqpScriptedHost.AcceptPairAsync(new AmqpConnectionListenerOptions { AllowLinkStealing = true }, timeout.Token);
+        await using AmqpScriptedHost first = firstHost;
+        await using AmqpScriptedHost second = secondHost;
+        AmqpLinkRegistry registry = ((AmqpConnectionEndpoint)first.Connection).LinkRegistry.ShouldNotBeNull();
+        IAmqpSession firstSession = await BeginAsync(first, timeout.Token);
+        IAmqpSession secondSession = await BeginAsync(second, timeout.Token);
+        AmqpSenderOptions options = new() { Name = "orders", Target = new AmqpTarget { Address = "peer" } };
+        Task<IAmqpSender> pendingAttach = firstSession.AttachSenderAsync(options, timeout.Token).AsTask();
+        AmqpAttachPerformative engineAttach = await ReadUntilAsync<AmqpAttachPerformative>(first.Peer, timeout.Token);
+        AmqpAttachPerformative attach = CreateReceiverAttach(new AmqpTarget { Address = "peer" });
+        attach.Name = "orders";
+
+        // Act: the peer attaches the link from its second connection before its first answers the engine's attach.
+        await second.Peer.WriteFrameAsync(0, attach, timeout.Token);
+        IAmqpLinkRequest request = await secondSession.AcceptLinkAsync(timeout.Token);
+        IAmqpSender taker = await request.AcceptSenderAsync(cancellationToken: timeout.Token);
+        AmqpException exception = await Should.ThrowAsync<AmqpException>(pendingAttach);
+        await first.Peer.WriteFrameAsync(0, new AmqpAttachPerformative
+        {
+            Name = engineAttach.Name,
+            Handle = 0,
+            Role = AmqpRole.Receiver,
+            Source = engineAttach.Source,
+            Target = engineAttach.Target
+        }, timeout.Token);
+        List<AmqpPerformative> answered = await ReadPerformativesThroughEchoAsync(first.Peer, timeout.Token);
+        await first.Peer.WriteFrameAsync(0, new AmqpDetachPerformative { Handle = 0, Closed = true }, timeout.Token);
+        AmqpPerformative next = await ReadNextAfterEchoAsync(first.Peer, timeout.Token);
+
+        // Assert: the application's attach failed with the condition, the engine closed the attachment with it once
+        // the peer answered, and the new attachment keeps the link.
+        exception.ErrorCode.ShouldBe(AmqpErrorCode.LinkDetached);
+        exception.Error.ShouldNotBeNull().Condition.ShouldBe(AmqpErrorCondition.Stolen);
+        AmqpDetachPerformative close = answered.OfType<AmqpDetachPerformative>().ShouldHaveSingleItem();
+        close.Handle.ShouldBe(engineAttach.Handle);
+        close.Closed.ShouldBeTrue();
+        close.Error.ShouldNotBeNull().Condition.ShouldBe(AmqpErrorCondition.Stolen);
+        next.ShouldBeOfType<AmqpFlowPerformative>().Handle.ShouldBeNull();
+        request.Name.ShouldBe("orders");
+        taker.LinkDetached.IsCancellationRequested.ShouldBeFalse();
+        registry.Count.ShouldBe(1);
+        firstSession.SessionEnded.IsCancellationRequested.ShouldBeFalse();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - AttachSenderAsync: Should refuse a link the peer attached on another of the listener's connections before sending anything")]
+    public async Task AttachSenderAsync_OnLinkAttachedOnAnotherConnection_ShouldThrowBeforeSending()
+    {
+        // Arrange
+        using CancellationTokenSource timeout = new(_testTimeout);
+        (AmqpScriptedHost firstHost, AmqpScriptedHost secondHost) = await AmqpScriptedHost.AcceptPairAsync(new AmqpConnectionListenerOptions { AllowLinkStealing = true }, timeout.Token);
+        await using AmqpScriptedHost first = firstHost;
+        await using AmqpScriptedHost second = secondHost;
+        IAmqpSession firstSession = await BeginAsync(first, timeout.Token);
+        IAmqpSession secondSession = await BeginAsync(second, timeout.Token);
+        AmqpAttachPerformative attach = CreateReceiverAttach(new AmqpTarget { Address = "peer" });
+        attach.Name = "orders";
+        IAmqpSender attached = await AttachPeerReceiverAsync(first.Peer, firstSession, attach, null, timeout.Token);
+        AmqpSenderOptions options = new() { Name = "orders", Target = new AmqpTarget { Address = "peer" } };
+
+        // Act
+        InvalidOperationException exception = await Should.ThrowAsync<InvalidOperationException>(async () => await secondSession.AttachSenderAsync(options, timeout.Token));
+        AmqpPerformative next = await ReadNextAfterEchoAsync(second.Peer, timeout.Token);
+
+        // Assert: the second connection sent nothing, and the first keeps the link.
+        exception.Message.ShouldBe(string.Format(CultureInfo.CurrentCulture, ErrorMessages.LinkNameInUse, "orders"));
+        next.ShouldBeOfType<AmqpFlowPerformative>().Handle.ShouldBeNull();
+        attached.LinkDetached.IsCancellationRequested.ShouldBeFalse();
+    }
+
+    /// <summary>
+    /// Accepts a link request as a receiver, or returns <see langword="null"/> when an attach on another connection
+    /// stole the link before the application answered.
+    /// </summary>
+    private static async Task<IAmqpReceiver?> AcceptUnlessStolenAsync(IAmqpLinkRequest request, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await request.AcceptReceiverAsync(cancellationToken: cancellationToken);
+        }
+        catch (AmqpException exception) when (exception.Error?.Condition == AmqpErrorCondition.Stolen)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Returns the index of the receiver whose link was stolen: one whose request could not be accepted, or the first
+    /// whose link detaches.
+    /// </summary>
+    private static async Task<int> WaitForStolenAsync(IAmqpReceiver?[] receivers, CancellationToken cancellationToken)
+    {
+        int unanswered = Array.FindIndex(receivers, receiver => receiver is null);
+
+        if (unanswered >= 0)
+        {
+            return unanswered;
+        }
+
+        Task[] detached = Array.ConvertAll(receivers, receiver => Task.Delay(Timeout.Infinite, receiver!.LinkDetached));
+        Task first = await Task.WhenAny(detached).WaitAsync(cancellationToken);
+
+        return Array.IndexOf(detached, first);
+    }
+
+    /// <summary>
+    /// Writes a session <c>flow</c> that asks for an echo, and returns the names of the performatives the engine
+    /// wrote up to and including that echo.
+    /// </summary>
+    private static async Task<List<string>> ReadThroughEchoAsync(AmqpTestPeer peer, CancellationToken cancellationToken)
+    {
+        List<AmqpPerformative> performatives = await ReadPerformativesThroughEchoAsync(peer, cancellationToken);
+
+        return performatives.ConvertAll(performative => performative.PerformativeName);
+    }
+
+    /// <summary>
+    /// Writes a session <c>flow</c> that asks for an echo, and returns the performatives the engine wrote up to and
+    /// including that echo.
+    /// </summary>
+    private static async Task<List<AmqpPerformative>> ReadPerformativesThroughEchoAsync(AmqpTestPeer peer, CancellationToken cancellationToken)
+    {
+        await peer.WriteFrameAsync(0, new AmqpFlowPerformative { IncomingWindow = 100, NextOutgoingId = 1, OutgoingWindow = 100, Echo = true }, cancellationToken);
+
+        List<AmqpPerformative> performatives = [];
+
+        while (true)
+        {
+            AmqpPerformative performative = (await peer.ReadNonEmptyFrameAsync(cancellationToken)).Performative!;
+
+            performatives.Add(performative);
+
+            if (performative is AmqpFlowPerformative { Handle: null })
+            {
+                return performatives;
+            }
+        }
     }
 
     /// <summary>

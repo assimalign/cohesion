@@ -234,8 +234,9 @@ throws `ArgumentException`, with `ParamName` `listener` or `factory`, otherwise.
   255), `IdleTimeout` (default one minute), `HandshakeTimeout` (default 10 seconds),
   `SessionOptions`, and the `open`'s `OfferedCapabilities`, `DesiredCapabilities` and `Properties`.
   The listener adds `MaxConcurrentHandshakes` (default 512, at least 1: TLS's default and the TCP
-  listener's default backlog) and `SaslMechanisms`, the server mechanisms it offers in order. The
-  factory adds `HostName` and `SaslMechanism`, the one client mechanism it uses.
+  listener's default backlog), `SaslMechanisms`, the server mechanisms it offers in order, and
+  `AllowLinkStealing` (default off, see "Links"). The factory adds `HostName` and `SaslMechanism`,
+  the one client mechanism it uses.
 - **Options are read once**, at `Create`, into an internal immutable `AmqpConnectionSettings`.
   Changing an options object afterwards does not affect a listener or factory created from it.
 - **Timeouts have floors and ceilings.** A non-positive `HandshakeTimeout` disables the limit, and a
@@ -255,6 +256,12 @@ An open connection is one `AmqpConnectionEndpoint` with its `AmqpSessionEndpoint
   frames that span levels, such as a `disposition` that settles deliveries of several links or an
   `end` that detaches every link of a session, for no gain the carrier would notice: encoding a frame
   is cheap next to writing it.
+- **One lock reaches across connections, and only beneath theirs.** A listener that allows link
+  stealing shares an `AmqpLinkRegistry` among its connections, with a lock of its own that is taken
+  under a connection's lock and never the other way round: the registry calls into nothing. A link
+  stolen from another connection is closed on a thread-pool thread that takes that connection's lock
+  after the thief's is released, because two connections stealing from each other at once would
+  otherwise each wait for the other's lock.
 - **No application code runs under the lock.** Every completion the engine signals
   (`TaskCompletionSource` with `RunContinuationsAsynchronously`, the waiters, the accept channels)
   runs its continuations asynchronously.
@@ -353,6 +360,24 @@ sequenceDiagram
   because it cannot complete on that attachment. A `disposition` that breaks a rule for a suspended
   link's delivery is not applied, since the link has no handle left to detach. Until 2026-11 a
   detach of any kind failed the link's deliveries.
+- **A listener can let a peer steal a link** (L15, #1930), with `AllowLinkStealing`. A link is
+  identified by its source container, its target container and its name (Part 2 §2.6.1), so it
+  is active on one connection at a time. With the option off, the default, each session keeps its
+  own names and refuses a second attach of a name and direction it holds (L2). With it on, the
+  listener keys every link its connections hold by both container identifiers, the name and the
+  direction, from the moment its `attach` is sent or received until it stops. A peer's `attach` of
+  a link held elsewhere, on another connection or session, becomes a new link request, and the
+  earlier attachment closes with `amqp:link:stolen`: an unanswered request is refused, an attached
+  link is closed, and an attach the peer has not answered fails the application's call at once and
+  closes when the answer arrives. What waits on the old link fails with `LinkDetached` carrying the
+  condition. Of two attaches at once, the one the registry takes second keeps the link. A link that
+  is detaching or suspended is not held, so attaching it again resumes it rather than stealing it;
+  a stolen close the peer answers by suspending follows the crossed-detach rule below, so the
+  peer's attach that closes it ends the close and steals nothing back. The application's own attach
+  of a link held elsewhere throws `InvalidOperationException` before anything is sent, as a
+  duplicate on its own session does: the application holds that link and closes it first. This is
+  what a broker needs when a client whose connection died attaches its links again from a new one
+  while the old connection waits for its idle timeout.
 
 ### Closing, ending and detaching
 
@@ -408,7 +433,7 @@ deleting one breaks the build. Rules that record a leniency say so.
 | Performatives | `AmqpPerformativeTests` | P1 to P8 | field order and defaults, mandatory fields, descriptors, restricted values, multiple-valued fields, delivery tags, errors, a zero `max-message-size` |
 | Connection | `AmqpConnectionComplianceTests` | C1 to C8 | the negotiated frame size and channels, a frame too large to write, what may follow `open`, closing and crossed closes, a carrier that ends first, idle timeouts |
 | Session | `AmqpSessionComplianceTests` | S1 to S12 | beginning on a channel, channel and handle limits, handles in use and unattached, the incoming window and what it holds, ending, crossed ends, ending with an error |
-| Link | `AmqpLinkComplianceTests` | L1 to L14 | attaching with roles and handles, link names, contradictory attaches, refusing a link, closing and suspending, link errors, who may transfer, flow echoes, crossed detaches |
+| Link | `AmqpLinkComplianceTests` | L1 to L15 | attaching with roles and handles, link names, contradictory attaches, refusing a link, closing and suspending, link errors, who may transfer, flow echoes, crossed detaches, link stealing |
 | Transfer | `AmqpTransferComplianceTests` | F1 to F20 | splitting and reassembly, settlement on frames, aborts, malformed fragmentation, terminal outcomes, credit and drains |
 | Settlement | `AmqpSettlementComplianceTests` | DS1 to DS7 | terminal outcomes, sender and receiver settle modes, disposition ranges and the deliveries they cover, deliveries of a suspended link |
 | Resume | `AmqpResumeComplianceTests` | R1 to R11 | unsettled-map comparison at both ends, resuming and aborting, the `received` state, new deliveries while maps are incomplete, the Part 3 §3.4.6 example end to end |
@@ -488,7 +513,6 @@ engine holds the rule, the rule moves into a map with its tests.
 
 | Gap | The specification | The engine | Work item |
 |---|---|---|---|
-| G1 | A second attach of a link may steal it, closing the first with `amqp:link:stolen` (Part 2 §2.6.1). | Keeps no registry beyond the session, and refuses a second attach of a name it holds on the session with `amqp:not-allowed` (L2). A host that lets a reconnecting client take over its link closes the old link with `amqp:link:stolen` itself. | #1930 |
 | G2 | An attach of a link detached with an error must resume it with an unsettled map, and a pipelined re-attach without one ends the session with `amqp:session:errant-link` (Part 2 §2.6.5 and §2.8.17). | Accepts it as a new attach. | #1931 |
 | G4 | A peer may open TLS in band, with the AMQP TLS header (protocol id 2) and the TLS handshake after it (Part 5 §5.2 and §5.2.1). | Answers that header with the one it supports and closes (H3). TLS comes from the carrier instead, the alternative establishment §5.2.1 allows. | #1935 |
 

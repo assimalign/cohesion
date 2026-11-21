@@ -196,7 +196,8 @@ public sealed class AmqpConnectionListener : ConnectionListener<IAmqpConnection>
             SessionSettings = AmqpSessionSettings.From(options.SessionOptions),
             OfferedCapabilities = options.OfferedCapabilities,
             DesiredCapabilities = options.DesiredCapabilities,
-            Properties = options.Properties
+            Properties = options.Properties,
+            LinkRegistry = options.AllowLinkStealing ? new AmqpLinkRegistry() : null
         };
 
         AmqpHandshake.ThrowIfListenerFramesTooLarge(settings, nameof(options));

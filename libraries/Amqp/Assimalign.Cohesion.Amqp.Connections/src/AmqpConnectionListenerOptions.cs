@@ -192,6 +192,31 @@ public sealed class AmqpConnectionListenerOptions
     /// </remarks>
     public IReadOnlyDictionary<AmqpSymbol, object?>? Properties { get; set; }
 
+    /// <summary>
+    /// Gets or sets a value indicating whether a peer's <c>attach</c> of a link that is attached on another of the
+    /// listener's connections, or on another session, takes the link over (AMQP 1.0 Part 2, section 2.6.1).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Defaults to <see langword="false"/>: each session keeps its own link names, refuses a second <c>attach</c>
+    /// of a name and direction it holds with <c>amqp:not-allowed</c>, and does not see links on other sessions or
+    /// connections.
+    /// </para>
+    /// <para>
+    /// When <see langword="true"/>, the listener tracks every link its connections hold by the peer's container
+    /// identifier, its own, the link's name and its direction, which together identify a link. A peer's
+    /// <c>attach</c> of a link held elsewhere is handed to the application as a new link request, and the earlier
+    /// attachment is closed with <c>amqp:link:stolen</c>, its pending sends and receives failing with a
+    /// <see cref="AmqpErrorCode.LinkDetached"/> error that carries the condition. This lets a client whose
+    /// connection died attach its links again from a new connection while the old one still waits for its idle
+    /// timeout. A link that is detaching, or was suspended, is no longer held, so attaching it again resumes it
+    /// rather than stealing it. The application's own attach of a link held elsewhere throws
+    /// <see cref="System.InvalidOperationException"/> before anything is sent, as a duplicate on its own session
+    /// does: the application holds that link, and closes it first.
+    /// </para>
+    /// </remarks>
+    public bool AllowLinkStealing { get; set; }
+
     private sealed class DebugView
     {
         private readonly AmqpConnectionListenerOptions _options;
@@ -212,5 +237,6 @@ public sealed class AmqpConnectionListenerOptions
         public IReadOnlyList<AmqpSymbol>? OfferedCapabilities => _options.OfferedCapabilities;
         public IReadOnlyList<AmqpSymbol>? DesiredCapabilities => _options.DesiredCapabilities;
         public IReadOnlyDictionary<AmqpSymbol, object?>? Properties => _options.Properties;
+        public bool AllowLinkStealing => _options.AllowLinkStealing;
     }
 }

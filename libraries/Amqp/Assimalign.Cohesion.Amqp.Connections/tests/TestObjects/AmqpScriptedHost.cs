@@ -63,6 +63,55 @@ internal sealed class AmqpScriptedHost : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// Opens two connections to one new listener, each from its own scripted peer. Both peers send the same
+    /// container identifier, so a link is the same link whichever connection attaches it. Disposing either host
+    /// disposes the shared listener.
+    /// </summary>
+    public static async Task<(AmqpScriptedHost First, AmqpScriptedHost Second)> AcceptPairAsync(
+        AmqpConnectionListenerOptions? options,
+        CancellationToken cancellationToken)
+    {
+        TestConnection firstCarrier = new();
+        TestConnection secondCarrier = new();
+        TestConnectionListener carrierListener = new();
+
+        carrierListener.Enqueue(firstCarrier);
+        carrierListener.Enqueue(secondCarrier);
+
+        AmqpConnectionListener listener = AmqpConnectionListener.Create(carrierListener, options);
+        AmqpTestPeer firstPeer = new(firstCarrier);
+        AmqpTestPeer secondPeer = new(secondCarrier);
+        IAmqpConnection? first = null;
+
+        try
+        {
+            // Only the peer that opened has written anything, so each accept returns that peer's connection.
+            Task<IAmqpConnection> acceptFirst = listener.AcceptAsync(cancellationToken).AsTask();
+            AmqpOpenPerformative firstOpen = await firstPeer.OpenAsClientAsync(null, cancellationToken);
+            first = await acceptFirst;
+
+            Task<IAmqpConnection> acceptSecond = listener.AcceptAsync(cancellationToken).AsTask();
+            AmqpOpenPerformative secondOpen = await secondPeer.OpenAsClientAsync(null, cancellationToken);
+            IAmqpConnection second = await acceptSecond;
+
+            return (new AmqpScriptedHost(firstPeer, listener, first, firstOpen), new AmqpScriptedHost(secondPeer, listener, second, secondOpen));
+        }
+        catch
+        {
+            firstCarrier.CompletePeerOutput();
+            secondCarrier.CompletePeerOutput();
+
+            if (first is not null)
+            {
+                await first.DisposeAsync();
+            }
+
+            await listener.DisposeAsync();
+            throw;
+        }
+    }
+
     public async ValueTask DisposeAsync()
     {
         Peer.Carrier.CompletePeerOutput();
