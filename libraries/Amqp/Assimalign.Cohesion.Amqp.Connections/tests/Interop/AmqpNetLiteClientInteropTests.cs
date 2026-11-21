@@ -673,6 +673,46 @@ public sealed class AmqpNetLiteClientInteropTests : IDisposable
         await peer.CloseAsync();
     }
 
+    [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - Interop AcceptLinkAsync: Should take AMQPNetLite's attach of a link name the broker refused as a new link, though it carries no unsettled map")]
+    public async Task AcceptLinkAsync_OnNetLiteAttachAfterRefusal_ShouldTakeItAsANewLink()
+    {
+        // Arrange: the broker refuses the client's link, as it does for a node that does not exist yet.
+        using CancellationTokenSource timeout = new(_testTimeout);
+        await using AmqpInteropBroker broker = await AmqpInteropBroker.StartAsync(null, timeout.Token);
+        (IAmqpConnection server, NetLite.Connection peer) = await ConnectAsync(broker, timeout.Token);
+        await using IAmqpConnection serverConnection = server;
+        Task<IAmqpSession> accept = AcceptSessionWithPeerAsync(server, peer, out NetLite.Session peerSession, timeout.Token);
+        TaskCompletionSource<NetLiteFraming.Error?> refused = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        NetLite.SenderLink first = new(peerSession, "orders-sender", "orders");
+        first.AddClosedCallback((_, error) => refused.TrySetResult(error));
+        IAmqpSession session = await accept;
+        IAmqpLinkRequest request = await session.AcceptLinkAsync(timeout.Token);
+        await request.RejectAsync(new AmqpError(AmqpErrorCondition.NotFound, "no such node"), timeout.Token);
+        NetLiteFraming.Error? error = await refused.Task.WaitAsync(timeout.Token);
+
+        // Act: the client tries the node again on the same session, with the same link name.
+        Task<IAmqpReceiver> attach = AcceptReceiverAsync(session, timeout.Token);
+        NetLite.SenderLink second = new(peerSession, "orders-sender", "orders");
+        IAmqpReceiver receiver = await attach;
+        Task send = second.SendAsync(new NetLite.Message("retried"));
+        IAmqpDelivery delivery = await ReceiveFromPeerAsync(receiver, send, timeout.Token);
+        await delivery.AcceptAsync(timeout.Token);
+        await send.WaitAsync(timeout.Token);
+
+        // Assert: the client's second attach carried no unsettled map, and the broker took it as an ordinary link.
+        string[] attaches = [.. _trace.Frames.Where(frame => frame.StartsWith("SEND", StringComparison.Ordinal) && frame.Contains(") attach(", StringComparison.Ordinal))];
+        _trace.LinkFrames.ShouldBe(["SEND attach", "RECV attach", "RECV detach closed", "SEND detach closed", "SEND attach", "RECV attach"]);
+        error.ShouldNotBeNull().Condition.ToString().ShouldBe(NetLite.ErrorCode.NotFound);
+        attaches.Length.ShouldBe(2);
+        attaches[1].ShouldNotContain(",unsettled:", Case.Sensitive);
+        receiver.Name.ShouldBe("orders-sender");
+        delivery.GetMessage().Body.ShouldBeOfType<AmqpValueBody>().Value.ShouldBe("retried");
+        session.SessionEnded.IsCancellationRequested.ShouldBeFalse();
+        server.ConnectionClosed.IsCancellationRequested.ShouldBeFalse();
+
+        await peer.CloseAsync();
+    }
+
     [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - Interop CloseAsync: Should give AMQPNetLite the error the broker closed with")]
     public async Task CloseAsync_WithErrorToNetLite_ShouldReachThePeer()
     {

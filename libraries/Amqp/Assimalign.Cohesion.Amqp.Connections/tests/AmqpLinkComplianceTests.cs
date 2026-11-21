@@ -129,7 +129,16 @@ public class AmqpLinkComplianceTests
                 nameof(OnAttach_OnSuspendedLinkWithLinkStealing_ShouldResumeItWithoutStealing),
                 nameof(OnAttach_OnLinkTheApplicationIsAttachingElsewhere_ShouldFailItsAttachAndCloseItOnceAnswered)
             ],
-            Refusals: [nameof(AttachSenderAsync_OnLinkAttachedOnAnotherConnection_ShouldThrowBeforeSending)])
+            Refusals: [nameof(AttachSenderAsync_OnLinkAttachedOnAnotherConnection_ShouldThrowBeforeSending)]),
+        new("L16", "An attach of a name whose link the engine detached with an error, a refused attach included, is a new link when it carries no unsettled map, not a pipelined re-attach that ends the session with amqp:session:errant-link: the engine destroyed the old endpoint, so nothing is resumed or lost by attaching anew, while ending the session would end every other link on it for a client that tries a missing node again, and AMQPNetLite never sends an unsettled map.", "Part 2, sections 2.6.5 and 2.8.17",
+            Tests:
+            [
+                nameof(OnAttach_AfterRefusingTheName_ShouldTakeItAsANewLink),
+                nameof(OnAttach_AfterErrorDetach_ShouldTakeAPipelinedAttachAsANewLink),
+                nameof(AmqpNetLiteClientInteropTests.AcceptLinkAsync_OnNetLiteAttachAfterRefusal_ShouldTakeItAsANewLink)
+            ],
+            Refusals: [],
+            Leniency: true)
     ];
 
     [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - OnAttach: Should answer a peer's attach in the opposite role on a handle of its own")]
@@ -352,6 +361,78 @@ public class AmqpLinkComplianceTests
         receiver.LinkDetached.IsCancellationRequested.ShouldBeTrue();
         session.SessionEnded.IsCancellationRequested.ShouldBeFalse();
         host.Connection.State.ShouldBe(ConnectionState.Open);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - OnAttach: Should take an attach of a name it refused, without an unsettled map, as a new link rather than ending the session with errant-link")]
+    public async Task OnAttach_AfterRefusingTheName_ShouldTakeItAsANewLink()
+    {
+        // Arrange: the application refuses the peer's link, as a broker does for a node that does not exist yet.
+        using CancellationTokenSource timeout = new(_testTimeout);
+        await using AmqpScriptedHost host = await AmqpScriptedHost.AcceptAsync(cancellationToken: timeout.Token);
+        AmqpTestPeer peer = host.Peer;
+        IAmqpSession session = await BeginAsync(host, timeout.Token);
+        AmqpAttachPerformative attach = CreateSenderAttach(new AmqpTarget { Address = "orders" });
+        attach.Name = "orders";
+        await peer.WriteFrameAsync(0, attach, timeout.Token);
+        IAmqpLinkRequest refused = await session.AcceptLinkAsync(timeout.Token);
+        await refused.RejectAsync(new AmqpError(AmqpErrorCondition.NotFound, "no such node"), timeout.Token);
+        AmqpAttachPerformative refusal = await ReadUntilAsync<AmqpAttachPerformative>(peer, timeout.Token);
+        AmqpDetachPerformative refusalDetach = await ReadUntilAsync<AmqpDetachPerformative>(peer, timeout.Token);
+        await peer.WriteFrameAsync(0, new AmqpDetachPerformative { Handle = 0, Closed = true }, timeout.Token);
+
+        // Act: the peer tries the node again on the same session, with the same name and no unsettled map.
+        await peer.WriteFrameAsync(0, attach, timeout.Token);
+        IAmqpLinkRequest request = await session.AcceptLinkAsync(timeout.Token);
+        IAmqpReceiver receiver = await request.AcceptReceiverAsync(cancellationToken: timeout.Token);
+        AmqpAttachPerformative answer = await ReadUntilAsync<AmqpAttachPerformative>(peer, timeout.Token);
+        await peer.WriteFrameAsync(0, CreateTransfer(deliveryId: 0, settled: true), timeout.Token, payload: _payload);
+        IAmqpDelivery delivery = await receiver.ReceiveAsync(timeout.Token);
+
+        // Assert: the refusal was a detach with an error, and the next attach of the name is an ordinary link.
+        refusal.Target.ShouldBeNull();
+        refusalDetach.Closed.ShouldBeTrue();
+        refusalDetach.Error.ShouldNotBeNull().Condition.ShouldBe(AmqpErrorCondition.NotFound);
+        request.Name.ShouldBe("orders");
+        request.Unsettled.ShouldBeNull();
+        answer.Name.ShouldBe("orders");
+        answer.Target.ShouldNotBeNull();
+        delivery.Payload.ToArray().ShouldBe(_payload);
+        session.SessionEnded.IsCancellationRequested.ShouldBeFalse();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - OnAttach: Should take a pipelined attach of a link it detached with an error, without an unsettled map, as a new link rather than ending the session with errant-link")]
+    public async Task OnAttach_AfterErrorDetach_ShouldTakeAPipelinedAttachAsANewLink()
+    {
+        // Arrange: a transfer without credit detaches the link with an error.
+        using CancellationTokenSource timeout = new(_testTimeout);
+        await using AmqpScriptedHost host = await AmqpScriptedHost.AcceptAsync(cancellationToken: timeout.Token);
+        AmqpTestPeer peer = host.Peer;
+        IAmqpSession session = await BeginAsync(host, timeout.Token);
+        AmqpAttachPerformative attach = CreateSenderAttach(new AmqpTarget { Address = "queue" });
+        attach.Name = "orders";
+        IAmqpReceiver failed = await AttachPeerSenderAsync(peer, session, attach, new AmqpReceiverOptions { Prefetch = 0 }, timeout.Token);
+        await peer.WriteFrameAsync(0, CreateTransfer(deliveryId: 0), timeout.Token, payload: _payload);
+        AmqpDetachPerformative detach = await ReadUntilAsync<AmqpDetachPerformative>(peer, timeout.Token);
+
+        // Act: the peer answers the detach and attaches the link again in the same breath, with no unsettled map.
+        await peer.WriteFrameAsync(0, new AmqpDetachPerformative { Handle = 0, Closed = true }, timeout.Token);
+        await peer.WriteFrameAsync(0, attach, timeout.Token);
+        IAmqpLinkRequest request = await session.AcceptLinkAsync(timeout.Token);
+        IAmqpReceiver receiver = await request.AcceptReceiverAsync(cancellationToken: timeout.Token);
+        AmqpAttachPerformative answer = await ReadUntilAsync<AmqpAttachPerformative>(peer, timeout.Token);
+        await peer.WriteFrameAsync(0, CreateTransfer(deliveryId: 1, settled: true), timeout.Token, payload: _payload);
+        IAmqpDelivery delivery = await receiver.ReceiveAsync(timeout.Token);
+
+        // Assert: the engine destroyed the failed endpoint, and the attach made a new one in its place.
+        detach.Closed.ShouldBeTrue();
+        detach.Error.ShouldNotBeNull().Condition.ShouldBe(AmqpErrorCondition.TransferLimitExceeded);
+        failed.LinkDetached.IsCancellationRequested.ShouldBeTrue();
+        request.Name.ShouldBe("orders");
+        request.Unsettled.ShouldBeNull();
+        answer.Name.ShouldBe("orders");
+        receiver.Handle.ShouldBe(answer.Handle);
+        delivery.Payload.ToArray().ShouldBe(_payload);
+        session.SessionEnded.IsCancellationRequested.ShouldBeFalse();
     }
 
     [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - OnTransfer: Should detach a link with illegal-state when the peer, its receiver, sends a transfer on it")]

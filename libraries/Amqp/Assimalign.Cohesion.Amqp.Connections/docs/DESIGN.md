@@ -405,6 +405,19 @@ sequenceDiagram
   `amqp:not-found` (see "Interoperability"). Either crossing is handled once: a `detach` that
   follows the exchange ends the link whatever it says. Until 2026-11 the engine took either crossing
   `detach` as the answer to its own.
+- **A link detached with an error can be attached again as a new link** (L16, #1931, a leniency).
+  Part 2 §2.6.5 destroys a link endpoint detached with an error: the peer must resume it, with an
+  unsettled map that tells the resume from a pipelined re-attach, and a re-attach without one ends
+  the session with `amqp:session:errant-link` (§2.8.17). The engine does not enforce that, and takes
+  such an attach as a new link. A refused attach is also a detach with an error, so enforcing it
+  would end the whole session of a client that tries a node again once it exists, under the same
+  name, and AMQPNetLite never sends an unsettled map at all (the interop test shows its second
+  attach). Nothing is lost by attaching anew: the engine already destroyed the old endpoint and failed
+  its deliveries. An attach that does carry an unsettled map is a resume, which the Resume map's
+  rules reconcile against what the engine still holds, and for a link that failed that is nothing.
+  Decided 2026-11-21; the alternative, remembering for some period the names of links detached with
+  an error, was rejected for the session it costs a well-behaved retry. Input the peer sent for the
+  old link before it read the error is still discarded (L8).
 
 ### Idle timeout
 
@@ -433,7 +446,7 @@ deleting one breaks the build. Rules that record a leniency say so.
 | Performatives | `AmqpPerformativeTests` | P1 to P8 | field order and defaults, mandatory fields, descriptors, restricted values, multiple-valued fields, delivery tags, errors, a zero `max-message-size` |
 | Connection | `AmqpConnectionComplianceTests` | C1 to C8 | the negotiated frame size and channels, a frame too large to write, what may follow `open`, closing and crossed closes, a carrier that ends first, idle timeouts |
 | Session | `AmqpSessionComplianceTests` | S1 to S12 | beginning on a channel, channel and handle limits, handles in use and unattached, the incoming window and what it holds, ending, crossed ends, ending with an error |
-| Link | `AmqpLinkComplianceTests` | L1 to L15 | attaching with roles and handles, link names, contradictory attaches, refusing a link, closing and suspending, link errors, who may transfer, flow echoes, crossed detaches, link stealing |
+| Link | `AmqpLinkComplianceTests` | L1 to L16 | attaching with roles and handles, link names, contradictory attaches, refusing a link, closing and suspending, link errors and attaching after one, who may transfer, flow echoes, crossed detaches, link stealing |
 | Transfer | `AmqpTransferComplianceTests` | F1 to F20 | splitting and reassembly, settlement on frames, aborts, malformed fragmentation, terminal outcomes, credit and drains |
 | Settlement | `AmqpSettlementComplianceTests` | DS1 to DS7 | terminal outcomes, sender and receiver settle modes, disposition ranges and the deliveries they cover, deliveries of a suspended link |
 | Resume | `AmqpResumeComplianceTests` | R1 to R11 | unsettled-map comparison at both ends, resuming and aborting, the `received` state, new deliveries while maps are incomplete, the Part 3 §3.4.6 example end to end |
@@ -473,6 +486,10 @@ The leniencies, each accepted because the meaning is clear and nothing is at ris
 - **L14:** a closing `detach` that answers the engine's suspending one ends a link the peer
   attached, without the second attach Part 2 §2.6.6 asks the engine to send: the peer closed the
   link, and a peer that only initiates links may refuse an attach it did not ask for.
+- **L16:** an `attach` of a name whose link the engine detached with an error, a refused attach
+  included, is a new link when it carries no unsettled map, rather than a pipelined re-attach that
+  ends the session with `amqp:session:errant-link`: the old endpoint is gone, so nothing is resumed
+  or lost, and the session's other links live on.
 - **DS6:** a peer's transfer is settled or unsettled by its own `settled` flag, even where that
   contradicts the sender settle mode the peer declared: the flag states what the sender did, and
   refusing it would strand the delivery.
@@ -513,7 +530,6 @@ engine holds the rule, the rule moves into a map with its tests.
 
 | Gap | The specification | The engine | Work item |
 |---|---|---|---|
-| G2 | An attach of a link detached with an error must resume it with an unsettled map, and a pipelined re-attach without one ends the session with `amqp:session:errant-link` (Part 2 §2.6.5 and §2.8.17). | Accepts it as a new attach. | #1931 |
 | G4 | A peer may open TLS in band, with the AMQP TLS header (protocol id 2) and the TLS handshake after it (Part 5 §5.2 and §5.2.1). | Answers that header with the one it supports and closes (H3). TLS comes from the carrier instead, the alternative establishment §5.2.1 allows. | #1935 |
 
 ## Regression register (#433)
@@ -582,7 +598,7 @@ them alone and `--filter "Category!=Interop"` leaves them out; CI runs both.
 
 | Direction | Tests | Scenarios |
 |---|---|---|
-| AMQPNetLite client, Cohesion listener | `AmqpNetLiteClientInteropTests` (21) | SASL PLAIN and ANONYMOUS; a refused password while the listener keeps accepting; each outcome and pre-settled transfers both ways; every type AMQPNetLite encodes, through both codecs; every message section both ways; messages split across frames both ways; order across sessions and links; a refused link; a close with an error both ways; a committed and an abandoned `TransactionScope` through the broker's coordinator; drain; a suspending detach the client answers by closing, with the connection kept; idle timeout kept with empty frames |
+| AMQPNetLite client, Cohesion listener | `AmqpNetLiteClientInteropTests` (22) | SASL PLAIN and ANONYMOUS; a refused password while the listener keeps accepting; each outcome and pre-settled transfers both ways; every type AMQPNetLite encodes, through both codecs; every message section both ways; messages split across frames both ways; order across sessions and links; a refused link, and the same name attached again on the session; a close with an error both ways; a committed and an abandoned `TransactionScope` through the broker's coordinator; drain; a suspending detach the client answers by closing, with the connection kept; idle timeout kept with empty frames |
 | Cohesion client, AMQPNetLite `ContainerHost` | `AmqpNetLiteHostInteropTests` (12) | SASL PLAIN and ANONYMOUS; a refused password; close; each outcome from a message processor; 50 sends within a credit of 5, in order; split sends; settlements reported to a message source; 300 messages within a prefetch of 50, in order; split receives; a link refused with `amqp:not-found`; a suspending detach the host answers by closing, attached again and closed |
 
 **Reading a failure.** Each test prints every frame AMQPNetLite sent and received. A failure is
