@@ -274,6 +274,9 @@
   <data name="LinkRefused" xml:space="preserve">
     <value>The peer refused to attach the AMQP link.</value>
   </data>
+  <data name="DeliveryCarriedOver" xml:space="preserve">
+    <value>The AMQP link was attached again under its name, so the delivery carries over to the new attachment, whose unsettled maps settle or resume it.</value>
+  </data>
   <data name="LinkNameInUse" xml:space="preserve">
     <value>A link named '{0}' is already attached in this role.</value>
   </data>

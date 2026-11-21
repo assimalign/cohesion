@@ -340,6 +340,19 @@ sequenceDiagram
 - **A delivery is reassembled under the lock and handed out whole.** Its payload never changes after
   its last frame arrives. A delivery the sender aborts is discarded, unless it was resumed (see
   "Compliance maps", the resume map).
+- **A suspended link's deliveries stay live.** A link detached without closing and without an error
+  (`DetachAsync()`, or the peer's `detach` without `closed` or an error) leaves its unsettled
+  deliveries tracked on the session, because a `disposition` may still name them and its state must
+  be applied (Part 2 §2.7.6): a pending send completes with the receiver's outcome, and the
+  application can still settle a delivery it took (DS7, #1933). They end, failing with
+  `LinkDetached`, when the link closes or detaches with an error at either end, a peer's answer to a
+  suspension included; when it attaches again under its name on the session, since they then carry
+  over to the new attachment's unsettled maps and a `disposition` no longer names them by their old
+  delivery-ids; or when the session ends. A link attached again on another session leaves them to
+  the first session's end. A delivery whose frames were not all sent or received ends at once,
+  because it cannot complete on that attachment. A `disposition` that breaks a rule for a suspended
+  link's delivery is not applied, since the link has no handle left to detach. Until 2026-11 a
+  detach of any kind failed the link's deliveries.
 
 ### Closing, ending and detaching
 
@@ -384,7 +397,7 @@ deleting one breaks the build. Rules that record a leniency say so.
 | Session | `AmqpSessionComplianceTests` | S1 to S12 | beginning on a channel, channel and handle limits, handles in use and unattached, the incoming window and what it holds, ending, crossed ends, ending with an error |
 | Link | `AmqpLinkComplianceTests` | L1 to L11 | attaching with roles and handles, link names, contradictory attaches, refusing a link, closing and suspending, link errors, who may transfer, flow echoes |
 | Transfer | `AmqpTransferComplianceTests` | F1 to F20 | splitting and reassembly, settlement on frames, aborts, malformed fragmentation, terminal outcomes, credit and drains |
-| Settlement | `AmqpSettlementComplianceTests` | DS1 to DS6 | terminal outcomes, sender and receiver settle modes, disposition ranges and the deliveries they cover |
+| Settlement | `AmqpSettlementComplianceTests` | DS1 to DS7 | terminal outcomes, sender and receiver settle modes, disposition ranges and the deliveries they cover, deliveries of a suspended link |
 | Resume | `AmqpResumeComplianceTests` | R1 to R11 | unsettled-map comparison at both ends, resuming and aborting, the `received` state, new deliveries while maps are incomplete, the Part 3 §3.4.6 example end to end |
 | Transactions | `AmqpTransactionComplianceTests` | T1 to T14 | declare and discharge, transactional work on transfers and dispositions, acquisition, identifiers, capabilities |
 
@@ -463,7 +476,6 @@ engine holds the rule, the rule moves into a map with its tests.
 | G2 | An attach of a link detached with an error must resume it with an unsettled map, and a pipelined re-attach without one ends the session with `amqp:session:errant-link` (Part 2 §2.6.5 and §2.8.17). | Accepts it as a new attach. | #1931 |
 | G3 | When one end closes a link while the other suspends it, the end that suspended reattaches the link and then closes it (Part 2 §2.6.6). | Takes either crossing `detach` as the answer to its own: it does not reattach to close a link it suspended, and a peer that reattaches to close a link the engine closed reaches the application as a new link request. | #1932 |
 | G4 | A peer may open TLS in band, with the AMQP TLS header (protocol id 2) and the TLS handshake after it (Part 5 §5.2 and §5.2.1). | Answers that header with the one it supports and closes (H3). TLS comes from the carrier instead, the alternative establishment §5.2.1 allows. | #1935 |
-| G6 | A delivery on a link detached without closing and without an error stays live, and a disposition that names it applies (Part 2 §2.7.6). | Fails a suspended link's deliveries when the link detaches and passes over a later disposition for them. Resuming the link reconciles their state through the unsettled maps instead. | #1933 |
 
 ## Regression register (#433)
 

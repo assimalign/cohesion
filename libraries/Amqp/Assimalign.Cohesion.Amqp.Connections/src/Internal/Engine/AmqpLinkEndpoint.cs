@@ -22,6 +22,12 @@ namespace Assimalign.Cohesion.Amqp.Connections.Internal;
 /// A link stops carrying deliveries as soon as either peer sends <c>detach</c> or its session stops; its
 /// handles and name are released once both peers have detached it.
 /// </para>
+/// <para>
+/// A link detached without closing and without an error is suspended, and its unsettled deliveries stay live
+/// in the session: a <c>disposition</c> that names one still applies to it (AMQP 1.0 Part 2, section 2.7.6).
+/// They end when the link closes or detaches with an error, when it attaches again under its name, or when
+/// the session ends.
+/// </para>
 /// </remarks>
 [DebuggerDisplay("AmqpLink {Name,nq} ({Role}, {State})")]
 [DebuggerTypeProxy(typeof(DebugView))]
@@ -40,6 +46,7 @@ internal abstract class AmqpLinkEndpoint : IAmqpLink
     private uint? _remoteHandle;
     private AmqpException? _detachedException;
     private bool _stopped;
+    private bool _keepsDeliveries;
     private bool _closeWhenAttached;
     private AmqpSource? _localSource;
     private IAmqpTarget? _localTarget;
@@ -316,7 +323,7 @@ internal abstract class AmqpLinkEndpoint : IAmqpLink
         WriteRefusalLocked();
         WriteDetachLocked(true, error);
         _state = AmqpLinkState.DetachSent;
-        StopLocked(AmqpException.LinkDetached(error));
+        StopLocked(AmqpException.LinkDetached(error), keepDeliveries: false);
     }
 
     /// <summary>
@@ -346,20 +353,28 @@ internal abstract class AmqpLinkEndpoint : IAmqpLink
                 // The peer gave up before the application answered: answer as a refusal, so both ends close.
                 WriteRefusalLocked();
                 WriteDetachLocked(detach.Closed, null);
-                DetachedLocked(AmqpException.LinkDetached(detach.Error));
+                DetachedLocked(AmqpException.LinkDetached(detach.Error), keepDeliveries: false);
                 break;
             case AmqpLinkState.AttachRefused:
                 WriteDetachLocked(detach.Closed, null);
-                DetachedLocked(AmqpException.LinkRefused(detach.Error));
+                DetachedLocked(AmqpException.LinkRefused(detach.Error), keepDeliveries: false);
                 break;
             case AmqpLinkState.Attached:
-                // The peer detaches: answer with the same closed flag (AMQP 1.0 Part 2, section 2.6.6).
+                // The peer detaches: answer with the same closed flag (AMQP 1.0 Part 2, section 2.6.6). A peer that
+                // suspends the link keeps its deliveries live (section 2.7.6).
                 WriteDetachLocked(detach.Closed, null);
-                DetachedLocked(AmqpException.LinkDetached(detach.Error));
+                DetachedLocked(AmqpException.LinkDetached(detach.Error), keepDeliveries: IsSuspension(detach.Closed, detach.Error));
                 break;
             case AmqpLinkState.DetachSent:
-                // The peer answers the detach this endpoint sent.
-                DetachedLocked(_detachedException ?? AmqpException.LinkDetached(detach.Error));
+                // The peer answers the detach this endpoint sent. An answer that closes the link, or carries an
+                // error, ends the deliveries a suspension kept live.
+                if (_keepsDeliveries && !IsSuspension(detach.Closed, detach.Error))
+                {
+                    _keepsDeliveries = false;
+                    _session.FailDeliveriesLocked(this, AmqpException.LinkDetached(detach.Error));
+                }
+
+                DetachedLocked(_detachedException ?? AmqpException.LinkDetached(detach.Error), _keepsDeliveries);
                 break;
         }
     }
@@ -375,7 +390,7 @@ internal abstract class AmqpLinkEndpoint : IAmqpLink
         }
 
         _state = AmqpLinkState.Detached;
-        StopLocked(AmqpException.LinkDetached(null, sessionException));
+        StopLocked(AmqpException.LinkDetached(null, sessionException), keepDeliveries: false);
 
         // An attach still waiting for the peer's answer fails with the session's reason.
         if (_attached.TrySetException(sessionException))
@@ -420,7 +435,7 @@ internal abstract class AmqpLinkEndpoint : IAmqpLink
 
         WriteDetachLocked(closed, error);
         _state = AmqpLinkState.DetachSent;
-        StopLocked(AmqpException.LinkDetached(error));
+        StopLocked(AmqpException.LinkDetached(error), IsSuspension(closed, error));
     }
 
     /// <summary>
@@ -532,7 +547,16 @@ internal abstract class AmqpLinkEndpoint : IAmqpLink
         }
     }
 
-    private void StopLocked(AmqpException exception)
+    /// <summary>
+    /// Returns whether a <c>detach</c> suspends the link: it neither closes the link nor carries an error, so the
+    /// link's unsettled deliveries stay live (AMQP 1.0 Part 2, section 2.7.6).
+    /// </summary>
+    private static bool IsSuspension(bool closed, AmqpError? error)
+    {
+        return !closed && error is null;
+    }
+
+    private void StopLocked(AmqpException exception, bool keepDeliveries)
     {
         _detachedException ??= exception;
 
@@ -542,19 +566,20 @@ internal abstract class AmqpLinkEndpoint : IAmqpLink
         }
 
         _stopped = true;
+        _keepsDeliveries = keepDeliveries;
 
         // The token is canceled before any waiting operation fails, so code that observes such a failure
         // always finds LinkDetached canceled: a failed receive's continuation runs on another thread and can
         // start before this method returns. CancelAsync marks the token at once and runs its callbacks later.
         _ = _detachedSource.CancelAsync();
         OnStoppedLocked(_detachedException);
-        _session.OnLinkStoppedLocked(this, _detachedException);
+        _session.OnLinkStoppedLocked(this, _detachedException, keepDeliveries);
     }
 
-    private void DetachedLocked(AmqpException exception)
+    private void DetachedLocked(AmqpException exception, bool keepDeliveries)
     {
         _state = AmqpLinkState.Detached;
-        StopLocked(exception);
+        StopLocked(exception, keepDeliveries);
 
         // A refused attach fails with the peer's reason.
         if (_attached.TrySetException(_detachedException!))

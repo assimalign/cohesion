@@ -16,6 +16,12 @@ namespace Assimalign.Cohesion.Amqp;
 /// outcome unsettled and completes when the sender settles. A delivery the sender sent settled needs no
 /// outcome, so settling it does nothing. Only the first settlement call has an effect.
 /// </para>
+/// <para>
+/// A delivery stays live while its link is suspended (detached without closing and without an error): it
+/// can still be settled, and a <c>disposition</c> the sender sends still applies to it (AMQP 1.0 Part 2,
+/// section 2.7.6). It can no longer be settled once the link closes or detaches with an error, attaches
+/// again under its name on the session, or its session ends.
+/// </para>
 /// </remarks>
 public interface IAmqpDelivery
 {

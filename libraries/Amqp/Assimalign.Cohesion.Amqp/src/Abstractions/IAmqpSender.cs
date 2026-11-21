@@ -19,6 +19,14 @@ namespace Assimalign.Cohesion.Amqp;
 /// <see cref="AmqpReceiverSettleMode.Second"/> the sender settles the delivery when that outcome
 /// arrives, and the receiver settles after it.
 /// </para>
+/// <para>
+/// A delivery whose frames are all sent stays pending when its link is suspended (detached without
+/// closing and without an error), because the receiver's outcome still settles it (AMQP 1.0 Part 2,
+/// section 2.7.6). It fails with <see cref="AmqpErrorCode.LinkDetached"/> when the link closes or
+/// detaches with an error, when the link attaches again under its name on the session, which carries the
+/// delivery over to the new attachment's unsettled maps, or when the session ends. A delivery whose
+/// frames were not all sent fails as soon as its link detaches.
+/// </para>
 /// </remarks>
 public interface IAmqpSender : IAmqpLink
 {
@@ -98,7 +106,7 @@ public interface IAmqpSender : IAmqpLink
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="message"/> is <see langword="null"/>.</exception>
     /// <exception cref="ArgumentException">Thrown when a value in the message has no AMQP representation or nests too deeply, or an application property holds a list, map or array, or when the options break a rule of the link (see <see cref="SendAsync(ReadOnlyMemory{byte}, AmqpDeliveryOptions?, CancellationToken)"/>). Nothing is sent.</exception>
     /// <exception cref="InvalidOperationException">Thrown when the delivery is new and either unsettled map of the link's attach was incomplete (<see cref="AmqpUnsettledReconciliation.IsComplete"/>). Nothing is sent.</exception>
-    /// <exception cref="AmqpException">Thrown with <see cref="AmqpErrorCode.MessageSizeExceeded"/> when the encoded message exceeds <see cref="IAmqpLink.RemoteMaxMessageSize"/>, or with <see cref="AmqpErrorCode.LinkDetached"/> when the link detaches first.</exception>
+    /// <exception cref="AmqpException">Thrown with <see cref="AmqpErrorCode.MessageSizeExceeded"/> when the encoded message exceeds <see cref="IAmqpLink.RemoteMaxMessageSize"/>, or with <see cref="AmqpErrorCode.LinkDetached"/> when the link detaches before the delivery's frames are all sent, or the delivery ends before its outcome arrives (the link closes or detaches with an error, attaches again under its name, or its session ends).</exception>
     /// <exception cref="OperationCanceledException">Thrown when the send is canceled.</exception>
     ValueTask<AmqpDeliveryState?> SendAsync(AmqpMessage message, AmqpDeliveryOptions? options = null, CancellationToken cancellationToken = default);
 
@@ -127,7 +135,7 @@ public interface IAmqpSender : IAmqpLink
     /// frame.
     /// </exception>
     /// <exception cref="InvalidOperationException">Thrown when the delivery is new and either unsettled map of the link's attach was incomplete (<see cref="AmqpUnsettledReconciliation.IsComplete"/>): only resumed deliveries can be sent until the link attaches again with complete maps (AMQP 1.0 Part 2, section 2.6.13). Nothing is sent.</exception>
-    /// <exception cref="AmqpException">Thrown with <see cref="AmqpErrorCode.MessageSizeExceeded"/> when the payload exceeds <see cref="IAmqpLink.RemoteMaxMessageSize"/>, or with <see cref="AmqpErrorCode.LinkDetached"/> when the link detaches first.</exception>
+    /// <exception cref="AmqpException">Thrown with <see cref="AmqpErrorCode.MessageSizeExceeded"/> when the payload exceeds <see cref="IAmqpLink.RemoteMaxMessageSize"/>, or with <see cref="AmqpErrorCode.LinkDetached"/> when the link detaches before the delivery's frames are all sent, or the delivery ends before its outcome arrives (the link closes or detaches with an error, attaches again under its name, or its session ends).</exception>
     /// <exception cref="OperationCanceledException">Thrown when the send is canceled.</exception>
     ValueTask<AmqpDeliveryState?> SendAsync(ReadOnlyMemory<byte> payload, AmqpDeliveryOptions? options = null, CancellationToken cancellationToken = default);
 

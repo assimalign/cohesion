@@ -219,12 +219,14 @@ internal sealed class AmqpReceiverEndpoint : AmqpLinkEndpoint, IAmqpReceiver
                 return ValueTask.FromException(failure);
             }
 
-            if (State != AmqpLinkState.Attached)
+            AmqpSessionEndpoint session = SessionEndpoint;
+
+            // A suspended link's deliveries stay live, so the application can still settle one it took (AMQP 1.0
+            // Part 2, section 2.7.6).
+            if (State != AmqpLinkState.Attached && !session.IsLiveIncomingLocked(delivery))
             {
                 return ValueTask.FromException(GetDetachedExceptionLocked());
             }
-
-            AmqpSessionEndpoint session = SessionEndpoint;
 
             if (delivery.SettlesFirst)
             {
@@ -587,9 +589,12 @@ internal sealed class AmqpReceiverEndpoint : AmqpLinkEndpoint, IAmqpReceiver
 
     private protected override void OnStoppedLocked(AmqpException exception)
     {
+        // A delivery the sender had not finished cannot complete on this attachment, so the session stops tracking
+        // it even when the link's deliveries stay live: the application never held it.
         if (_partial is not null)
         {
             _partial.DiscardLocked();
+            SessionEndpoint.RemoveIncomingLocked(_partial);
             _partial = null;
         }
 

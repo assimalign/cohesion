@@ -33,9 +33,7 @@ internal static partial class AmqpComplianceMatrix
         new("G3", "When one end closes a link while the other suspends it, the end that suspended reattaches the link and then closes it. The engine takes either crossing detach as the answer to its own: it does not reattach to close a link it suspended, and a peer that reattaches to close a link the engine closed reaches the application as a new link request.", "Part 2, section 2.6.6",
             WorkItem: "#1932"),
         new("G4", "A peer may open TLS in band, by sending the AMQP TLS header (protocol id 2) and starting the TLS handshake after it. The engine answers that header with the one it supports and closes (header-phase rule H3); TLS comes from the carrier instead, as the alternative establishment allows.", "Part 5, sections 5.2 and 5.2.1",
-            WorkItem: "#1935"),
-        new("G6", "A delivery on a link detached without closing and without an error stays live, and a disposition that names it is applied. The engine fails a suspended link's deliveries when the link detaches and passes over a later disposition for them; resuming the link reconciles their state through the unsettled maps instead.", "Part 2, section 2.7.6",
-            WorkItem: "#1933")
+            WorkItem: "#1935")
     ];
 
     /// <summary>

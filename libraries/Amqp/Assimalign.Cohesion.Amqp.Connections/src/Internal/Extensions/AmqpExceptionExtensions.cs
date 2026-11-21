@@ -22,6 +22,7 @@ internal static class AmqpExceptionExtensions
     private static readonly string _linkDetachedMessage = ErrorMessages.LinkDetached;
     private static readonly string _linkDetachedWithErrorFormat = ErrorMessages.LinkDetachedWithError;
     private static readonly string _linkRefusedMessage = ErrorMessages.LinkRefused;
+    private static readonly string _deliveryCarriedOverMessage = ErrorMessages.DeliveryCarriedOver;
 
     extension(AmqpException)
     {
@@ -104,6 +105,16 @@ internal static class AmqpExceptionExtensions
         public static AmqpException LinkRefused(AmqpError? error)
         {
             return Create(AmqpErrorCode.LinkDetached, _linkRefusedMessage, error, null);
+        }
+
+        /// <summary>
+        /// Creates the exception for a delivery of a suspended link once the link attaches again under its name:
+        /// the delivery carries over to the new attachment, whose unsettled maps settle or resume it (AMQP 1.0
+        /// Part 2, section 2.6.13).
+        /// </summary>
+        public static AmqpException DeliveryCarriedOver()
+        {
+            return Create(AmqpErrorCode.LinkDetached, _deliveryCarriedOverMessage, null, null);
         }
     }
 
