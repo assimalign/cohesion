@@ -17,6 +17,9 @@
 	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub/src/">
 		<Project Path="Assimalign.Cohesion.IdentityHub/src/Assimalign.Cohesion.IdentityHub.csproj" />
 	</Folder>
+	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub/tests/">
+		<Project Path="Assimalign.Cohesion.IdentityHub/tests/Assimalign.Cohesion.IdentityHub.Tests.csproj" />
+	</Folder>
 	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub.Client/" />
 	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub.Client/src/">
 		<Project Path="Assimalign.Cohesion.IdentityHub.Client/src/Assimalign.Cohesion.IdentityHub.Client.csproj" />

@@ -1,0 +1,234 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <resheader name="resmimetype">
+    <value>text/microsoft-resx</value>
+  </resheader>
+  <resheader name="version">
+    <value>2.0</value>
+  </resheader>
+  <resheader name="reader">
+    <value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <resheader name="writer">
+    <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <data name="RecordSetNameInvalid" xml:space="preserve">
+    <value>A record set name is 1 to 64 characters: lowercase ASCII letters and digits in segments separated by '.' or '-', starting with a letter.</value>
+  </data>
+  <data name="RecordSetNameRequired" xml:space="preserve">
+    <value>A record set name is required.</value>
+  </data>
+  <data name="RecordIndexNameInvalid" xml:space="preserve">
+    <value>A record index name is 1 to 64 characters: lowercase ASCII letters and digits in segments separated by '.' or '-', starting with a letter.</value>
+  </data>
+  <data name="RecordIndexNameRequired" xml:space="preserve">
+    <value>A record index name is required.</value>
+  </data>
+  <data name="RecordIndexValueRequired" xml:space="preserve">
+    <value>A record index value is required.</value>
+  </data>
+  <data name="RecordKeyInvalid" xml:space="preserve">
+    <value>A record key is 1 to 512 characters with no control character and no unpaired surrogate.</value>
+  </data>
+  <data name="RecordKeyRequired" xml:space="preserve">
+    <value>A record key is required.</value>
+  </data>
+  <data name="RecordVersionInvalid" xml:space="preserve">
+    <value>A record version is 1 to 128 visible ASCII characters.</value>
+  </data>
+  <data name="RecordVersionRequired" xml:space="preserve">
+    <value>A record version is required.</value>
+  </data>
+  <data name="RecordPayloadTooLarge" xml:space="preserve">
+    <value>A record payload is at most {0} bytes.</value>
+  </data>
+  <data name="RecordIndexCountExceeded" xml:space="preserve">
+    <value>A record carries at most {0} index entries.</value>
+  </data>
+  <data name="RecordIndexDuplicate" xml:space="preserve">
+    <value>A record lists index '{0}' twice with the same value.</value>
+  </data>
+  <data name="RecordIndexUniquenessMixed" xml:space="preserve">
+    <value>A record lists index '{0}' as both unique and not unique.</value>
+  </data>
+  <data name="PageContinuationEmpty" xml:space="preserve">
+    <value>A continuation token is null or a non-empty string.</value>
+  </data>
+  <data name="PageRecordRequired" xml:space="preserve">
+    <value>A page holds no null record.</value>
+  </data>
+  <data name="ContinuationInvalid" xml:space="preserve">
+    <value>The continuation token was not issued by this store for this query.</value>
+  </data>
+  <data name="StoreRecordCorrupt" xml:space="preserve">
+    <value>Record '{1}' in set '{0}' could not be decoded.</value>
+  </data>
+  <data name="StoreResultRequired" xml:space="preserve">
+    <value>The store returned no result for set '{0}'.</value>
+  </data>
+  <data name="CodecSetRequired" xml:space="preserve">
+    <value>A record codec names the record set it reads and writes.</value>
+  </data>
+  <data name="CodecRecordRequired" xml:space="preserve">
+    <value>The codec of record set '{0}' encoded a value to no record.</value>
+  </data>
+  <data name="IndexNotUnique" xml:space="preserve">
+    <value>Index '{1}' of record set '{0}' holds more than one record for the value.</value>
+  </data>
+  <data name="ClientNameInvalid" xml:space="preserve">
+    <value>A client name is 1 to 128 characters: ASCII letters, digits, '-', '.', '_' and '~', starting and ending with a letter or digit.</value>
+  </data>
+  <data name="ClientNameRequired" xml:space="preserve">
+    <value>A client name is required.</value>
+  </data>
+  <data name="ClientIdRequired" xml:space="preserve">
+    <value>A client identifier is required: the empty GUID identifies no client.</value>
+  </data>
+  <data name="CredentialIdInvalid" xml:space="preserve">
+    <value>A credential identifier is 1 to 64 characters: ASCII letters, digits, '-', '.', '_' and '~', starting and ending with a letter or digit.</value>
+  </data>
+  <data name="CredentialIdRequired" xml:space="preserve">
+    <value>A credential identifier is required.</value>
+  </data>
+  <data name="PermissionNameInvalid" xml:space="preserve">
+    <value>A scope or role name is 1 to 128 visible ASCII characters with no space, double quote or backslash.</value>
+  </data>
+  <data name="PermissionNameRequired" xml:space="preserve">
+    <value>A scope or role name is required.</value>
+  </data>
+  <data name="PermissionKindInvalid" xml:space="preserve">
+    <value>A permission is delegated or application.</value>
+  </data>
+  <data name="AudienceInvalid" xml:space="preserve">
+    <value>An audience is 1 to 256 visible ASCII characters with no space. One that holds a ':' starts with a URI scheme and holds no fragment.</value>
+  </data>
+  <data name="AudienceRequired" xml:space="preserve">
+    <value>An audience is required.</value>
+  </data>
+  <data name="RedirectUriInvalid" xml:space="preserve">
+    <value>A redirect URI is an absolute URI of at most 512 characters that RFC 3986 allows, with no user information.</value>
+  </data>
+  <data name="RedirectUriWildcard" xml:space="preserve">
+    <value>A redirect URI is matched exactly and holds no '*'.</value>
+  </data>
+  <data name="RedirectUriFragment" xml:space="preserve">
+    <value>A redirect URI holds no fragment.</value>
+  </data>
+  <data name="RedirectUriInsecure" xml:space="preserve">
+    <value>A redirect URI uses https. http is accepted only for a loopback address.</value>
+  </data>
+  <data name="RedirectUriSchemeRefused" xml:space="preserve">
+    <value>A redirect URI uses https, or http for a loopback address. A native application may also use a private scheme that holds a '.', such as 'com.example.app'.</value>
+  </data>
+  <data name="RedirectPlatformInvalid" xml:space="preserve">
+    <value>A redirect is for a web, single-page, or native application.</value>
+  </data>
+  <data name="DisplayNameInvalid" xml:space="preserve">
+    <value>A display name is 1 to 128 characters with no control character and is not blank.</value>
+  </data>
+  <data name="DescriptionInvalid" xml:space="preserve">
+    <value>A description is at most 256 characters with no control character other than a line break or a tab.</value>
+  </data>
+  <data name="RoleMembersInvalid" xml:space="preserve">
+    <value>A role is open to users, applications, or both.</value>
+  </data>
+  <data name="CredentialWindowInvalid" xml:space="preserve">
+    <value>A credential expires after the instant it is first accepted.</value>
+  </data>
+  <data name="CredentialSecretInvalid" xml:space="preserve">
+    <value>A client secret is 1 to 512 printable ASCII characters and is not blank.</value>
+  </data>
+  <data name="CredentialVerifierInvalid" xml:space="preserve">
+    <value>The stored verifier of a client secret is not one the hub derives.</value>
+  </data>
+  <data name="CredentialCertificateInvalid" xml:space="preserve">
+    <value>A certificate credential is one X.509 certificate of at most 8192 bytes in its DER encoding.</value>
+  </data>
+  <data name="CredentialIssuerInvalid" xml:space="preserve">
+    <value>A federated credential's issuer is an https URL of at most 512 characters with no query or fragment.</value>
+  </data>
+  <data name="CredentialSubjectInvalid" xml:space="preserve">
+    <value>A federated credential's subject is 1 to 512 characters with no control character.</value>
+  </data>
+  <data name="CredentialAudiencesInvalid" xml:space="preserve">
+    <value>A federated credential accepts 1 to 8 audiences, each once.</value>
+  </data>
+  <data name="ClientDisplayNameInvalid" xml:space="preserve">
+    <value>Client '{0}': the display name is 1 to 128 characters with no control character and is not blank.</value>
+  </data>
+  <data name="ClientDescriptionInvalid" xml:space="preserve">
+    <value>Client '{0}': the description is at most 256 characters with no control character other than a line break or a tab.</value>
+  </data>
+  <data name="ClientGrantsInvalid" xml:space="preserve">
+    <value>Client '{0}' names a grant the hub does not define.</value>
+  </data>
+  <data name="ClientLifetimeInvalid" xml:space="preserve">
+    <value>Client '{0}': the access token lifetime is greater than zero and at most {1}.</value>
+  </data>
+  <data name="ClientListTooLong" xml:space="preserve">
+    <value>Client '{0}': '{1}' holds at most {2} entries.</value>
+  </data>
+  <data name="ClientListEntryRequired" xml:space="preserve">
+    <value>Client '{0}': '{1}' holds an empty entry.</value>
+  </data>
+  <data name="ClientRedirectDuplicate" xml:space="preserve">
+    <value>Client '{0}' lists redirect '{1}' twice.</value>
+  </data>
+  <data name="ClientCredentialDuplicate" xml:space="preserve">
+    <value>Client '{0}' holds credential '{1}' twice.</value>
+  </data>
+  <data name="ClientAudienceDuplicate" xml:space="preserve">
+    <value>Client '{0}' exposes audience '{1}' twice.</value>
+  </data>
+  <data name="ClientScopeDuplicate" xml:space="preserve">
+    <value>Client '{0}' exposes scope '{1}' twice.</value>
+  </data>
+  <data name="ClientRoleDuplicate" xml:space="preserve">
+    <value>Client '{0}' exposes role '{1}' twice.</value>
+  </data>
+  <data name="ClientPermissionDuplicate" xml:space="preserve">
+    <value>Client '{0}' holds permission '{1}' twice.</value>
+  </data>
+  <data name="ClientRedirectRequired" xml:space="preserve">
+    <value>Client '{0}' uses the authorization code grant and lists no redirect.</value>
+  </data>
+  <data name="ClientRedirectUnused" xml:space="preserve">
+    <value>Client '{0}' lists a redirect and does not use the authorization code grant.</value>
+  </data>
+  <data name="ClientCredentialRequired" xml:space="preserve">
+    <value>Client '{0}' uses the client credentials grant and holds no credential.</value>
+  </data>
+  <data name="ClientRefreshUnused" xml:space="preserve">
+    <value>Client '{0}' uses refresh tokens with neither the authorization code grant nor the device code grant.</value>
+  </data>
+  <data name="ClientAudienceRequired" xml:space="preserve">
+    <value>Client '{0}' exposes a scope or a role and no audience.</value>
+  </data>
+  <data name="ClientScopeUnknown" xml:space="preserve">
+    <value>Client '{0}' holds a delegated permission on scope '{1}', which client '{2}' does not expose.</value>
+  </data>
+  <data name="ClientRoleUnknown" xml:space="preserve">
+    <value>Client '{0}' holds an application permission on role '{1}', which client '{2}' does not expose to applications.</value>
+  </data>
+  <data name="ClientLayoutUnknown" xml:space="preserve">
+    <value>A stored client uses layout version {0}, which this hub does not read.</value>
+  </data>
+  <data name="ClientPayloadInvalid" xml:space="preserve">
+    <value>A stored client does not follow its layout.</value>
+  </data>
+  <data name="RegistryClientRequired" xml:space="preserve">
+    <value>A registry is given no null client.</value>
+  </data>
+  <data name="RegistryClientDuplicate" xml:space="preserve">
+    <value>Client '{0}' is defined twice.</value>
+  </data>
+  <data name="RegistryAudienceDuplicate" xml:space="preserve">
+    <value>Audience '{0}' is exposed by clients '{1}' and '{2}'.</value>
+  </data>
+  <data name="PageClientRequired" xml:space="preserve">
+    <value>A page holds no null client.</value>
+  </data>
+  <data name="StoreStatusUnexpected" xml:space="preserve">
+    <value>The store answered a write to set '{0}' with status '{1}', which that write cannot have.</value>
+  </data>
+</root>

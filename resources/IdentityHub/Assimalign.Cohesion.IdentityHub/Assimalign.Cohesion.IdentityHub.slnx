@@ -6,12 +6,18 @@
 	</Configurations>
 	<Folder Name="/Assimalign.Cohesion.IdentityHub/" />
 	<Folder Name="/Assimalign.Cohesion.IdentityHub/docs/">
-		<File Path="docs/Design.md" />
+		<File Path="docs/DESIGN.md" />
+		<File Path="docs/OVERVIEW.md" />
 	</Folder>
 	<Folder Name="/Assimalign.Cohesion.IdentityHub/src/">
 		<Project Path="src/Assimalign.Cohesion.IdentityHub.csproj" />
 	</Folder>
-	<Folder Name="/Assimalign.Cohesion.IdentityHub/refs/" >
-		<Project Path="../../IdentityModel/Assimalign.Cohesion.IdentityModel/src/Assimalign.Cohesion.IdentityModel.csproj" />
+	<Folder Name="/Assimalign.Cohesion.IdentityHub/tests/">
+		<Project Path="tests/Assimalign.Cohesion.IdentityHub.Tests.csproj" />
+	</Folder>
+	<Folder Name="/Assimalign.Cohesion.IdentityHub/refs/">
+		<Project Path="../../../libraries/Core/Assimalign.Cohesion.Core/src/Assimalign.Cohesion.Core.csproj" />
+		<Project Path="../../../libraries/IdentityModel/Assimalign.Cohesion.IdentityModel/src/Assimalign.Cohesion.IdentityModel.csproj" />
+		<Project Path="../Assimalign.Cohesion.IdentityHub.Models/src/Assimalign.Cohesion.IdentityHub.Models.csproj" />
 	</Folder>
 </Solution>
