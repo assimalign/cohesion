@@ -22,7 +22,9 @@ namespace Assimalign.Cohesion.Amqp.Connections;
 /// <see cref="ConnectionCapabilities.IsOrdered"/>). Over a single-stream carrier each accepted
 /// <see cref="IDuplexConnection"/> carries one AMQP connection. Over a multiplexed carrier each accepted
 /// <see cref="IMultiplexedConnection"/> carries one AMQP connection, on the first stream its peer opens.
-/// TLS is the carrier's concern: compose the carrier listener with a TLS layer first.
+/// TLS either secures the carrier before AMQP starts, by composing the carrier listener with a TLS layer first,
+/// or follows the AMQP TLS protocol header, through <see cref="AmqpConnectionListenerOptions.TlsLayer"/> (AMQP 1.0
+/// Part 5, sections 5.2 and 5.2.1).
 /// </para>
 /// <para>
 /// <see cref="ConnectionListener{TConnection}.AcceptAsync(CancellationToken)"/> returns open connections:
@@ -67,7 +69,9 @@ public sealed class AmqpConnectionListener : ConnectionListener<IAmqpConnection>
     /// <inheritdoc />
     /// <remarks>
     /// The carrier listener's capabilities; over a multiplexed carrier, those of one of its streams, so
-    /// <see cref="ConnectionCapabilities.IsMultiplexed"/> is <see langword="false"/>.
+    /// <see cref="ConnectionCapabilities.IsMultiplexed"/> is <see langword="false"/>. When the listener requires TLS
+    /// of a carrier that does not secure its connections, they are those
+    /// <see cref="AmqpConnectionListenerOptions.TlsLayer"/> describes, since every connection went through it.
     /// </remarks>
     public ConnectionCapabilities Capabilities => _listener.Capabilities;
 
@@ -84,8 +88,10 @@ public sealed class AmqpConnectionListener : ConnectionListener<IAmqpConnection>
     /// <exception cref="ArgumentException">
     /// Thrown when the carrier does not deliver a reliable, ordered byte stream; when
     /// <see cref="AmqpConnectionListenerOptions.SaslMechanisms"/> holds <see langword="null"/> or two
-    /// mechanisms with the same name; or when the options make the listener's <c>open</c> or its
-    /// <c>sasl-mechanisms</c> frame larger than the 512 bytes a peer accepts before the connection opens.
+    /// mechanisms with the same name; when the options make the listener's <c>open</c> or its
+    /// <c>sasl-mechanisms</c> frame larger than the 512 bytes a peer accepts before the connection opens; or when
+    /// <see cref="AmqpConnectionListenerOptions.RequireTls"/> is set without
+    /// <see cref="AmqpConnectionListenerOptions.TlsLayer"/> over a carrier that does not secure its connections.
     /// </exception>
     public static AmqpConnectionListener Create(IDuplexConnectionListener listener, AmqpConnectionListenerOptions? options = null)
     {
@@ -106,8 +112,10 @@ public sealed class AmqpConnectionListener : ConnectionListener<IAmqpConnection>
     /// <exception cref="ArgumentException">
     /// Thrown when the carrier does not deliver a reliable, ordered byte stream; when
     /// <see cref="AmqpConnectionListenerOptions.SaslMechanisms"/> holds <see langword="null"/> or two
-    /// mechanisms with the same name; or when the options make the listener's <c>open</c> or its
-    /// <c>sasl-mechanisms</c> frame larger than the 512 bytes a peer accepts before the connection opens.
+    /// mechanisms with the same name; when the options make the listener's <c>open</c> or its
+    /// <c>sasl-mechanisms</c> frame larger than the 512 bytes a peer accepts before the connection opens; or when
+    /// <see cref="AmqpConnectionListenerOptions.RequireTls"/> is set without
+    /// <see cref="AmqpConnectionListenerOptions.TlsLayer"/> over a carrier that does not secure its connections.
     /// </exception>
     public static AmqpConnectionListener Create(IMultiplexedConnectionListener listener, AmqpConnectionListenerOptions? options = null)
     {
@@ -185,6 +193,13 @@ public sealed class AmqpConnectionListener : ConnectionListener<IAmqpConnection>
             }
         }
 
+        // A listener that requires TLS of a carrier that does not secure its connections, without a layer to
+        // secure them, would refuse every peer.
+        if (options.RequireTls && options.TlsLayer is null && carrier.Capabilities.Security != ConnectionSecurity.Tls)
+        {
+            throw new ArgumentException(ErrorMessages.TlsLayerMissing, nameof(options));
+        }
+
         AmqpConnectionSettings settings = new()
         {
             ContainerId = options.ContainerId ?? AmqpConnectionSettings.CreateContainerId(),
@@ -192,6 +207,8 @@ public sealed class AmqpConnectionListener : ConnectionListener<IAmqpConnection>
             ChannelMax = options.ChannelMax,
             IdleTimeout = options.IdleTimeout,
             HandshakeTimeout = options.HandshakeTimeout,
+            TlsLayer = options.TlsLayer,
+            RequireTls = options.RequireTls,
             ServerMechanisms = mechanisms,
             SessionSettings = AmqpSessionSettings.From(options.SessionOptions),
             OfferedCapabilities = options.OfferedCapabilities,

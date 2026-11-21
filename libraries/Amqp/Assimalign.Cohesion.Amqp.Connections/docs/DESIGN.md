@@ -79,7 +79,8 @@ configured) and `open` frames are done. The application begins and accepts sessi
 - **`IAmqpConnection` is an `IConnection`, not an `IDuplexConnection`.** Its traffic is frames
   multiplexed into sessions, not a byte stream, so it exposes no pipe. It shares the carrier's id,
   endpoints and capabilities, and its feature collection falls back to the carrier's, so the facts
-  a lower layer registered, such as TLS (`connection.Tls`), stay visible. After SASL it adds
+  a lower layer registered, such as TLS (`connection.Tls`), stay visible. After in-band TLS, the
+  carrier is the connection the TLS layer returned. After SASL it adds
   `IAmqpSaslConnectionInfo` (`connection.AmqpSasl`).
 - **The implementation derives from `DuplexConnection` anyway**, because the Connections layered
   listener carries upgraded connections as `IDuplexConnection`. Its `Input` and `Output` throw
@@ -95,10 +96,12 @@ configured) and `open` frames are done. The application begins and accepts sessi
 
 1. on a multiplexed carrier, the AMQP stream is acquired (see "A multiplexed carrier is adapted to
    the duplex shape");
-2. with a SASL mechanism configured, the SASL header is exchanged and the SASL exchange runs;
-3. the AMQP header is exchanged, and each side sends its `open` right behind its header, without
+2. with a TLS layer configured and asked for, the TLS header is exchanged and the layer secures the
+   carrier, and every later step runs over the connection it returns (see "In-band TLS");
+3. with a SASL mechanism configured, the SASL header is exchanged and the SASL exchange runs;
+4. the AMQP header is exchanged, and each side sends its `open` right behind its header, without
    waiting for the peer's (Part 2 §2.4.1 permits this pipelining);
-4. the peer's `open` is read and checked, and the connection starts its read and write loops.
+5. the peer's `open` is read and checked, and the connection starts its read and write loops.
 
 This sequence shows a client and a server that both use SASL:
 
@@ -143,6 +146,66 @@ sequenceDiagram
   inner exception, so a caller can tell a slow peer from its own cancellation. The message format is
   read once into a static field, because a stalled peer can make every handshake time out.
 
+### In-band TLS (#1935)
+
+A peer may ask for TLS inside AMQP: it sends the TLS protocol header (protocol id 2) before the SASL
+and AMQP headers, and the TLS handshake follows it (Part 5 §5.2). The listener and the factory each
+take a TLS layer for this, an `IConnectionLayer` such as `TlsConnectionLayer` from
+`Assimalign.Cohesion.Connections.Security`, the same layer `UseTls` composes below AMQP. This
+sequence shows a client and a server that negotiate TLS in band and then use SASL:
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant Server
+    Client->>Server: TLS protocol header
+    Server->>Client: TLS protocol header
+    Note over Client,Server: The TLS handshake, run by each side's TLS layer
+    Client->>Server: SASL protocol header, over TLS
+    Server->>Client: SASL protocol header, then sasl-mechanisms, over TLS
+    Note over Client,Server: SASL, the AMQP headers and open, as above, all over TLS
+```
+
+- **A listener offers TLS with `TlsLayer` and requires it with `RequireTls`.** With a layer, a first
+  header that asks for TLS is answered with the TLS header, the layer's handshake runs over the
+  carrier, and the peer's next header is read over the connection the layer returns. Without a
+  layer, the TLS header is answered with the header the listener supports and refused (H3), as
+  before. With `RequireTls`, any other first header from a carrier that is not secured is answered
+  with the TLS header and refused with `ProtocolViolation`, so the client learns what the server
+  needs. A carrier the layer below AMQP secured, one whose capabilities report
+  `ConnectionSecurity.Tls`, meets the requirement without the TLS header, so one setting covers
+  both establishments §5.2.1 allows. `RequireTls` without a layer, over a carrier listener that
+  does not secure its connections, would refuse every client, so `Create` refuses it with
+  `ArgumentException`.
+- **A factory asks for TLS with `TlsLayer`.** It sends the TLS header, waits for the answer, runs
+  the layer's handshake when the answer is the TLS header, and continues over the secured
+  connection. A listener that answers with the SASL or AMQP header has declined TLS, and the
+  factory fails with `ProtocolViolation`. A factory without a layer whose first header is answered
+  with the TLS header fails with a message saying the peer requires TLS.
+- **TLS is negotiated once.** After TLS, a TLS header from either side is a header the engine does
+  not support (H21).
+- **The layer owns the handshake and its failures.** Its exception, such as the
+  `AuthenticationException` for a certificate the client does not trust, reaches the `ConnectAsync`
+  caller unchanged; on a listener it is an `UpgradeFailed` like any other. The handshake runs within
+  the AMQP `HandshakeTimeout`, as well as any timeout of the layer's own, and on a listener it holds
+  one of the `MaxConcurrentHandshakes` slots.
+  Bytes a peer sends right behind its TLS header stay in the carrier for the layer to read. When
+  establishment fails after the layer returned a connection, that connection is disposed as well as
+  the carrier.
+- **The connection reports the secured connection's facts.** Its features and capabilities fall back
+  to the connection the layer returned, so `connection.Tls` and `Security == ConnectionSecurity.Tls`
+  hold as they do with TLS below AMQP. A listener's `Capabilities` report TLS only when every
+  connection it produces is secured: when its carrier listener's do, or with `RequireTls` and a
+  layer. A factory with a layer always reports it.
+- **Rejected: a factory that continues without TLS when the server declines it.** Anyone on the path
+  could force that by rewriting the server's eight-byte answer, and the application would not know.
+  A client that can do without TLS configures no layer.
+- **Rejected: TLS inside this package.** The engine sends and reads the TLS header and hands the
+  carrier to the layer it was given; the layer does the cryptography, as it does below AMQP.
+- **TLS below AMQP stays the common composition.** AMQPNetLite 2.5.5 accepts only protocol id 0 in
+  its connection and secures a carrier with `SslStream` before the first header, the "amqps"
+  composition on port 5671. In-band TLS therefore has no interop test.
+
 ### On a listener: a connection layer
 
 The listener composes `AmqpConnectionLayer : IConnectionLayer` onto its carrier listener with
@@ -176,6 +239,10 @@ sequenceDiagram
   `AmqpConnectionListener.Create(tcpListener.UseTls(tlsServerOptions), amqpOptions)`. The TLS handshake
   runs under `TlsServerOptions.HandshakeTimeout` and `MaxConcurrentHandshakes`; the AMQP
   `HandshakeTimeout` starts only once the AMQP layer has a connection whose TLS handshake completed.
+  In-band TLS is the exception: its handshake is a step of the AMQP establishment, so it runs within
+  the AMQP `HandshakeTimeout` and holds one of the AMQP listener's `MaxConcurrentHandshakes` slots.
+  The layer's own `HandshakeTimeout` still bounds the TLS handshake itself, while
+  `TlsServerOptions.MaxConcurrentHandshakes`, which only `UseTls` reads, does not apply.
 - **Rejected: an accept loop of AMQP's own.** It would rebuild the pump's concurrency, bound,
   containment, disposal and diagnostics, and drift from TLS. The Connections design calls the
   layered listener the one place that knows which failures belong to a connection.
@@ -232,9 +299,10 @@ throws `ArgumentException`, with `ParamName` `listener` or `factory`, otherwise.
 - **Options are split by role.** `AmqpConnectionListenerOptions` and `AmqpConnectionFactoryOptions`
   share `ContainerId`, `MaxFrameSize` (default 262,144 bytes, at least 512), `ChannelMax` (default
   255), `IdleTimeout` (default one minute), `HandshakeTimeout` (default 10 seconds),
-  `SessionOptions`, and the `open`'s `OfferedCapabilities`, `DesiredCapabilities` and `Properties`.
-  The listener adds `MaxConcurrentHandshakes` (default 512, at least 1: TLS's default and the TCP
-  listener's default backlog), `SaslMechanisms`, the server mechanisms it offers in order, and
+  `SessionOptions`, the `open`'s `OfferedCapabilities`, `DesiredCapabilities` and `Properties`, and
+  `TlsLayer` (none by default, see "In-band TLS"). The listener adds `MaxConcurrentHandshakes`
+  (default 512, at least 1: TLS's default and the TCP listener's default backlog), `RequireTls`
+  (default off), `SaslMechanisms`, the server mechanisms it offers in order, and
   `AllowLinkStealing` (default off, see "Links"). The factory adds `HostName` and `SaslMechanism`,
   the one client mechanism it uses.
 - **Options are read once**, at `Create`, into an internal immutable `AmqpConnectionSettings`.
@@ -439,7 +507,7 @@ deleting one breaks the build. Rules that record a leniency say so.
 
 | Map | Evidence | Rules | Covers |
 |---|---|---|---|
-| Header phase | `AmqpHeaderPhaseComplianceTests` over `AmqpHeaderPhaseCorpus` | H1 to H20 | protocol headers, the SASL exchange and its frames, the `open` exchange, idle timeouts, channels and frame layout |
+| Header phase | `AmqpHeaderPhaseComplianceTests` over `AmqpHeaderPhaseCorpus` | H1 to H21 | protocol headers, in-band TLS, the SASL exchange and its frames, the `open` exchange, idle timeouts, channels and frame layout |
 | Type system | `AmqpTypeSystemComplianceTests` over `AmqpTypeSystemCorpus` | one per type, with a case per constructor, CLR type and refusal | the Part 1 type surface (see "The type surface") |
 | Message format | `AmqpMessageFormatComplianceTests` over `AmqpMessageFormatCorpus` | MF1 to MF9 | section order, repetition and body kinds, descriptors, message ids, annotation and property keys |
 | Termini | `AmqpTerminusComplianceTests` over `AmqpTerminusCorpus` | T1 to T10 | terminus defaults, dynamic nodes and their owner, node properties, filters, durability, expiry, default outcomes |
@@ -496,7 +564,7 @@ The leniencies, each accepted because the meaning is clear and nothing is at ris
 
 ### The matrix (#431)
 
-`AmqpComplianceMatrix` in the tests reads every map into one list, 153 rules in 12 maps, and keeps
+`AmqpComplianceMatrix` in the tests reads every map into one list, 161 rules in 12 maps, and keeps
 the gaps beside them (below). `AmqpComplianceMatrixTests` checks the list:
 
 - **Each rule cites its Parts.** A reference reads `Part N, section X`, `Part N, sections X and Y`
@@ -509,15 +577,15 @@ the gaps beside them (below). `AmqpComplianceMatrixTests` checks the list:
   the test output. A rule that cites several Parts counts under each, so the Parts' totals add up to
   more than the number of rules.
 
-The report on 2026-11-20:
+The report on 2026-11-21:
 
 | Part | Rules | Maps | Leniencies | Gaps |
 |---|---|---|---|---|
 | 1, Types | 32 | 4 | 0 | 0 |
-| 2, Transport | 86 | 8 | 10 | 5 |
+| 2, Transport | 94 | 8 | 12 | 0 |
 | 3, Messaging | 24 | 5 | 2 | 0 |
 | 4, Transactions | 14 | 1 | 2 | 0 |
-| 5, Security | 10 | 2 | 0 | 1 |
+| 5, Security | 11 | 2 | 0 | 0 |
 
 A new map adds its rules once, in `AmqpComplianceMatrix.CreateEntries`. The checks, the report and
 the regression register's lookup of the rule each defect broke then cover it.
@@ -528,9 +596,16 @@ the regression register's lookup of the rule each defect broke then cover it.
 each with the sections it cites and the work item that tracks it. A gap names no evidence: once the
 engine holds the rule, the rule moves into a map with its tests.
 
-| Gap | The specification | The engine | Work item |
+The list is empty. The matrix first found six gaps, and each became rules in a map:
+
+| Gap | The specification | Now | Work item |
 |---|---|---|---|
-| G4 | A peer may open TLS in band, with the AMQP TLS header (protocol id 2) and the TLS handshake after it (Part 5 §5.2 and §5.2.1). | Answers that header with the one it supports and closes (H3). TLS comes from the carrier instead, the alternative establishment §5.2.1 allows. | #1935 |
+| G1 | A second attach of a link may steal it, closing the first with `amqp:link:stolen` (Part 2 §2.6.1). | L15, on a listener that sets `AllowLinkStealing` | #1930 |
+| G2 | An attach of a link detached with an error must resume it with an unsettled map, and a pipelined re-attach without one ends the session with `amqp:session:errant-link` (Part 2 §2.6.5 and §2.8.17). | L16, a leniency: such an attach is a new link | #1931 |
+| G3 | When one end closes a link while the other suspends it, the end that suspended reattaches the link and then closes it (Part 2 §2.6.6). | L12 and L13, and L14, a leniency for a link the peer attached | #1932 |
+| G4 | A peer may open TLS in band, with the AMQP TLS header (protocol id 2) and the TLS handshake after it (Part 5 §5.2 and §5.2.1). | H21, with `TlsLayer` and `RequireTls` | #1935 |
+| G5 | A peer that sends past the incoming window breaks the session with `amqp:session:window-violation` (Part 2 §2.5.6 and §2.8.17). | S12, with F7's default `MaxMessageSize` of 16 MiB | #1934 |
+| G6 | A delivery on a link detached without closing and without an error stays live, and a disposition that names it applies (Part 2 §2.7.6). | DS7 | #1933 |
 
 ## Regression register (#433)
 
@@ -638,8 +713,8 @@ What the suite does not cover, and why:
   `ContainerHost` accepts the second attach of a link the engine attached and completes the
   exchange, which the host test shows frame by frame.
 - **Not exercised here:** resuming a link (AMQPNetLite keeps no unsettled map), Cohesion as a
-  transaction controller (`ContainerHost` has no coordinator), multiplexed carriers, TLS and SASL
-  EXTERNAL.
+  transaction controller (`ContainerHost` has no coordinator), multiplexed carriers, TLS (in-band
+  TLS is not in AMQPNetLite, and TLS below AMQP is the carrier's) and SASL EXTERNAL.
 
 ## Framing and the codec
 
@@ -859,10 +934,9 @@ any IL warning, a non-zero exit, or a summary line that does not report every ch
 - **No claims-based security (CBS) and no management draft.** Both are message exchanges over
   ordinary links, so they build on the model without changes here. CBS, which MessageHub needs for
   the Azure clients, is tracked outside the engine by #1936.
-- **No TLS inside this package.** Security is a connection layer composed below AMQP, with
-  `UseTls` from `Assimalign.Cohesion.Connections.Security`; the AMQP header's TLS protocol id (2) is
-  never sent. Accepting that header in band is a gap, not a non-goal (G4, #1935), and even then the
-  TLS session would come from the connection layer, not from this package.
+- **No TLS implementation in this package.** TLS is a connection layer, composed below AMQP with
+  `UseTls` or run in band by establishment through `TlsLayer` (see "In-band TLS"). The engine sends
+  and answers the TLS protocol header, and the layer it is given does the cryptography.
 - **No AMQP 0-9-1 (RabbitMQ classic) compatibility.** This is AMQP 1.0 only.
 - **No sharing of one multiplexed carrier between AMQP connections.**
 
@@ -874,7 +948,9 @@ any IL warning, a non-zero exit, or a summary line that does not report every ch
   capability, the listener and factory bases, `DuplexConnection`, `IConnectionLayer` and the
   layered listener that runs establishment.
 - **`Assimalign.Cohesion.Connections.Security`**: TLS as a `UseTls` layer composed on the carrier
-  listener or factory, below AMQP.
+  listener or factory, below AMQP, or as the `TlsConnectionLayer` an AMQP listener or factory runs
+  in band. The engine does not reference it: `TlsLayer` takes any `IConnectionLayer`, and the tests
+  reference it to negotiate real TLS.
 - **`Assimalign.Cohesion.Http.Connections`**: the sibling application protocol. Both consume the
   connection contracts by capability, with TLS composed below them.
 

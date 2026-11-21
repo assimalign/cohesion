@@ -24,11 +24,11 @@ internal static partial class AmqpComplianceMatrix
     /// <summary>
     /// Gets the rules of AMQP 1.0 the engine does not hold yet, each with the work item that tracks it.
     /// </summary>
-    public static IReadOnlyList<AmqpComplianceGap> Gaps { get; } =
-    [
-        new("G4", "A peer may open TLS in band, by sending the AMQP TLS header (protocol id 2) and starting the TLS handshake after it. The engine answers that header with the one it supports and closes (header-phase rule H3); TLS comes from the carrier instead, as the alternative establishment allows.", "Part 5, sections 5.2 and 5.2.1",
-            WorkItem: "#1935")
-    ];
+    /// <remarks>
+    /// Empty since the six gaps the matrix first found, G1 to G6 (#1930 to #1935), were closed. A rule found
+    /// missing is added here with its work item until a map holds it.
+    /// </remarks>
+    public static IReadOnlyList<AmqpComplianceGap> Gaps { get; } = [];
 
     /// <summary>
     /// Reads the Parts of the specification a reference cites, in the order it cites them.

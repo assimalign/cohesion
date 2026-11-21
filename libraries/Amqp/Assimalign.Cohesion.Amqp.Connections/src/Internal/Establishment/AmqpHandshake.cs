@@ -13,11 +13,20 @@ using Assimalign.Cohesion.Connections;
 namespace Assimalign.Cohesion.Amqp.Connections.Internal;
 
 /// <summary>
-/// Establishes an AMQP connection over a carrier: the protocol header exchange, the SASL layer when the
-/// settings configure one, and the <c>open</c> frames (AMQP 1.0 Part 2, sections 2.2 and 2.4.1; Part 5,
-/// section 5.3).
+/// Establishes an AMQP connection over a carrier: the protocol header exchange, the TLS and SASL layers when
+/// the settings configure them, and the <c>open</c> frames (AMQP 1.0 Part 2, sections 2.2 and 2.4.1; Part 5,
+/// sections 5.2 and 5.3).
 /// </summary>
 /// <remarks>
+/// <para>
+/// TLS comes first and is negotiated at most once. A listener with a TLS layer answers the TLS protocol
+/// header with its own, hands the carrier to the layer, and reads the peer's next header over the secured
+/// connection; a listener that requires TLS answers any other first header from an unsecured carrier with
+/// the TLS header and refuses it. A factory with a TLS layer sends the TLS header first and fails when the
+/// peer answers with another: falling back to an unsecured connection would let anyone on the path force
+/// it. Everything after the upgrade, the SASL exchange and the connection itself, runs over the connection
+/// the layer returns.
+/// </para>
 /// <para>
 /// Both sides send their <c>open</c> right behind their AMQP protocol header, without waiting for the
 /// peer's, as section 2.4.1 permits. The local <c>open</c> must fit the 512 bytes a peer accepts before
@@ -49,6 +58,7 @@ internal static class AmqpHandshake
     // The protocol headers as big-endian integers: "AMQP", the protocol id, then the version 1.0.0.
     private const ulong amqpHeader = 0x414D_5150_0001_0000;
     private const ulong saslHeader = 0x414D_5150_0301_0000;
+    private const ulong tlsHeader = 0x414D_5150_0201_0000;
     private const uint amqpMagic = 0x414D_5150;
 
     // Peers drive these failures, so their messages are read once, not on every refused connection.
@@ -57,6 +67,9 @@ internal static class AmqpHandshake
     private static readonly string _protocolHeaderInvalid = ErrorMessages.ProtocolHeaderInvalid;
     private static readonly string _protocolHeaderUnsupportedFormat = ErrorMessages.ProtocolHeaderUnsupported;
     private static readonly string _saslRequired = ErrorMessages.SaslRequired;
+    private static readonly string _tlsRequired = ErrorMessages.TlsRequired;
+    private static readonly string _tlsNotOffered = ErrorMessages.TlsNotOffered;
+    private static readonly string _tlsRequiredByPeer = ErrorMessages.TlsRequiredByPeer;
     private static readonly string _saslAuthenticationFailedFormat = ErrorMessages.SaslAuthenticationFailed;
     private static readonly string _saslMechanismUnknownFormat = ErrorMessages.SaslMechanismUnknown;
     private static readonly string _peerSaslFrameTooLargeFormat = ErrorMessages.PeerSaslFrameTooLarge;
@@ -70,7 +83,10 @@ internal static class AmqpHandshake
     /// <summary>
     /// Establishes an AMQP connection over a carrier within the settings' handshake timeout, and starts it.
     /// </summary>
-    /// <param name="carrier">The carrier; it stays the caller's when establishment fails.</param>
+    /// <param name="carrier">
+    /// The carrier; it stays the caller's when establishment fails, although a TLS layer's connection that wraps
+    /// it is disposed then, which may dispose the carrier too.
+    /// </param>
     /// <param name="settings">The settings of the listener or factory.</param>
     /// <param name="connecting"><see langword="true"/> on the connecting side; <see langword="false"/> on the listening side.</param>
     /// <param name="hostName">The host name a connecting side names in its <c>open</c> and SASL <c>init</c>.</param>
@@ -78,6 +94,7 @@ internal static class AmqpHandshake
     /// <returns>The open, started connection.</returns>
     /// <exception cref="AmqpException">Thrown when the peer's protocol header, SASL exchange or <c>open</c> fails establishment.</exception>
     /// <exception cref="TimeoutException">Thrown when establishment exceeds the handshake timeout.</exception>
+    /// <remarks>A TLS layer whose handshake fails throws its own exception, which propagates unchanged.</remarks>
     public static async ValueTask<AmqpConnectionEndpoint> EstablishAsync(
         IDuplexConnection carrier,
         AmqpConnectionSettings settings,
@@ -157,8 +174,56 @@ internal static class AmqpHandshake
         AmqpBufferWriter scratch,
         CancellationToken cancellationToken)
     {
-        PipeReader input = carrier.Input;
-        PipeWriter output = carrier.Output;
+        if (settings.TlsLayer is not IConnectionLayer layer)
+        {
+            return await OpenAsync(carrier, settings, hostName, secured: false, scratch, cancellationToken).ConfigureAwait(false);
+        }
+
+        // The TLS header asks the peer to secure the connection before anything else (AMQP 1.0 Part 5, section
+        // 5.2). The TLS records start only once the peer's own TLS header is read, so none of them is taken for it.
+        WriteProtocolHeader(carrier.Output, tlsHeader);
+        await FlushAsync(carrier.Output, cancellationToken).ConfigureAwait(false);
+
+        ulong header = await ReadProtocolHeaderAsync(carrier.Input, cancellationToken).ConfigureAwait(false);
+
+        if (header != tlsHeader)
+        {
+            throw header is amqpHeader or saslHeader
+                ? new AmqpException(AmqpErrorCode.ProtocolViolation, _tlsNotOffered)
+                : CreateHeaderException(header);
+        }
+
+        IDuplexConnection secured = await layer.UpgradeAsync(carrier, cancellationToken).ConfigureAwait(false);
+        AmqpConnectionEndpoint? connection = null;
+
+        try
+        {
+            connection = await OpenAsync(secured, settings, hostName, secured: true, scratch, cancellationToken).ConfigureAwait(false);
+            return connection;
+        }
+        finally
+        {
+            if (connection is null)
+            {
+                await ReleaseAsync(carrier, secured).ConfigureAwait(false);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Runs the connecting side from the SASL or AMQP header on: over the carrier, or over the connection a TLS
+    /// layer secured when <paramref name="secured"/> is <see langword="true"/>.
+    /// </summary>
+    private static async ValueTask<AmqpConnectionEndpoint> OpenAsync(
+        IDuplexConnection connection,
+        AmqpConnectionSettings settings,
+        string? hostName,
+        bool secured,
+        AmqpBufferWriter scratch,
+        CancellationToken cancellationToken)
+    {
+        PipeReader input = connection.Input;
+        PipeWriter output = connection.Output;
         IAmqpSaslConnectionInfo? sasl = null;
 
         if (settings.ClientMechanism is IAmqpSaslClientMechanism mechanism)
@@ -172,10 +237,10 @@ internal static class AmqpHandshake
             {
                 throw header == amqpHeader
                     ? new AmqpException(AmqpErrorCode.AuthenticationFailed, ErrorMessages.SaslNotOffered)
-                    : CreateHeaderException(header);
+                    : CreateAnswerException(header, firstHeader: !secured);
             }
 
-            sasl = await AuthenticateAsync(carrier, settings, mechanism, hostName, scratch, cancellationToken).ConfigureAwait(false);
+            sasl = await AuthenticateAsync(connection, settings, mechanism, hostName, scratch, cancellationToken).ConfigureAwait(false);
         }
 
         // The open travels right behind the header (AMQP 1.0 Part 2, section 2.4.1).
@@ -191,12 +256,12 @@ internal static class AmqpHandshake
             // one this endpoint does not accept.
             throw amqp == saslHeader && sasl is null
                 ? new AmqpException(AmqpErrorCode.AuthenticationFailed, ErrorMessages.SaslAuthenticationRequired)
-                : CreateHeaderException(amqp);
+                : CreateAnswerException(amqp, firstHeader: !secured && sasl is null);
         }
 
         AmqpOpenPerformative remoteOpen = await ReadOpenAsync(input, output, settings, scratch, cancellationToken).ConfigureAwait(false);
 
-        return new AmqpConnectionEndpoint(carrier, settings, remoteOpen, sasl);
+        return new AmqpConnectionEndpoint(connection, settings, remoteOpen, sasl);
     }
 
     private static async ValueTask<AmqpConnectionEndpoint> AcceptAsync(
@@ -205,11 +270,62 @@ internal static class AmqpHandshake
         AmqpBufferWriter scratch,
         CancellationToken cancellationToken)
     {
-        PipeReader input = carrier.Input;
-        PipeWriter output = carrier.Output;
-        IAmqpSaslConnectionInfo? sasl = null;
+        ulong header = await ReadProtocolHeaderAsync(carrier.Input, cancellationToken).ConfigureAwait(false);
 
-        ulong header = await ReadProtocolHeaderAsync(input, cancellationToken).ConfigureAwait(false);
+        if (header == tlsHeader && settings.TlsLayer is IConnectionLayer layer)
+        {
+            // Answer with the TLS header, secure the carrier, then read the peer's next header over TLS (AMQP 1.0
+            // Part 5, section 5.2). A TLS record the peer sent right behind its header stays in the carrier's input
+            // for the layer to read.
+            WriteProtocolHeader(carrier.Output, tlsHeader);
+            await FlushAsync(carrier.Output, cancellationToken).ConfigureAwait(false);
+
+            IDuplexConnection secured = await layer.UpgradeAsync(carrier, cancellationToken).ConfigureAwait(false);
+            AmqpConnectionEndpoint? connection = null;
+
+            try
+            {
+                // TLS is negotiated once: another TLS header is refused like any header this endpoint does not accept.
+                header = await ReadProtocolHeaderAsync(secured.Input, cancellationToken).ConfigureAwait(false);
+                connection = await AcceptAmqpAsync(secured, header, settings, scratch, cancellationToken).ConfigureAwait(false);
+                return connection;
+            }
+            finally
+            {
+                if (connection is null)
+                {
+                    await ReleaseAsync(carrier, secured).ConfigureAwait(false);
+                }
+            }
+        }
+
+        if (settings.RequireTls && carrier.Capabilities.Security != ConnectionSecurity.Tls)
+        {
+            // Answer with the header this endpoint requires first, then refuse (AMQP 1.0 Part 2, section 2.2).
+            await RefuseAsync(carrier.Output, tlsHeader, cancellationToken).ConfigureAwait(false);
+
+            throw header is amqpHeader or saslHeader
+                ? new AmqpException(AmqpErrorCode.ProtocolViolation, _tlsRequired)
+                : CreateHeaderException(header);
+        }
+
+        return await AcceptAmqpAsync(carrier, header, settings, scratch, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Runs the listening side from the peer's SASL or AMQP header on, over the carrier or over the connection a
+    /// TLS layer secured.
+    /// </summary>
+    private static async ValueTask<AmqpConnectionEndpoint> AcceptAmqpAsync(
+        IDuplexConnection connection,
+        ulong header,
+        AmqpConnectionSettings settings,
+        AmqpBufferWriter scratch,
+        CancellationToken cancellationToken)
+    {
+        PipeReader input = connection.Input;
+        PipeWriter output = connection.Output;
+        IAmqpSaslConnectionInfo? sasl = null;
 
         if (settings.ServerMechanisms.Count > 0)
         {
@@ -224,7 +340,7 @@ internal static class AmqpHandshake
             }
 
             WriteProtocolHeader(output, saslHeader);
-            sasl = await AuthenticatePeerAsync(carrier, settings, scratch, cancellationToken).ConfigureAwait(false);
+            sasl = await AuthenticatePeerAsync(connection, settings, scratch, cancellationToken).ConfigureAwait(false);
             header = await ReadProtocolHeaderAsync(input, cancellationToken).ConfigureAwait(false);
         }
 
@@ -241,7 +357,7 @@ internal static class AmqpHandshake
 
         AmqpOpenPerformative remoteOpen = await ReadOpenAsync(input, output, settings, scratch, cancellationToken).ConfigureAwait(false);
 
-        return new AmqpConnectionEndpoint(carrier, settings, remoteOpen, sasl);
+        return new AmqpConnectionEndpoint(connection, settings, remoteOpen, sasl);
     }
 
     /// <summary>
@@ -628,6 +744,18 @@ internal static class AmqpHandshake
                 (byte)header));
     }
 
+    /// <summary>
+    /// Creates the exception for a header the peer answered the connecting side's with. The TLS header in answer to
+    /// the connection's first header means the peer requires TLS; anywhere else it is just a header this endpoint
+    /// does not accept, since TLS is negotiated once.
+    /// </summary>
+    private static AmqpException CreateAnswerException(ulong header, bool firstHeader)
+    {
+        return header == tlsHeader && firstHeader
+            ? new AmqpException(AmqpErrorCode.ProtocolViolation, _tlsRequiredByPeer)
+            : CreateHeaderException(header);
+    }
+
     private static AmqpException CreateSaslFrameException(AmqpPerformative performative, string expected)
     {
         return new AmqpException(
@@ -780,6 +908,28 @@ internal static class AmqpHandshake
         catch (Exception exception) when (exception is AmqpException or InvalidOperationException or System.IO.IOException or ObjectDisposedException)
         {
             // The close is a courtesy: the carrier is released whether or not it arrives.
+        }
+    }
+
+    /// <summary>
+    /// Releases the connection a TLS layer returned when establishment fails over it. The secured connection wraps
+    /// the carrier, so disposing it may dispose the carrier too, which the caller then disposes again without
+    /// effect; a layer that returned the carrier itself leaves nothing to release.
+    /// </summary>
+    private static async ValueTask ReleaseAsync(IDuplexConnection carrier, IDuplexConnection secured)
+    {
+        if (ReferenceEquals(secured, carrier))
+        {
+            return;
+        }
+
+        try
+        {
+            await secured.DisposeAsync().ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or System.IO.IOException or ObjectDisposedException)
+        {
+            // The failure that ended establishment is the one to report, not a failure to release.
         }
     }
 

@@ -9,6 +9,8 @@
         <CohesionProjectReference Include="Assimalign.Cohesion.Amqp.Connections" />
         <CohesionProjectReference Include="Assimalign.Cohesion.Connections" />
         <CohesionProjectReference Include="Assimalign.Cohesion.Connections.InMemory" />
+        <!-- The real TLS layer the in-band TLS tests negotiate with (#1935). -->
+        <CohesionProjectReference Include="Assimalign.Cohesion.Connections.Security" />
         <CohesionProjectReference Include="Assimalign.Cohesion.Connections.Tcp" />
     </ItemGroup>
     <ItemGroup>

@@ -29,10 +29,14 @@ internal sealed class AmqpConnectionLayer : IConnectionLayer
         _settings = settings;
     }
 
-    // An AMQP connection runs over its carrier's byte stream: establishing it changes no capability.
+    // An AMQP connection runs over its carrier's byte stream, so establishing it changes no capability, except
+    // where a listener requires TLS of an unsecured carrier: then every connection it returns went through its TLS
+    // layer, which describes them. A secured carrier's connections may skip the layer, and are secured anyway.
     public ConnectionCapabilities Describe(ConnectionCapabilities capabilities)
     {
-        return capabilities;
+        return _settings.RequireTls && _settings.TlsLayer is IConnectionLayer layer && capabilities.Security != ConnectionSecurity.Tls
+            ? layer.Describe(capabilities)
+            : capabilities;
     }
 
     public async ValueTask<IDuplexConnection> UpgradeAsync(IDuplexConnection connection, CancellationToken cancellationToken = default)

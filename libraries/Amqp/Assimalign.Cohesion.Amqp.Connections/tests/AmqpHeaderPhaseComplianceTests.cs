@@ -14,7 +14,7 @@ using Assimalign.Cohesion.Amqp.Connections.Internal;
 namespace Assimalign.Cohesion.Amqp.Connections.Tests;
 
 /// <summary>
-/// Runs the header-phase compliance corpus (AMQP 1.0 Part 2, sections 2.2 to 2.4; Part 5, section 5.3)
+/// Runs the header-phase compliance corpus (AMQP 1.0 Part 2, sections 2.2 to 2.4; Part 5, sections 5.2 and 5.3)
 /// against a listener and a factory: a scripted peer plays the other side of each establishment, checks
 /// every byte the engine answers with, and the case states whether the connection opens or establishment
 /// fails, and with which exact exception.
@@ -140,6 +140,9 @@ public class AmqpHeaderPhaseComplianceTests
         AmqpHeaderPhaseCorpus.Cases.ShouldAllBe(entry => entry.Outcome.Opened || entry.Outcome.Message != null);
         AmqpHeaderPhaseCorpus.Cases.Count(entry => entry.Role == AmqpHeaderPhaseRole.Listener).ShouldBeGreaterThan(0);
         AmqpHeaderPhaseCorpus.Cases.Count(entry => entry.Role == AmqpHeaderPhaseRole.Factory).ShouldBeGreaterThan(0);
+
+        // A factory requires TLS by asking for it, so only a listener's case can require it.
+        AmqpHeaderPhaseCorpus.Cases.ShouldAllBe(entry => entry.Tls != AmqpHeaderPhaseTls.Required || entry.Role == AmqpHeaderPhaseRole.Listener);
     }
 
     private static (AmqpTestPeer Peer, AmqpConnectionListener? Listener, Task<IAmqpConnection> Establish) Start(
@@ -148,7 +151,11 @@ public class AmqpHeaderPhaseComplianceTests
     {
         if (entry.Role == AmqpHeaderPhaseRole.Listener)
         {
-            AmqpConnectionListenerOptions options = new();
+            AmqpConnectionListenerOptions options = new()
+            {
+                TlsLayer = entry.Tls == AmqpHeaderPhaseTls.None ? null : new AmqpTestTlsLayer(),
+                RequireTls = entry.Tls == AmqpHeaderPhaseTls.Required
+            };
 
             switch (entry.Sasl)
             {
@@ -167,6 +174,7 @@ public class AmqpHeaderPhaseComplianceTests
 
         AmqpConnectionFactoryOptions factoryOptions = new()
         {
+            TlsLayer = entry.Tls == AmqpHeaderPhaseTls.Layer ? new AmqpTestTlsLayer() : null,
             SaslMechanism = entry.Sasl switch
             {
                 AmqpHeaderPhaseSasl.Anonymous => new AmqpSaslAnonymousClientMechanism(),
