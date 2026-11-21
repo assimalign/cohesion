@@ -231,4 +231,76 @@
   <data name="StoreStatusUnexpected" xml:space="preserve">
     <value>The store answered a write to set '{0}' with status '{1}', which that write cannot have.</value>
   </data>
+  <data name="UserNameInvalid" xml:space="preserve">
+    <value>A user name is 1 to 128 characters: ASCII letters, digits, '-', '.', '_', '~', '+' and at most one '@', starting and ending with a letter or digit.</value>
+  </data>
+  <data name="UserNameRequired" xml:space="preserve">
+    <value>A user name is required.</value>
+  </data>
+  <data name="UserIdRequired" xml:space="preserve">
+    <value>A user identifier is required: the empty GUID identifies no user.</value>
+  </data>
+  <data name="GroupNameInvalid" xml:space="preserve">
+    <value>A group name is 1 to 128 characters: ASCII letters, digits, '-', '.', '_' and '~', starting and ending with a letter or digit.</value>
+  </data>
+  <data name="GroupNameRequired" xml:space="preserve">
+    <value>A group name is required.</value>
+  </data>
+  <data name="GroupIdRequired" xml:space="preserve">
+    <value>A group identifier is required: the empty GUID identifies no group.</value>
+  </data>
+  <data name="UserDisplayNameInvalid" xml:space="preserve">
+    <value>User '{0}': the display name is 1 to 128 characters with no control character and is not blank.</value>
+  </data>
+  <data name="UserGivenNameInvalid" xml:space="preserve">
+    <value>User '{0}': the given name is 1 to 64 characters with no control character and is not blank.</value>
+  </data>
+  <data name="UserFamilyNameInvalid" xml:space="preserve">
+    <value>User '{0}': the family name is 1 to 64 characters with no control character and is not blank.</value>
+  </data>
+  <data name="UserEmailInvalid" xml:space="preserve">
+    <value>User '{0}': the email address is 3 to 254 characters with no white space and exactly one '@', with text on both sides of it.</value>
+  </data>
+  <data name="UserEmailRequired" xml:space="preserve">
+    <value>User '{0}' marks its email address verified and gives none.</value>
+  </data>
+  <data name="UserLayoutUnknown" xml:space="preserve">
+    <value>A stored user uses layout version {0}, which this hub does not read.</value>
+  </data>
+  <data name="UserPayloadInvalid" xml:space="preserve">
+    <value>A stored user does not follow its layout.</value>
+  </data>
+  <data name="GroupDisplayNameInvalid" xml:space="preserve">
+    <value>Group '{0}': the display name is 1 to 128 characters with no control character and is not blank.</value>
+  </data>
+  <data name="GroupDescriptionInvalid" xml:space="preserve">
+    <value>Group '{0}': the description is at most 256 characters with no control character other than a line break or a tab.</value>
+  </data>
+  <data name="GroupLayoutUnknown" xml:space="preserve">
+    <value>A stored group uses layout version {0}, which this hub does not read.</value>
+  </data>
+  <data name="GroupPayloadInvalid" xml:space="preserve">
+    <value>A stored group does not follow its layout.</value>
+  </data>
+  <data name="DirectoryUserRequired" xml:space="preserve">
+    <value>A directory is given no null user.</value>
+  </data>
+  <data name="DirectoryUserDuplicate" xml:space="preserve">
+    <value>User '{0}' is defined twice.</value>
+  </data>
+  <data name="DirectoryUserNameDuplicate" xml:space="preserve">
+    <value>User name '{0}' is held by users '{1}' and '{2}'.</value>
+  </data>
+  <data name="DirectoryGroupRequired" xml:space="preserve">
+    <value>A directory is given no null group.</value>
+  </data>
+  <data name="DirectoryGroupDuplicate" xml:space="preserve">
+    <value>Group '{0}' is defined twice.</value>
+  </data>
+  <data name="DirectoryGroupNameDuplicate" xml:space="preserve">
+    <value>Group name '{0}' is held by groups '{1}' and '{2}'.</value>
+  </data>
+  <data name="PageObjectRequired" xml:space="preserve">
+    <value>A page holds no null object.</value>
+  </data>
 </root>

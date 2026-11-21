@@ -18,6 +18,7 @@ namespace Assimalign.Cohesion.IdentityHub.Hosting;
 public sealed class IdentityHubApplicationContext : HostContext, IIdentityHubApplicationContext
 {
     private IServiceProvider? _serviceProvider;
+    private IIdentityHubDirectory? _directory;
     private IReadOnlyList<IHostService> _hostedServices = Array.Empty<IHostService>();
     private readonly IHostEnvironment _environment;
     private int _isServiceProviderDisposed;
@@ -50,12 +51,30 @@ public sealed class IdentityHubApplicationContext : HostContext, IIdentityHubApp
     /// </summary>
     /// <exception cref="InvalidOperationException">The application has not been built.</exception>
     public IServiceProvider ServiceProvider => _serviceProvider
-        ?? throw new InvalidOperationException("The service provider is created when the identity hub application is built.");
+        ?? throw new InvalidOperationException(ErrorMessages.ServiceProviderNotBuilt);
+
+    /// <summary>
+    /// Gets the hub's directory of identity objects: the users and groups the builder defined,
+    /// served locked, over the ones in the application's store.
+    /// </summary>
+    /// <remarks>
+    /// The directory is created when the application is built, before any host service factory
+    /// runs, so such a factory reads it here.
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">The application has not been built.</exception>
+    public IIdentityHubDirectory Directory => _directory
+        ?? throw new InvalidOperationException(ErrorMessages.DirectoryNotBuilt);
 
     internal void SetServiceProvider(IServiceProvider serviceProvider)
     {
         ArgumentNullException.ThrowIfNull(serviceProvider);
         _serviceProvider = serviceProvider;
+    }
+
+    internal void SetDirectory(IIdentityHubDirectory directory)
+    {
+        ArgumentNullException.ThrowIfNull(directory);
+        _directory = directory;
     }
 
     internal void ResolveHostedServices()

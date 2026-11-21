@@ -4,11 +4,13 @@
 
 IdentityHub is a code-first identity server: its identity objects are defined in code, and the
 same objects can be created and changed at run time through an API. The area root holds the two
-seams every other IdentityHub package builds against, and the first of those identity objects:
+seams every other IdentityHub package builds against, and the identity objects every other part
+of the hub reads:
 
 - **The application seam.** `IIdentityHubApplicationBuilder`, `IIdentityHubApplication`, and
   `IIdentityHubApplicationContext` are what an application composes. `IdentityHub.Hosting`
-  implements them.
+  implements them. The builder is where an identity hub is defined in code: one `Add` verb per
+  kind of identity object (*The application seam*).
 - **The store seam.** `IIdentityHubStore` is the one contract between the hub and the data layer
   that keeps its state. The hub reads and writes every durable fact through it and depends on no
   concrete store, so the same hub runs on memory, on an embedded database, or on a managed service.
@@ -16,11 +18,19 @@ seams every other IdentityHub package builds against, and the first of those ide
   API, or as both, and `IIdentityClientRegistry` serves them: the ones defined in code, which are
   locked, over the ones kept in the store. Every later identity object follows the same rule
   (*Code-first objects are locked*).
+- **The directory.** `IdentityUser` and `IdentityGroup` are the accounts and the groups the hub
+  knows, and `IIdentityHubDirectory` serves them on the same terms as registrations (*The
+  directory: users and groups*).
 
-The registration model sits in the root, and not in a feature package, because every other part
-of the hub reads it: the token endpoint, the authorization endpoint, the management API, and each
-flow all start from "which application is this". It references nothing the root did not already
-reference.
+Which identity objects the hub will hold, what each corresponds to in Entra and in other identity
+providers, and the order they are built in is *The identity object catalog*.
+
+The registration model and the directory sit in the root, and not in a feature package, because
+every other part of the hub reads them: the token endpoint, the authorization endpoint, the
+management API, and each flow all start from "which application is this" and "which user is
+this". They reference nothing the root did not already reference. What decides and enforces
+(conditional access, sign-in flows, federation) ships as feature packages (owner decision,
+2026-11-21, *Where each family lives*).
 
 The root references Core, IdentityModel, and IdentityHub.Models. It references no
 `Assimalign.Cohesion.Hosting*` library (COHRES004) and never its own runtime module (COHRES001).
@@ -51,11 +61,11 @@ rejects: the root may not reference its area's runtime module.
 
 | Package | Role | References in the area |
 | --- | --- | --- |
-| `Assimalign.Cohesion.IdentityHub` | Area root: application seam, store seam, record vocabulary, error model, in-memory store, app registrations and their registry | `IdentityHub.Models` |
+| `Assimalign.Cohesion.IdentityHub` | Area root: application seam, store seam, record vocabulary, error model, in-memory store, app registrations and their registry, the directory of users and groups | `IdentityHub.Models` |
 | `Assimalign.Cohesion.IdentityHub.Models` | Tenant-directory data contracts | none |
 | `Assimalign.Cohesion.IdentityHub.Hosting` | Runtime module: issuer endpoints and host lifecycle | the root |
 | Planned: a store package per medium | Implements `IIdentityHubStore` and passes the store contract tests | the root |
-| Planned: hub feature packages | Own their values and the codecs that store them | the root |
+| Planned: hub feature packages | Own their identity objects, the builder verbs that define them, and the codecs that store them: conditional access, sign-in flows, federation (*Where each family lives*) | the root |
 
 ## The store seam
 
@@ -697,15 +707,316 @@ The model, the registry, and the stored layout are in the root, and nothing call
 - `IdentityClient` shares the word "client" with the `IdentityHub.Client` package, which is the
   library an application uses to call a hub. The type kept the name its placeholder interface had.
 
+## The identity object catalog
+
+The goal is an identity server defined in code: its identity objects, its sign-in flows, and its
+conditional access are declared on the application builder, and the same objects are also served
+and managed over the web. This section is the map of that goal. It names every family of
+identity object the hub is meant to hold, what the family is called in Microsoft Entra and in
+other identity providers, the builder verb that defines it, and how far it is built. The map is
+of concepts, not a promise of compatibility: the hub borrows how these products shape an object,
+and does not reproduce their APIs.
+
+### The families
+
+| # | Family | Entra | Keycloak, Auth0, Okta, Duende | Hub object and builder verb | State |
+| --- | --- | --- | --- | --- | --- |
+| 1 | Applications | App registration and its service principal | Keycloak client; Auth0 application and API; Okta app integration; Duende `Client`, `ApiResource`, `ApiScope` | `IdentityClient`, `AddClient` | Model and registry built. The verb for it, and the token endpoint, move in #1913 |
+| 2 | Users | User | Keycloak, Auth0, and Okta user. Duende has none of its own | `IdentityUser`, `AddUser` | Built: served by the directory. Nothing signs a user in yet |
+| 3 | Groups | Security group | Keycloak and Okta group. Auth0 has roles and organizations in their place | `IdentityGroup`, `AddGroup` | Built: served by the directory. Membership is family 4 |
+| 4 | Roles and assignments | Directory roles, group membership, app role assignments | Keycloak realm and client roles with role mappings; Auth0 roles; Okta group and app assignments | Proposed: a membership object and an assignment object, each its own record | Planned (#1946) |
+| 5 | Authentication methods | Authentication methods policy, authentication strengths | Keycloak credential types and required actions; Auth0 factors; Okta authenticators | Proposed: a method policy, and a user's credentials as records apart from the user | Planned, with user sign-in (#1947, #226) |
+| 6 | Identity providers | External identity providers, direct federation | Keycloak identity brokering; Auth0 connections; Okta identity providers; Duende external providers | Proposed: `AddIdentityProvider` | Planned (#1948, #227 for SAML) |
+| 7 | Sign-in flows | User flows, custom policies | Keycloak authentication flows; Auth0 Actions and Universal Login; Okta sign-on policies | Proposed: `AddFlow` | Planned (#1949) |
+| 8 | Conditional access | Conditional Access policies, named locations | Keycloak conditional flow steps; Auth0 post-login Actions and adaptive MFA; Okta authentication policies | Proposed: `AddConditionalAccessPolicy`, `AddNamedLocation` | Planned, with the sign-in pipeline that enforces it (#1950) |
+| 9 | Token and claims policy | Claims mapping policy, token lifetime policy, optional claims | Keycloak protocol mappers and client scopes; Auth0 Actions custom claims; Okta authorization server claims; Duende `IProfileService` | Proposed: a claims policy object | Planned (#1951) |
+| 10 | Custom attributes | Directory extensions, custom security attributes | Keycloak user profile attributes; Auth0 metadata; Okta profile schema | Proposed: an attribute schema users and groups carry values for | Planned (#1951) |
+| 11 | Signing keys | Managed by the service | Keycloak realm keys; Auth0 and Okta signing keys; Duende key management | Tracked apart from this catalog | Epic #65, #220 |
+| 12 | Tenants and domains | Tenant, verified domains | Keycloak realm; Auth0 tenant and organization; Okta org | None yet | Blocked by the tenancy contracts (#826, #1914) |
+| 13 | Consent and grants | Admin and user consent, permission grants | Keycloak and Auth0 consent; Duende consent and persisted grants | None yet. A permission a registration holds is granted | Open, with the hub service (#1917) |
+
+Every name in the fifth column marked "proposed" is a proposal. Only the first three families
+have a decided shape.
+
+### The rules every identity object follows
+
+App registrations set these rules, and each later family follows them unless its own section says
+otherwise:
+
+1. **A validated value, made in one place.** An object is a sealed type created from a mutable
+   descriptor by a static `Create`, which checks it whole. A stored object read back goes through
+   the same `Create`.
+2. **Locked when defined in code, stored when created at run time.** The registry that serves
+   the kind holds the locked set and never writes it to the store (*Code-first objects are
+   locked*).
+3. **An identifier that code and the API agree on.** An identifier is a GUID that `FromName`
+   derives from a name, with a namespace of its own per kind, so code adopts an object created at
+   run time under that name (*Code adopts a registration by its identifier*).
+4. **One builder verb per kind, in two spellings.** The seam member takes the finished object.
+   An extension member takes a name or an identifier and a callback that fills the descriptor,
+   creates the object, and calls the seam member, so a mistake throws on the line that declares
+   the object.
+5. **One record set per kind**, with a payload that carries a layout version and refuses unknown
+   members.
+
+### A verb exists once the hub serves the kind
+
+A builder verb lands in the change that makes the hub serve what it declares, and not before. A
+verb that accepts an object the hub then ignores is a trap: the code reads as if a policy were in
+force. That is why `AddClient` in its new form waits for the token endpoint (#1913), and why
+`AddConditionalAccessPolicy` waits for the sign-in pipeline that would enforce it.
+
+"Serves" is not "enforces everywhere". `AddUser` and `AddGroup` exist because the directory
+serves what they declare: a user defined in code is read, listed, and locked through
+`IIdentityHubDirectory`. No endpoint signs that user in yet. The line is drawn by kind of object:
+
+- **A fact** (an application, a user, a group, a membership) gets its verb once a registry
+  serves it.
+- **A rule that is supposed to stop something** (a conditional access policy, an authentication
+  strength, a flow step) gets its verb only with its enforcement.
+
+### Where each family lives
+
+Owner decision, 2026-11-21, recorded as open to change: **the directory lives in the root, and
+policy ships apart.** The diagram shows which package holds which family; an arrow means
+"references".
+
+```mermaid
+flowchart LR
+    Hosting["IdentityHub.Hosting: endpoints and the sign-in pipeline"] --> Root
+    Access["Planned feature: conditional access"] --> Root
+    Flows["Planned feature: sign-in flows"] --> Root
+    Federation["Planned feature: identity providers"] --> Root
+    Root["Area root: applications, users, groups, assignments, the builder seam"]
+    Hosting -->|"only when the runtime drives it"| Flows
+```
+
+- **The root holds what everything else reads**: applications, users, groups, and the
+  assignments between them. A conditional access policy names users, groups, and applications,
+  and a flow ends in a user, so those types have to sit below every feature.
+- **A feature package holds what decides and enforces**: conditional access, sign-in flows, and
+  federation, each with its own objects, its own record sets, and its own builder verbs as
+  `extension(IIdentityHubApplicationBuilder)` members. The root stays free of the vocabulary of
+  conditions, grant controls, and protocol brokering (`resource-areas.md`, "the root does not
+  absorb feature abstractions").
+- **Hosting references a feature only when the runtime itself drives it**, which the sign-in
+  pipeline will for flows. The labeled edge marks that reference, which COHRES002 permits. No
+  feature references Hosting (COHRES001).
+
+The alternative weighed and not chosen was one package for every family. It would have put the
+whole catalog on the root builder interface, and every later policy type into the assembly every
+store package and every client references.
+
+### The order they are built in
+
+Each step is a pull request that leaves the hub working. The order follows what each family needs
+below it, and the two things the goal names first, flows and conditional access, come late for
+that reason: both act on a user signing in, and the hub today issues tokens only to applications.
+
+1. The shared directory kernel, users, groups, and the store verb. Built (#1945).
+2. Hosting on the registry: the new `AddClient`, the issuer, and Hosting's own state on the
+   store (#1913).
+3. Membership and assignments (#1946).
+4. Authentication methods and user sign-in: the authorization endpoint, a session, and the first
+   credential (#1947, #226).
+5. Identity providers (#1948).
+6. Sign-in flows (#1949).
+7. Conditional access (#1950).
+8. Token and claims policy, and custom attributes (#1951).
+9. Tenancy, when its contracts exist (#826, #1914).
+
+### What the catalog leaves out
+
+Non-goals, each a decision and not an omission: privileged identity management, access reviews,
+entitlement management, risk scoring from sign-in telemetry, device management and compliance,
+and licensing. They are products built on a directory, not parts of one. Conditional access takes
+a risk level or a device state as an input when something supplies it, and computes neither.
+
+## The directory: users and groups
+
+### What a user and a group are
+
+`IdentityUser` is one person's account: the name the person signs in with and what the hub says
+about the person in a token. `IdentityGroup` is a named set of users that other objects point at.
+Both are created the way a registration is, from a descriptor, by `Create`:
+
+```csharp
+IdentityHubApplicationBuilder builder = IdentityHubApplication.CreateBuilder(args);
+
+builder
+    .AddGroup("orders-admins", group => group.DisplayName = "Orders administrators")
+    .AddUser("ada@contoso.example", user =>
+    {
+        user.DisplayName = "Ada Lovelace";
+        user.Email = "ada@contoso.example";
+    });
+
+await using IdentityHubApplication application = builder.Build();
+IdentityUser? ada = await application.Context.Directory.Users.FindByNameAsync("ada@contoso.example");
+```
+
+| Member | User | Group |
+| --- | --- | --- |
+| `Id` | `IdentityUserId`, a GUID | `IdentityGroupId`, a GUID |
+| `Name` | `IdentityUserName`: what the user signs in with | `IdentityGroupName` |
+| `DisplayName` | Text for people; the name when not given | The same |
+| Other contents | `GivenName`, `FamilyName`, `Email`, `IsEmailVerified`, `IsEnabled` | `Description` |
+| Set by the directory | `IsLocked`, `Version` | The same |
+
+Three decisions shape them:
+
+- **A user is an account, not a credential.** A password, a passkey, or an identity another
+  provider vouches for is not part of the user. A credential changes on its own schedule, a read
+  of a user must never carry verifier material, and a user defined in code must not force a
+  secret into source. Credentials are family 5, as records of their own.
+- **A group does not list its members.** A membership is its own object, added in family 4.
+  A group that held its members would be rewritten on every join, would grow without bound inside
+  one record, and could not be defined in code while its members are managed at run time. The
+  consequence for a locked group is the point: the group is fixed by the code, and who belongs to
+  it is still an API call.
+- **An email address is contact information.** It is not what a user signs in with, two users may
+  share one, and it is checked for shape only (one `@` with text on both sides, at most 254
+  characters). `IsEmailVerified` without an address is refused.
+
+`IsEnabled` is the one switch a user has: a user that is not enabled keeps its identifier and its
+name and is issued nothing. It exists on a user and not on a registration because a person's
+account is suspended and restored, while an application that should not be used is removed.
+
+Both types are concrete, with no `IIdentityUser` or `IIdentityGroup`. This is the same recorded
+departure from the interface-first rule as `IdentityClient` (*Why a registration is a concrete
+type*), marked at each declaration. The owner decided it for registrations and said every
+identity object follows the same rule; that it extends to these two types is this design's
+reading, and is listed under *Non-goals and open decisions* for confirmation.
+
+### Names and identifiers
+
+A user and a group each have a name and an identifier, and they do different jobs:
+
+- **The name is unique within its kind and compares without regard to case.** `Ada` and `ada`
+  are one user name. A user name is ASCII letters, digits, `-`, `.`, `_`, `~`, `+`, and at most
+  one `@`, starting and ending with a letter or digit, up to 128 characters, so it can take the
+  shape of an email address and needs no escaping in a form body. A group name is an identifier:
+  the unreserved characters of RFC 3986 section 2.3. A user and a group may share a name.
+- **The identifier never changes, and a token names the object by it.** A stored user or group
+  may be renamed by replacing it; the identifier stays.
+- **An identifier left out is derived from the name.** `IdentityUserId.FromName` and
+  `IdentityGroupId.FromName` are UUID version 5 over the lowercase name, each under a namespace
+  of its own, so the same name gives the same identifier on every machine and a user and a group
+  of one name get different identifiers. The namespaces are fixed from the first release:
+  `5df5f6e9-93f3-40bb-b580-a144644a97af` for users and `1dbba961-5e36-4f35-b634-d96873c00590`
+  for groups. Tests pin vectors for both.
+
+Derivation is what lets code adopt an object the API created, exactly as for a registration: a
+user created at run time under `ada@contoso.example` and a later `AddUser("ada@contoso.example")`
+have one identifier, and the directory serves the code definition, locked, from that deployment
+on. The verb that takes an identifier keeps an object across a rename in code: the identifier is
+the one its first name gave, and the callback sets the name it has now.
+
+Unlike a registration, a user or a group keeps the name its identifier was derived from. That is
+not a second answer to the open question about registrations: a person signs in with a user name
+and a policy points at a group by name, so the name is part of the object.
+
+### The directory and its registries
+
+`IIdentityHubDirectory` is what the rest of the hub reads the directory through. It has one
+registry per kind, `Users` and `Groups`, and `IdentityHubDirectory.Create(store, descriptor)`
+makes one over a store and the objects defined in code. `IdentityHub.Hosting` creates it when the
+application is built and exposes it as `IIdentityHubApplicationContext.Directory`.
+
+Both registries derive from `IIdentityObjectRegistry<TObject, TId>`, which is the registry
+contract of every identity object from here on:
+
+| Call | Answers |
+| --- | --- |
+| `Locked` | The objects defined in code, in the order of their identifiers, without a call to the store |
+| `FindAsync(id)` | The object, locked or stored, or nothing |
+| `FindByNameAsync(name)` | The one object that holds the name. On `IIdentityUserRegistry` and `IIdentityGroupRegistry` |
+| `ListAsync(limit, continuation)` | A page: the locked objects first, then the stored ones in the store's order |
+| `TryAddAsync(value)` | `Written`, `Locked`, `IdConflict`, or `NameConflict` |
+| `TryReplaceAsync(value, expectedVersion)` | `Written`, `Locked`, `VersionConflict`, or `NameConflict` |
+| `TryRemoveAsync(id, expectedVersion)` | `Removed`, `Locked`, or `VersionConflict` |
+
+A refused write is an `IdentityObjectWriteResult` and never an exception, on the same terms as
+the store seam and the client registry. The rules of *Code-first objects are locked* hold
+unchanged: a locked object never reaches the store, every write that names it is answered
+`Locked`, a stored object with a locked identifier is not served and is left in the store, and a
+write may not claim a name code holds. A page may hold fewer objects than its limit while a
+continuation remains, because a stored object that code shadows is dropped after the store counted
+it.
+
+One internal type, `IdentityObjectSet<TObject>`, implements all of that for every kind, over an
+`IdentityObjectCodec<TObject>` that says how the kind is stored and what its identifier and name
+are. A registry such as `IdentityUserRegistry` is a thin typed front: it converts the value
+objects, refuses `default` arguments, and calls the set. A new kind of directory object is a
+codec and a front, and inherits the locked set, shadowing, paging, and the write statuses with
+their tests.
+
+`IdentityHubDirectory.Create` checks the objects defined in code against each other once: within
+a kind, an identifier and a name may each appear once, and a mistake is an `ArgumentException`
+that names the objects and stops the hub from starting.
+
+### The stored layouts
+
+| Part | Users | Groups |
+| --- | --- | --- |
+| Record set | `users` | `groups` |
+| Key | The identifier in its one spelling: 36 lowercase characters with hyphens | The same |
+| Index entries | One unique `name` entry holding the lowercase name | The same |
+| Payload | UTF-8 JSON, `"v": 1`: `name`, `displayName`, `givenName`, `familyName`, `email`, `emailVerified`, `enabled` | UTF-8 JSON, `"v": 1`: `name`, `displayName`, `description` |
+| Expiry | None | None |
+
+The payloads follow the registration layout's rules: a source-generated context with no
+reflection, an unknown member is fatal, a layout version other than 1 is refused, and a member
+the object does not have is left out. `emailVerified` and `enabled` are always written, and a
+payload without either is corrupt and not read as `false`: a missing `enabled` must never turn
+into a disabled or an enabled account by default. A key that is not the one spelling of an
+identifier is a corrupt record. A user at every limit fits one record with room to spare, and a
+test holds it there.
+
+The unique `name` index is what keeps a name with one stored object, and one conditional write
+decides a rename: the store replaces the record and its index entry together, so two users racing
+for one name cannot both win.
+
+### What the directory leaves out
+
+- **No membership and no assignments.** Family 4.
+- **No credentials and no sign-in.** Family 5. A user defined today can be read and cannot sign in.
+- **No search.** A user is found by identifier or by exact name. Filtering by display name or by
+  email needs more than index equality, which the store seam does not offer (*Non-goals and open
+  decisions*).
+- **No custom attributes.** Family 10.
+- **No tenancy.** As for registrations (#826, #1914).
+- **No web API.** Run-time creation exists below it, in the registries, as it does for
+  registrations (#1924).
+- **`IdentityClientRegistry` does not use the shared set yet.** It predates the set and keeps a
+  registration unique by each of its audiences, several unique names per object, where the set
+  has one. Moving it onto the set, and its result and page types onto the shared ones, is its own
+  change (#1952).
+
 ## The application seam
 
-The area root owns the public contracts composed by an IdentityHub resource. `IIdentityHubApplicationBuilder` declares token audiences with `AddAudience`, registers OAuth clients with `AddClient`, and builds `IIdentityHubApplication`. The public concrete application, builder, and context live in `Assimalign.Cohesion.IdentityHub.Hosting`.
+The area root owns the public contracts composed by an IdentityHub resource. `IIdentityHubApplicationBuilder` is where a hub is defined in code, and builds `IIdentityHubApplication`. The public concrete application, builder, and context live in `Assimalign.Cohesion.IdentityHub.Hosting`.
+
+| Verb | Declares | Notes |
+| --- | --- | --- |
+| `AddStore(store)`, `AddStore(factory)` | The store that holds what is created at run time | One store per application. An instance stays with its caller; a factory's store is owned by the application. With neither, Hosting uses an `InMemoryIdentityHubStore` of its own |
+| `AddUser(user)` | A user, served locked | `AddUser(name, configure)` and `AddUser(id, configure)` are extension members that end in it |
+| `AddGroup(group)` | A group, served locked | `AddGroup(name, configure)` and `AddGroup(id, configure)` likewise |
+| `AddAudience`, `AddClient(string, …)` | The transitional token configuration | Replaced in #1913 |
+
+The members that take a finished object are on the interface, so Hosting implements one shape per
+kind. The name and identifier forms are `extension(IIdentityHubApplicationBuilder)` members in the
+root (`IdentityHubApplicationBuilderExtensions`), which is the shape a feature package's verbs
+will take as well: a feature extends the same builder without the root knowing the feature. A
+duplicate identifier or name is refused by the verb that repeats it, with an
+`InvalidOperationException` that names the object. The context exposes the result as
+`IIdentityHubApplicationContext.Directory`.
 
 `AddClient` and `IdentityHubClientOptions` predate the app registration model and still drive Hosting: a non-empty `ClientSecret` enables `client_credentials`, `AllowDeviceAuthorization` enables the device grant, clients list the audiences they may request, and build fails if a client names an undeclared audience or enables no grant. They are transitional. When Hosting adopts the registry (#1913), `AddClient` becomes `AddClient(IdentityClientId id, Action<IdentityClientDescriptor> configure)`, which defines a locked registration, and `AddAudience` and `IdentityHubClientOptions` are reshaped onto that model or retired.
 
-The builder has no verb for a store yet. `IdentityHub.Hosting` still keeps its device
-authorizations, signing key, and clients in its own internal types, and moving them onto
-`IIdentityHubStore` is the next increment (see *Non-goals and open decisions*).
+The store verb exists, and only the directory uses the store so far. `IdentityHub.Hosting` still
+keeps its device authorizations, signing key, and clients in its own internal types, and moving
+them onto `IIdentityHubStore` is the next increment (#1913).
 
 ## Security boundary
 
@@ -717,7 +1028,7 @@ The root references Core and IdentityModel contracts, with no Hosting library re
 
 ## Hosting-free application contract (O34)
 
-The root contracts are hosting-free (O34): `IIdentityHubApplication` exposes `Context`, `StartAsync`, and `StopAsync`; `IIdentityHubApplicationContext` exposes `ContentRootPath`. `IIdentityHubApplicationBuilder` owns area declarations and `Build()`. The root and feature packages reference no `Assimalign.Cohesion.Hosting*` library; COHRES004 enforces the boundary.
+The root contracts are hosting-free (O34): `IIdentityHubApplication` exposes `Context`, `StartAsync`, and `StopAsync`; `IIdentityHubApplicationContext` exposes `ContentRootPath` and `Directory`. `IIdentityHubApplicationBuilder` owns area declarations and `Build()`. The root and feature packages reference no `Assimalign.Cohesion.Hosting*` library; COHRES004 enforces the boundary.
 
 `IdentityHubApplication.CreateBuilder(args)` returns the public concrete `IdentityHubApplicationBuilder`; its `Build()` returns the public `IdentityHubApplication : Host<IdentityHubApplicationContext>`. The public `IdentityHubApplicationContext` implements `IIdentityHubApplicationContext`, reading `ContentRootPath` from the host environment. The application explicitly forwards the root lifecycle contract to `IHost`, and consumers use the concrete application for `RunAsync` and `await using`. Runtime options and supporting services remain internal.
 
@@ -769,14 +1080,24 @@ Non-goals of the store seam:
   staleness bound.
 - **No schema or migration in the store.** The payload layout is the codec's.
 
-Decisions that are still open, and what each one waits for. The store work is tracked under #1911
-and the app registration work under #69 (delivered here as #1923):
+Decisions that are still open, and what each one waits for. The store work is tracked under #1911,
+the app registration work under #69 (delivered here as #1923), and the identity object catalog
+under #1944:
 
 | Decision | Today | Waits for |
 | --- | --- | --- |
 | Tenancy in the record address | A record is addressed by set and key. A tenant is carried inside composed keys and index values | #1914, which waits for the tenancy contracts (#826). A first-class partition would change every signature here, so it must be settled before the first durable store ships |
 | Limits (key 512, name 64, payload 1 MiB, 16 index entries) | Provisional | The first durable store (#1916) |
-| Builder verb for a store, and Hosting on the store | None; Hosting keeps internal state | The next increment (#1913) |
+| Builder verb for a store, and Hosting on the store | The verb exists: `AddStore(store)` and `AddStore(factory)`, with an in-memory store when neither is called. The directory is the one thing on the store; Hosting keeps its own internal state | The next increment (#1913) |
+| The store an application gets when it names none | An in-memory store, and nothing says so: objects created at run time are gone when the application stops | The owner. The alternatives are to refuse `Build` with no store, or to report the default when the application starts |
+| Where each family lives | Decided 2026-11-21, open to change: the directory (applications, users, groups, assignments) in the root; conditional access, sign-in flows, and federation as feature packages with their own builder verbs (*Where each family lives*) | Nothing. The owner may revisit it when the first feature package is designed (#1948) |
+| Users and groups as concrete types | `IdentityUser` and `IdentityGroup` have no interface, following the owner's decision for registrations (2026-11-20) and the rule that every code-first object follows it | The owner's confirmation that the decision extends to them |
+| The identifier of a user and of a group | A GUID derived from the name with `FromName`, under a namespace per kind, so code adopts an object created at run time. The name is kept and may change; the identifier does not | The owner's confirmation. The namespaces and the lowercasing are fixed from the first release |
+| Membership | A group does not list its members; a membership is its own object | The owner's confirmation, in #1946 |
+| When a builder verb lands | With the change that makes the hub serve the kind: a fact when a registry serves it, a rule when something enforces it (*A verb exists once the hub serves the kind*) | The owner's confirmation. The alternative is to ship every verb now and enforce later, which was refused for `AddClient` on 2026-11-20 |
+| The order the families are built in | *The order they are built in* | The owner. It is a proposal |
+| The name of the context's directory property | `Directory` | The owner. `Objects` or `Identities` would also cover later families that are not directory objects |
+| The client registry on the shared set | `IdentityClientRegistry` keeps its own implementation and its own result and page types | #1952 |
 | Code-first clients versus stored clients | Decided 2026-11-19: both. A registration defined in code is locked and never stored; one created at run time is stored (*App registrations*) | Hosting adopting the registry (#1913) |
 | A registration as a concrete type | Decided 2026-11-20: `IdentityClient` with no interface, a recorded departure from the interface-first rule (*Why a registration is a concrete type*) | Nothing |
 | The client identifier | Decided 2026-11-20: a GUID. One defined in code is derived from a name with `FromName`, so code adopts a registration created at run time under that name (*Deterministic identifiers*) | Nothing. The namespace GUID and the lowercasing are fixed from the first release |

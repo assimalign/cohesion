@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <resheader name="resmimetype">
+    <value>text/microsoft-resx</value>
+  </resheader>
+  <resheader name="version">
+    <value>2.0</value>
+  </resheader>
+  <resheader name="reader">
+    <value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <resheader name="writer">
+    <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <data name="ApplicationAlreadyBuilt" xml:space="preserve">
+    <value>The identity hub application has already been built.</value>
+  </data>
+  <data name="AudienceAlreadyDeclared" xml:space="preserve">
+    <value>IdentityHub audience '{0}' is already declared.</value>
+  </data>
+  <data name="ClientAlreadyRegistered" xml:space="preserve">
+    <value>IdentityHub client '{0}' is already registered.</value>
+  </data>
+  <data name="ServiceFactoryReturnedNull" xml:space="preserve">
+    <value>The identity hub application service factory returned null.</value>
+  </data>
+  <data name="OptionValueRequired" xml:space="preserve">
+    <value>Command-line option '{0}' requires a value.</value>
+  </data>
+  <data name="EndpointInvalid" xml:space="preserve">
+    <value>The IdentityHub endpoint must be an absolute HTTP or HTTPS endpoint with an explicit port.</value>
+  </data>
+  <data name="ServiceProviderNotBuilt" xml:space="preserve">
+    <value>The service provider is created when the identity hub application is built.</value>
+  </data>
+  <data name="DirectoryNotBuilt" xml:space="preserve">
+    <value>The directory is created when the identity hub application is built.</value>
+  </data>
+  <data name="StoreAlreadyRegistered" xml:space="preserve">
+    <value>The identity hub application already has a store.</value>
+  </data>
+  <data name="StoreFactoryReturnedNull" xml:space="preserve">
+    <value>The identity hub application store factory returned null.</value>
+  </data>
+  <data name="UserAlreadyDefined" xml:space="preserve">
+    <value>IdentityHub user '{0}' is already defined.</value>
+  </data>
+  <data name="UserNameAlreadyDefined" xml:space="preserve">
+    <value>IdentityHub user name '{0}' is already held by user '{1}'.</value>
+  </data>
+  <data name="GroupAlreadyDefined" xml:space="preserve">
+    <value>IdentityHub group '{0}' is already defined.</value>
+  </data>
+  <data name="GroupNameAlreadyDefined" xml:space="preserve">
+    <value>IdentityHub group name '{0}' is already held by group '{1}'.</value>
+  </data>
+</root>

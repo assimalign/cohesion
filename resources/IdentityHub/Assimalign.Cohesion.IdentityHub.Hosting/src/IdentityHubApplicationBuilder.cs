@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Threading.Tasks;
 
@@ -15,9 +16,10 @@ namespace Assimalign.Cohesion.IdentityHub.Hosting;
 /// </summary>
 /// <remarks>
 /// Every dependency the application runs with is a registration in <see cref="Services"/>:
-/// declared audiences and clients, and the lifecycle services (<see cref="IHostService"/>).
-/// <see cref="Build"/> closes registration, creates the service provider once, validates the
-/// declared clients against the declared audiences, and resolves the lifecycle services once, in
+/// declared audiences and clients, the store, the users and groups defined in code, and the
+/// lifecycle services (<see cref="IHostService"/>). <see cref="Build"/> closes registration,
+/// creates the service provider once, validates the declared clients against the declared
+/// audiences, creates the directory over the store, and resolves the lifecycle services once, in
 /// registration order; the identity endpoint is always the last of them.
 /// </remarks>
 [global::System.Diagnostics.DebuggerDisplay("IdentityHubApplicationBuilder")]
@@ -83,7 +85,8 @@ public sealed class IdentityHubApplicationBuilder : IIdentityHubApplicationBuild
             if (descriptor.ImplementationInstance is IdentityHubAudience declared &&
                 string.Equals(declared.Value, audience, StringComparison.Ordinal))
             {
-                throw new InvalidOperationException($"IdentityHub audience '{audience}' is already declared.");
+                throw new InvalidOperationException(
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.AudienceAlreadyDeclared, audience));
             }
         }
 
@@ -116,13 +119,157 @@ public sealed class IdentityHubApplicationBuilder : IIdentityHubApplicationBuild
             if (descriptor.ImplementationInstance is IdentityHubClientRegistration registered &&
                 string.Equals(registered.ClientId, clientId, StringComparison.Ordinal))
             {
-                throw new InvalidOperationException($"IdentityHub client '{clientId}' is already registered.");
+                throw new InvalidOperationException(
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.ClientAlreadyRegistered, clientId));
             }
         }
 
         var options = new IdentityHubClientOptions();
         configure.Invoke(options);
         Services.AddSingleton(IdentityHubClientRegistration.Create(clientId, options));
+        return this;
+    }
+
+    /// <summary>
+    /// Sets the store that holds the identity objects created while the hub runs.
+    /// </summary>
+    /// <remarks>
+    /// The store is registered in <see cref="Services"/> and stays owned by the caller. An
+    /// application with no store keeps those objects in memory, in an
+    /// <see cref="InMemoryIdentityHubStore"/> it owns: they are gone when it stops, and two nodes
+    /// do not share them. The objects defined in code never reach the store.
+    /// </remarks>
+    /// <param name="store">The store.</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="store"/> is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException">The application already has a store or has been built.</exception>
+    public IdentityHubApplicationBuilder AddStore(IIdentityHubStore store)
+    {
+        EnsureNotBuilt();
+        ArgumentNullException.ThrowIfNull(store);
+        EnsureNoStore();
+
+        Services.AddSingleton<IIdentityHubStore>(store);
+        return this;
+    }
+
+    /// <summary>
+    /// Sets the store that holds the identity objects created while the hub runs, created when
+    /// the application is built.
+    /// </summary>
+    /// <remarks>
+    /// The factory is invoked once, when the application is built, and receives the application's
+    /// context. The application owns the store it returns: a store that is disposable is disposed
+    /// with the application. <see cref="IdentityHubApplicationContext.Directory"/> is not
+    /// available to the factory, because the directory is created over the store.
+    /// </remarks>
+    /// <param name="factory">The factory that creates the store.</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="factory"/> is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// The application already has a store or has been built, or the factory returns
+    /// <see langword="null"/> during build.
+    /// </exception>
+    public IdentityHubApplicationBuilder AddStore(Func<IdentityHubApplicationContext, IIdentityHubStore> factory)
+    {
+        EnsureNotBuilt();
+        ArgumentNullException.ThrowIfNull(factory);
+        EnsureNoStore();
+
+        Services.AddSingleton<IIdentityHubStore>(_ => factory.Invoke(_context)
+            ?? throw new InvalidOperationException(ErrorMessages.StoreFactoryReturnedNull));
+        return this;
+    }
+
+    /// <summary>
+    /// Defines a user in code. The application serves it locked.
+    /// </summary>
+    /// <remarks>
+    /// The user is registered in <see cref="Services"/>. A user stored under the same identifier,
+    /// which a user created under the same name has, is not served from then on: the one defined
+    /// here is.
+    /// </remarks>
+    /// <param name="user">The user.</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="user"/> is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// A user with the same identifier or the same name is already defined, or the application has
+    /// been built.
+    /// </exception>
+    public IdentityHubApplicationBuilder AddUser(IdentityUser user)
+    {
+        EnsureNotBuilt();
+        ArgumentNullException.ThrowIfNull(user);
+        foreach (ServiceDescriptor descriptor in Services.Container)
+        {
+            if (descriptor.ImplementationInstance is not IdentityUser defined)
+            {
+                continue;
+            }
+
+            if (defined.Id.Equals(user.Id))
+            {
+                throw new InvalidOperationException(
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.UserAlreadyDefined, Describe(user)));
+            }
+
+            if (defined.Name.Equals(user.Name))
+            {
+                throw new InvalidOperationException(string.Format(
+                    CultureInfo.CurrentCulture,
+                    ErrorMessages.UserNameAlreadyDefined,
+                    user.Name.Value,
+                    Describe(defined)));
+            }
+        }
+
+        Services.AddSingleton(user);
+        return this;
+    }
+
+    /// <summary>
+    /// Defines a group in code. The application serves it locked.
+    /// </summary>
+    /// <remarks>
+    /// The group is registered in <see cref="Services"/>. A group stored under the same
+    /// identifier, which a group created under the same name has, is not served from then on: the
+    /// one defined here is.
+    /// </remarks>
+    /// <param name="group">The group.</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="group"/> is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// A group with the same identifier or the same name is already defined, or the application
+    /// has been built.
+    /// </exception>
+    public IdentityHubApplicationBuilder AddGroup(IdentityGroup group)
+    {
+        EnsureNotBuilt();
+        ArgumentNullException.ThrowIfNull(group);
+        foreach (ServiceDescriptor descriptor in Services.Container)
+        {
+            if (descriptor.ImplementationInstance is not IdentityGroup defined)
+            {
+                continue;
+            }
+
+            if (defined.Id.Equals(group.Id))
+            {
+                throw new InvalidOperationException(
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.GroupAlreadyDefined, Describe(group)));
+            }
+
+            if (defined.Name.Equals(group.Name))
+            {
+                throw new InvalidOperationException(string.Format(
+                    CultureInfo.CurrentCulture,
+                    ErrorMessages.GroupNameAlreadyDefined,
+                    group.Name.Value,
+                    Describe(defined)));
+            }
+        }
+
+        Services.AddSingleton(group);
         return this;
     }
 
@@ -164,7 +311,7 @@ public sealed class IdentityHubApplicationBuilder : IIdentityHubApplicationBuild
         ArgumentNullException.ThrowIfNull(factory);
 
         Services.AddSingleton<IHostService>(_ => factory.Invoke(_context)
-            ?? throw new InvalidOperationException("The identity hub application service factory returned null."));
+            ?? throw new InvalidOperationException(ErrorMessages.ServiceFactoryReturnedNull));
         return this;
     }
 
@@ -174,7 +321,7 @@ public sealed class IdentityHubApplicationBuilder : IIdentityHubApplicationBuild
     /// <returns>The configured identity hub application.</returns>
     /// <exception cref="InvalidOperationException">
     /// The builder has already built an application, a registered client is invalid, or a registered
-    /// host service factory returns <see langword="null"/>.
+    /// store or host service factory returns <see langword="null"/>.
     /// </exception>
     /// <exception cref="ArgumentException">A command-line endpoint or data option is invalid or missing its value.</exception>
     public IdentityHubApplication Build()
@@ -188,6 +335,30 @@ public sealed class IdentityHubApplicationBuilder : IIdentityHubApplicationBuild
         Services.AddSingleton<IdentityHubRegistrations>(serviceProvider => IdentityHubRegistrations.Create(
             serviceProvider.GetRequiredService<IEnumerable<IdentityHubAudience>>(),
             serviceProvider.GetRequiredService<IEnumerable<IdentityHubClientRegistration>>()));
+
+        // An application with no store keeps the objects created at run time in memory. The
+        // factory makes the application the owner of that store.
+        if (!HasStore())
+        {
+            Services.AddSingleton<IIdentityHubStore>(_ => new InMemoryIdentityHubStore());
+        }
+
+        // The objects defined in code are checked against each other when the directory is created.
+        Services.AddSingleton<IIdentityHubDirectory>(serviceProvider =>
+        {
+            var descriptor = new IdentityHubDirectoryDescriptor();
+            foreach (IdentityUser user in serviceProvider.GetRequiredService<IEnumerable<IdentityUser>>())
+            {
+                descriptor.Users.Add(user);
+            }
+
+            foreach (IdentityGroup group in serviceProvider.GetRequiredService<IEnumerable<IdentityGroup>>())
+            {
+                descriptor.Groups.Add(group);
+            }
+
+            return IdentityHubDirectory.Create(serviceProvider.GetRequiredService<IIdentityHubStore>(), descriptor);
+        });
 
         // Registered after every AddService call, so the endpoint starts last and stops first.
         Services.AddSingleton<IHostService>(serviceProvider =>
@@ -217,6 +388,10 @@ public sealed class IdentityHubApplicationBuilder : IIdentityHubApplicationBuild
         {
             // The declared clients are validated before any lifecycle service is created.
             _ = _context.ServiceProvider.GetRequiredService<IdentityHubRegistrations>();
+
+            // The directory exists before any lifecycle service is created, so a service factory
+            // reads it from the context.
+            _context.SetDirectory(_context.ServiceProvider.GetRequiredService<IIdentityHubDirectory>());
             _context.ResolveHostedServices();
 
             return new IdentityHubApplication(
@@ -245,13 +420,59 @@ public sealed class IdentityHubApplicationBuilder : IIdentityHubApplicationBuild
         string clientId,
         Action<IdentityHubClientOptions> configure) => AddClient(clientId, configure);
 
+    IIdentityHubApplicationBuilder IIdentityHubApplicationBuilder.AddStore(IIdentityHubStore store) => AddStore(store);
+
+    IIdentityHubApplicationBuilder IIdentityHubApplicationBuilder.AddStore(
+        Func<IIdentityHubApplicationContext, IIdentityHubStore> factory)
+    {
+        EnsureNotBuilt();
+        ArgumentNullException.ThrowIfNull(factory);
+
+        return AddStore(context => factory.Invoke(context));
+    }
+
+    IIdentityHubApplicationBuilder IIdentityHubApplicationBuilder.AddUser(IdentityUser user) => AddUser(user);
+
+    IIdentityHubApplicationBuilder IIdentityHubApplicationBuilder.AddGroup(IdentityGroup group) => AddGroup(group);
+
     IIdentityHubApplication IIdentityHubApplicationBuilder.Build() => Build();
+
+    private static string Describe(IdentityUser user)
+    {
+        return string.Concat(user.Name.Value, " (", user.Id.ToString(), ")");
+    }
+
+    private static string Describe(IdentityGroup group)
+    {
+        return string.Concat(group.Name.Value, " (", group.Id.ToString(), ")");
+    }
+
+    private bool HasStore()
+    {
+        foreach (ServiceDescriptor descriptor in Services.Container)
+        {
+            if (descriptor.ServiceType == typeof(IIdentityHubStore))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private void EnsureNoStore()
+    {
+        if (HasStore())
+        {
+            throw new InvalidOperationException(ErrorMessages.StoreAlreadyRegistered);
+        }
+    }
 
     private void EnsureNotBuilt()
     {
         if (_isBuilt)
         {
-            throw new InvalidOperationException("The identity hub application has already been built.");
+            throw new InvalidOperationException(ErrorMessages.ApplicationAlreadyBuilt);
         }
     }
 
@@ -284,7 +505,9 @@ public sealed class IdentityHubApplicationBuilder : IIdentityHubApplicationBuild
             {
                 if (index + 1 >= _args.Length)
                 {
-                    throw new ArgumentException($"Command-line option '{name}' requires a value.", name);
+                    throw new ArgumentException(
+                        string.Format(CultureInfo.CurrentCulture, ErrorMessages.OptionValueRequired, name),
+                        name);
                 }
 
                 string value = _args[index + 1];
@@ -308,9 +531,7 @@ public sealed class IdentityHubApplicationBuilder : IIdentityHubApplicationBuild
             (!string.Equals(endpoint.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) &&
              !string.Equals(endpoint.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)))
         {
-            throw new ArgumentException(
-                "The IdentityHub endpoint must be an absolute HTTP or HTTPS endpoint with an explicit port.",
-                nameof(value));
+            throw new ArgumentException(ErrorMessages.EndpointInvalid, nameof(value));
         }
 
         return endpoint;
