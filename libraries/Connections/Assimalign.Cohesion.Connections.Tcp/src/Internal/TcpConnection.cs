@@ -15,8 +15,17 @@ namespace Assimalign.Cohesion.Connections.Tcp.Internal;
 /// A reliable, ordered, single-stream connection over a connected TCP socket.
 /// </summary>
 /// <remarks>
+/// <para>
 /// The connection is live on construction: the constructor starts the receive and send pump
 /// loops, which continuously move bytes between the socket and the consumer-facing duplex pipe.
+/// </para>
+/// <para>
+/// <see cref="DisposeAsync"/> closes gracefully: it completes both consumer-facing pipes, the send
+/// loop hands what the application already wrote to the socket and then shuts the socket down in
+/// its own <c>finally</c>, and the close escalates to <see cref="Abort"/> only when the send loop
+/// cannot drain within the close timeout (#1086). <see cref="Abort"/> tears the socket down at once
+/// and discards whatever has not been sent.
+/// </para>
 /// </remarks>
 [global::System.Diagnostics.DebuggerDisplay("TcpConnection {Id,nq}")]
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
@@ -34,11 +43,13 @@ internal sealed class TcpConnection : DuplexConnection
     private readonly ConnectionProtocol _protocol;
     private readonly IDisposable? _ownedResource;
     private readonly int _memoryPoolBlockSize;
+    private readonly TimeSpan _closeTimeout;
     private readonly Lock _lock = new();
 
     private Exception? _connectionError;
     private bool _isConnectionClosed;
     private int _disposeStarted;
+    private volatile bool _isClosing;
     private volatile bool _isSocketDisposed;
     private volatile ConnectionState _state;
 
@@ -67,6 +78,7 @@ internal sealed class TcpConnection : DuplexConnection
         _receiver = new SocketPipeReceiver(settings.PipeOptions.ReceiverScheduler);
         _senderPool = new SocketPipeSenderPool(settings.PipeOptions.SenderScheduler);
         _memoryPoolBlockSize = settings.PipeOptions.BlockSize;
+        _closeTimeout = settings.CloseTimeout;
 
         _state = ConnectionState.Opening;
 
@@ -111,32 +123,7 @@ internal sealed class TcpConnection : DuplexConnection
     /// <inheritdoc />
     public override void Abort(Exception? reason = null)
     {
-        bool firstAbort;
-        lock (_lock)
-        {
-            firstAbort = !_isSocketDisposed;
-            if (firstAbort)
-            {
-                _isSocketDisposed = true;
-                _connectionError ??= reason;
-                try
-                {
-                    _socket.Shutdown(SocketShutdown.Both);
-                }
-                catch (SocketException)
-                {
-                    // The connection is being torn down regardless of shutdown errors.
-                }
-                catch (ObjectDisposedException)
-                {
-                }
-
-                _socket.Dispose();
-                _state = ConnectionState.Aborted;
-            }
-        }
-
-        if (firstAbort)
+        if (CloseSocket(reason, abort: true))
         {
             _pair.TransportInput.CancelPendingRead();
             _pair.TransportOutput.CancelPendingFlush();
@@ -146,6 +133,11 @@ internal sealed class TcpConnection : DuplexConnection
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// A graceful close (RFC 9293 §3.6): nothing the application wrote before the call is discarded
+    /// unless the send loop cannot hand it to the socket within the close timeout, because the peer
+    /// stopped reading. Then the connection is aborted and stays <see cref="ConnectionState.Aborted"/>.
+    /// </remarks>
     public override async ValueTask DisposeAsync()
     {
         if (Interlocked.Exchange(ref _disposeStarted, 1) != 0)
@@ -154,20 +146,49 @@ internal sealed class TcpConnection : DuplexConnection
             return;
         }
 
-        // An abort before disposal is a hard tear-down and the connection stays Aborted; a
-        // dispose-initiated close transitions to Closed once the pump loops have finished.
-        bool wasAborted = _state == ConnectionState.Aborted;
+        lock (_lock)
+        {
+            // An abort before disposal is a hard tear-down, and the connection stays Aborted.
+            if (_state == ConnectionState.Open)
+            {
+                _state = ConnectionState.Closing;
+            }
+        }
 
-        Abort();
+        // Set before the pipes complete, so a receive loop that stops because its input completed
+        // leaves the socket to the send loop instead of aborting it.
+        _isClosing = true;
 
-        await _receiveTask.ConfigureAwait(false);
-        await _sendTask.ConfigureAwait(false);
+        // Completing the application's output lets the send loop send what is already written and
+        // then shut the socket down in its own finally. Completing the application's input releases
+        // a receive loop paused on back-pressure. Both are no-ops when the application completed them.
+        _pair.Output.Complete();
+        _pair.Input.Complete();
+
+        Task pumps = Task.WhenAll(_receiveTask, _sendTask);
+        if (!pumps.IsCompleted)
+        {
+            try
+            {
+                await pumps.WaitAsync(_closeTimeout).ConfigureAwait(false);
+            }
+            catch (TimeoutException)
+            {
+                // The peer stopped reading, so the send loop cannot drain: abort, which discards what
+                // is still unsent and fails the pending send.
+                Abort();
+                await pumps.ConfigureAwait(false);
+            }
+        }
 
         _ownedResource?.Dispose();
 
-        if (!wasAborted)
+        lock (_lock)
         {
-            _state = ConnectionState.Closed;
+            if (_state != ConnectionState.Aborted)
+            {
+                _state = ConnectionState.Closed;
+            }
         }
     }
 
@@ -269,7 +290,13 @@ internal sealed class TcpConnection : DuplexConnection
 
                 await _connectionClosingProcess.Task.ConfigureAwait(false);
 
-                Abort();
+                // During a graceful close the send loop owns the socket: it closes it once everything
+                // the application wrote has been sent, and aborting here would discard that output. A
+                // failed receive, or the connection ending outside a graceful close, still aborts.
+                if (error is not null || !_isClosing)
+                {
+                    Abort();
+                }
             }
         }
     }
@@ -277,6 +304,7 @@ internal sealed class TcpConnection : DuplexConnection
     private async Task SendAsync()
     {
         Exception? error = null;
+        bool drained = false;
 
         try
         {
@@ -330,6 +358,8 @@ internal sealed class TcpConnection : DuplexConnection
 
                 if (result.IsCompleted)
                 {
+                    // The application completed its output and everything it wrote has been sent.
+                    drained = error is null;
                     break;
                 }
             }
@@ -353,15 +383,62 @@ internal sealed class TcpConnection : DuplexConnection
         }
         finally
         {
-            // Abort with the send error so it is recorded as the connection error before the
-            // receive loop completes the transport output.
-            Abort(error);
+            if (drained)
+            {
+                // The bytes are in the socket's send buffer, so the shutdown queues the FIN behind them
+                // and the kernel delivers both after the socket is closed (RFC 9293 §3.6).
+                CloseSocket(reason: null, abort: false);
+            }
+            else
+            {
+                // Abort with the send error so it is recorded as the connection error before the
+                // receive loop completes the transport output.
+                Abort(error);
+            }
 
             // Complete the transport input after disposing the socket.
             _pair.TransportInput.Complete(error);
 
             // Cancel any pending flushes so that the receive loop is un-paused.
             _pair.TransportOutput.CancelPendingFlush();
+        }
+    }
+
+    /// <summary>
+    /// Shuts the socket down in both directions and disposes it, once.
+    /// </summary>
+    /// <param name="reason">The connection error to record, when this call closes the socket.</param>
+    /// <param name="abort">
+    /// Whether this is a tear-down (<see cref="ConnectionState.Aborted"/>) rather than the send loop's
+    /// close after it drained (<see cref="ConnectionState.Closing"/> until disposal completes).
+    /// </param>
+    /// <returns>Whether this call closed the socket.</returns>
+    private bool CloseSocket(Exception? reason, bool abort)
+    {
+        lock (_lock)
+        {
+            if (_isSocketDisposed)
+            {
+                return false;
+            }
+
+            _isSocketDisposed = true;
+            _connectionError ??= reason;
+            try
+            {
+                _socket.Shutdown(SocketShutdown.Both);
+            }
+            catch (SocketException)
+            {
+                // The connection is being torn down regardless of shutdown errors.
+            }
+            catch (ObjectDisposedException)
+            {
+            }
+
+            _socket.Dispose();
+            _state = abort ? ConnectionState.Aborted : ConnectionState.Closing;
+            return true;
         }
     }
 

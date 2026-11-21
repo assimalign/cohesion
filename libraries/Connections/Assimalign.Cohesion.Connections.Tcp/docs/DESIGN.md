@@ -110,10 +110,51 @@ transport security) are identical for both families — only the protocol identi
 
 ## Lifecycle and Error Model
 
+A connection is open from construction until one of three paths ends it. The diagram shows the states
+the paths move it through; the bullets below say the same in words.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Open: constructed, both loops running
+    Open --> Closing: DisposeAsync, or Output completed and drained
+    Closing --> Closed: DisposeAsync returns after both loops end
+    Open --> Aborted: Abort, a failed send or receive, or the peer ends the stream
+    Closing --> Aborted: close timeout, or a failure while draining
+    Closed --> [*]
+    Aborted --> [*]
+```
+
 - A connection is **live on construction**: the constructor starts the receive and send loops.
-- **Graceful half-close** — complete `Output`; **`DisposeAsync`** — close (transitions to `Closed` once
-  the loops finish); **`Abort(reason)`** — immediate tear-down (`Aborted`), discarding in-flight data.
-  `ConnectionClosed` is signaled on abort and observed peer closure, and before disposal returns.
+- **Completing `Output`** ends the sending side gracefully: the send loop sends everything written,
+  then shuts the socket down in both directions and closes it in its own `finally`, and the state moves
+  to `Closing`. It is not a TCP half-close: the driver stops receiving when it closes the socket, so
+  bytes the peer sends afterwards are not read.
+- **`DisposeAsync` is a graceful close** (RFC 9293 §3.6, #1086). It completes both consumer-facing
+  pipes, so the send loop drains and closes the socket as above, then awaits both loops and moves to
+  `Closed`. Nothing written before the call is lost. If the send loop cannot drain within the close
+  timeout, because the peer stopped reading, disposal aborts the connection, which ends `Aborted`.
+  The timeout is five seconds (`TcpConnectionSettings.DefaultCloseTimeout`). It is not a public option;
+  only the tests shorten it.
+- **`Abort(reason)`** is an immediate tear-down (`Aborted`): the socket closes at once, and whatever the
+  send loop has not handed to it is discarded.
+- `ConnectionClosed` is signaled on abort and observed peer closure, and before disposal returns.
+- **During a graceful close the send loop owns the socket.** The receive loop stopping because its input
+  completed, or because the peer ended the stream, no longer aborts the connection, which would discard
+  the output being drained; a failed receive still does. Outside a graceful close, the peer ending the
+  stream still aborts, as it always has.
+- **A graceful close is not a lingering close.** The driver does not wait for the peer's FIN before it
+  closes the socket. If the peer is still sending at that moment, the unread bytes make the operating
+  system reset the connection instead of finishing it, and a reset can discard output the peer has not
+  read yet. A protocol that must deliver a last frame while its peer may still be sending stops the peer
+  first with its own close handshake (AMQP's `close`, HTTP/2's `GOAWAY`), or reads to the peer's end of
+  stream before it disposes.
+- Until #1086, `DisposeAsync` aborted first, so bytes flushed just before it could be lost: a Database
+  server's terminal error frame, an AMQP server's SASL outcome. `TcpConnectionDisposeTests` disposes
+  right after a flush 500 times for each of three payload sizes, over TCP and over a Unix domain
+  socket, and requires every byte followed by end of stream each time. The HTTP stack's own drain
+  wait (#686: complete `Output`, then wait up to 200 ms for the state to leave `Open`) is kept: it is
+  now redundant over TCP but harmless, since the drain moves the state to `Closing` as soon as it ends,
+  and removing it is a change to the HTTP stack, not to this driver.
 - Socket reset/abort conditions are classified by `SocketHelper` and surfaced through the
   `ConnectionException` family (`ConnectionResetException` for resets) so consumers catch one hierarchy.
 - The generic listener base owns the live accepted set. Listener disposal releases the listening

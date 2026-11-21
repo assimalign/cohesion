@@ -2450,8 +2450,9 @@ so the host releases what it held: its connection slot, or the stream's exchange
 ### HTTP/2: one deadline per connection (`Http2ConnectionTimeout`)
 
 The frame pump bounds every inbound read, the preface included, with one
-`CancellationTokenSource` linked to its own token. The deadline it carries moves with the
-connection's state, as `Http1ReadTimeout`'s moves through an HTTP/1.1 request:
+`CancellationTokenSource` linked to its own token, which one `TimeProvider` timer cancels. The
+deadline the timer carries moves with the connection's state, as `Http1ReadTimeout`'s moves
+through an HTTP/1.1 request:
 
 - **Keep-alive.** The connection is busy by the count that admits streams against
   `SETTINGS_MAX_CONCURRENT_STREAMS`: the streams in the table plus the exchanges that kept a
@@ -2471,6 +2472,19 @@ connection's state, as `Http1ReadTimeout`'s moves through an HTTP/1.1 request:
   A block that ends without opening a stream returns the connection to the keep-alive deadline
   as it stood, so blocks on a refused or reset stream cannot keep an idle connection open.
 
+The timer's callback cancels the source only after checking, under the deadline's lock, that the
+deadline the connection carries has elapsed, and it records which deadline that was. Moving or
+clearing the deadline changes the timer under the same lock, but no timer can recall a callback it
+has already dispatched, and on a busy thread pool that callback can run hundreds of milliseconds
+late. So a callback that finds the deadline cleared does nothing, and one that finds it moved, or
+that runs early on a timer clock coarser than the time provider's, waits for what is left of it.
+It cancels with `CancelAsync`, so the pending read's cancellation runs on the thread pool, never
+under the lock, which is always taken after the connection's. The deadline used
+`CancellationTokenSource.CancelAfter` until 2026-11-20. Its callback cancels unconditionally, so
+under load (first seen on the macOS CI runner) a late one cancelled the read that followed a
+cleared request-headers deadline and closed a connection busy with that request as if it had been
+idle.
+
 A deadline can fire while the pump processes a frame rather than while it reads one. The
 HPACK decode, the request-parse interceptors (which run inline in the pump) and the `413` or
 `RST_STREAM` writes they cause all happen between reads, after a head that arrived in time. So
@@ -2483,8 +2497,8 @@ takes the token afresh too, so a keep-alive deadline that fired just as a HEADER
 arrived does not fail the block that header started as a request-headers timeout.
 
 When a read is cancelled by the deadline while it waits, the connection always ends: the read
-may have consumed part of a frame. While a read waits, only the pump could change which
-deadline is carried, so that deadline is the one that fired. The request-headers deadline ends
+may have consumed part of a frame. The deadline that cancelled it is the one the callback
+recorded. The request-headers deadline ends
 the connection with `GOAWAY(ENHANCE_YOUR_CALM)`. The block holds the whole connection, and
 RFC 9113 §10.5 lets an endpoint treat activity that ties up its resources as that connection
 error, the code every other HTTP/2 limit escalates to. Requests already received in full stay

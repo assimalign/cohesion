@@ -1,6 +1,7 @@
-using System.Collections.Generic;
+using System;
 using System.Net;
 using System.Threading;
+using System.Threading.Channels;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Connections;
@@ -8,20 +9,25 @@ using Assimalign.Cohesion.Connections;
 namespace Assimalign.Cohesion.Amqp.Connections.Tests;
 
 /// <summary>
-/// A <see cref="MultiplexedConnectionListener"/> double that yields pre-queued multiplexed
-/// carrier connections and records when it is disposed.
+/// A <see cref="MultiplexedConnectionListener"/> double that hands out the multiplexed carrier connections
+/// a test queues. Like a real listener, an accept waits while nothing is queued, until a connection is
+/// queued, the accept is canceled, or the listener is disposed. It records binds and disposal.
 /// </summary>
 internal sealed class TestMultiplexedConnectionListener : MultiplexedConnectionListener
 {
-    private readonly Queue<IMultiplexedConnection> _pending = new();
+    private readonly Channel<IMultiplexedConnection> _pending = Channel.CreateUnbounded<IMultiplexedConnection>();
     private readonly ConnectionCapabilities _capabilities;
+    private int _bindCount;
+    private volatile bool _isDisposed;
 
     public TestMultiplexedConnectionListener(ConnectionCapabilities? capabilities = null)
     {
         _capabilities = capabilities ?? TestMultiplexedConnection.DefaultCapabilities;
     }
 
-    public bool IsDisposed { get; private set; }
+    public int BindCount => Volatile.Read(ref _bindCount);
+
+    public bool IsDisposed => _isDisposed;
 
     public override ListenerId Id { get; } = ListenerId.New();
 
@@ -29,14 +35,42 @@ internal sealed class TestMultiplexedConnectionListener : MultiplexedConnectionL
 
     public override ConnectionCapabilities Capabilities => _capabilities;
 
-    public void Enqueue(IMultiplexedConnection connection) => _pending.Enqueue(connection);
+    /// <summary>
+    /// Queues a multiplexed carrier connection for the next accept.
+    /// </summary>
+    public void Enqueue(IMultiplexedConnection connection)
+    {
+        if (!_pending.Writer.TryWrite(connection))
+        {
+            throw new InvalidOperationException("The test listener has been disposed.");
+        }
+    }
 
-    protected override ValueTask<IMultiplexedConnection> AcceptCoreAsync(CancellationToken cancellationToken = default)
-        => ValueTask.FromResult(_pending.Dequeue());
+    public override ValueTask BindAsync(CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        Interlocked.Increment(ref _bindCount);
+
+        return ValueTask.CompletedTask;
+    }
 
     public override ValueTask DisposeAsync()
     {
-        IsDisposed = true;
+        _isDisposed = true;
+        _pending.Writer.TryComplete();
+
         return ValueTask.CompletedTask;
+    }
+
+    protected override async ValueTask<IMultiplexedConnection> AcceptCoreAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            return await _pending.Reader.ReadAsync(cancellationToken);
+        }
+        catch (ChannelClosedException)
+        {
+            throw new ObjectDisposedException(nameof(TestMultiplexedConnectionListener));
+        }
     }
 }

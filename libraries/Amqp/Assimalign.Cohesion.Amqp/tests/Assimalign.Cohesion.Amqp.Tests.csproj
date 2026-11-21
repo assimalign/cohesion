@@ -1,20 +1,19 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
+    <PropertyGroup>
+        <RootNamespace>Assimalign.Cohesion.Amqp.Tests</RootNamespace>
+        <IsPackable>false</IsPackable>
+        <ImplicitUsings>disable</ImplicitUsings>
+    </PropertyGroup>
 
-  <PropertyGroup>
-    <RootNamespace>Assimalign.Cohesion.Amqp.Tests</RootNamespace>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <IsPackable>false</IsPackable>
-  </PropertyGroup>
-
-  <ItemGroup>
-    <CohesionPackageReference Include="coverlet.collector" />
-    <CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />
-    <CohesionPackageReference Include="xunit" />
-    <CohesionPackageReference Include="xunit.runner.visualstudio" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <Using Include="Xunit" />
-  </ItemGroup>
-
+    <ItemGroup>
+        <CohesionProjectReference Include="Assimalign.Cohesion.Amqp" />
+        <CohesionProjectReference Include="Assimalign.Cohesion.Connections.InMemory" />
+    </ItemGroup>
+    <ItemGroup>
+        <CohesionPackageReference Include="coverlet.collector" />
+        <CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />
+        <CohesionPackageReference Include="Shouldly" />
+        <CohesionPackageReference Include="xunit" />
+        <CohesionPackageReference Include="xunit.runner.visualstudio" />
+    </ItemGroup>
 </Project>
