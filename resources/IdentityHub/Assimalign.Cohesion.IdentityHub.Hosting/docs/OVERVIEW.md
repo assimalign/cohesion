@@ -7,7 +7,9 @@ and context for the AOT-safe OpenID Connect issuer runtime. Issuer services rema
 
 The host serves discovery, persisted ES256 JWKS, client-credentials tokens, and public health probes. Configuration is code-first through `AddAudience` and `AddClient`. Only `openid` and an empty scope are accepted.
 
-The area's resource integration is `Assimalign.Cohesion.IdentityHub.Hosting.ApplicationModel` (`builder.Services.AddResource(...)`), which references this module; this module references no application-model library.
+The builder also defines the hub's directory in code. `AddUser` and `AddGroup` define users and groups, `AddStore` names the store that holds the ones created at run time (an in-memory store when it is not called), and the built application serves both through `Context.Directory`, the code-defined ones locked. No endpoint reads the directory yet: the issuer serves applications only.
+
+This module references no application-model library. The old application model's integration, `Assimalign.Cohesion.IdentityHub.Hosting.ApplicationModel`, was removed with the old model.
 
 Device authorization and its fixed-subject browser approval page are exposed only by a loopback Local endpoint. Applications needing account login, subject selection, consent, recovery, or federation compose an authenticated user-facing flow separately.
 
@@ -25,4 +27,4 @@ The concrete application and IHost route share it. Startup failures still roll b
 
 ## Dependency injection composition
 
-`IdentityHubApplicationBuilder.Services` holds every registration the application runs with. `AddService` registers an `IHostService`, and a direct `IHostService` registration joins the lifecycle in the same order. `Build` closes registration and resolves the services once. Disposing the application disposes every factory-created service. See [DESIGN.md](DESIGN.md#dependency-injection-composition).
+`IdentityHubApplicationBuilder.Services` holds every registration the application runs with. `AddService` registers an `IHostService`, and a direct `IHostService` registration joins the lifecycle in the same order. The store, and each user and group defined in code, are registrations as well. `Build` closes registration, creates the directory over the store, and resolves the services once. Disposing the application disposes every factory-created service. See [DESIGN.md](DESIGN.md#dependency-injection-composition).

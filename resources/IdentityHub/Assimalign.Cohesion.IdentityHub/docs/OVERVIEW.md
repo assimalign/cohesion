@@ -4,7 +4,8 @@
 
 The IdentityHub area root. IdentityHub is a code-first identity server: its identity objects are
 defined in code, and the same objects can be created at run time through an API. The root defines
-the two seams the rest of the area builds against, and the first of those objects:
+the two seams the rest of the area builds against, and the identity objects every other part of
+the hub reads:
 
 - **The application seam**: the code-first composition and lifecycle contracts of an IdentityHub
   resource. The concrete issuer is supplied by `Assimalign.Cohesion.IdentityHub.Hosting`.
@@ -13,8 +14,14 @@ the two seams the rest of the area builds against, and the first of those object
 - **App registrations**: `IdentityClient`, an application the hub knows as a client, as an API,
   or as both, and `IIdentityClientRegistry`, which serves the registrations defined in code
   (locked) over the ones kept in the store.
+- **The directory**: `IdentityUser` and `IdentityGroup`, and `IIdentityHubDirectory`, which
+  serves the users and groups defined in code (locked) over the ones kept in the store.
 
-The reasoning behind all three is in [DESIGN.md](./DESIGN.md).
+The reasoning behind all four is in [DESIGN.md](./DESIGN.md), which also holds the identity
+object catalog: every family of identity object the hub is meant to hold (applications, users,
+groups, assignments, authentication methods, identity providers, sign-in flows, conditional
+access, claims policy), what each is called in Microsoft Entra and in other identity providers,
+its builder verb, and the order the families are built in.
 
 ## Dependencies
 
@@ -26,9 +33,31 @@ never `Assimalign.Cohesion.IdentityHub.Hosting` (COHRES001).
 
 ### Application seam
 
+- `AddStore(IIdentityHubStore)` and `AddStore(Func<IIdentityHubApplicationContext, IIdentityHubStore>)` set the store that holds what is created at run time. An application with neither keeps those objects in memory.
+- `AddUser(IdentityUser)` and `AddGroup(IdentityGroup)` define a user and a group in code. The application serves them locked.
+- `AddUser(name, configure)`, `AddUser(id, configure)`, `AddGroup(name, configure)`, and `AddGroup(id, configure)` are extension members (`IdentityHubApplicationBuilderExtensions`) that fill a descriptor, create the object, and call the member above.
 - `AddAudience(string)` declares an exact access-token audience.
 - `AddClient(string, Action<IdentityHubClientOptions>)` registers client credentials, device authorization, token lifetime, and allowed audiences.
-- `Build()` produces an `IIdentityHubApplication`, which exposes `Context`, `StartAsync`, and `StopAsync`.
+- `Build()` produces an `IIdentityHubApplication`, which exposes `Context`, `StartAsync`, and `StopAsync`. `Context.Directory` is the directory.
+
+```csharp
+IdentityHubApplicationBuilder builder = IdentityHubApplication.CreateBuilder(args);
+
+builder
+    .AddGroup("orders-admins", group => group.DisplayName = "Orders administrators")
+    .AddUser("ada@contoso.example", user =>
+    {
+        user.DisplayName = "Ada Lovelace";
+        user.Email = "ada@contoso.example";
+    });
+
+await using IdentityHubApplication application = builder.Build();
+IdentityUser? ada = await application.Context.Directory.Users.FindByNameAsync("ada@contoso.example");   // ada.IsLocked is true
+```
+
+A builder verb exists for a kind of identity object once the hub serves that kind, so nothing can
+be declared that the hub would then ignore. Users and groups are served by the directory today;
+no endpoint signs a user in yet.
 
 At least one grant and one declared audience are required for every registered client. The code-first registration verbs ship here, and Hosting issues tokens for the clients they register.
 
@@ -85,6 +114,37 @@ adopted by code that later defines that name: from that deployment it is served 
 locked, and whole. What the stored registration held and the code does not define, credentials
 included, is no longer served.
 
+### Directory
+
+| Type | Role |
+| --- | --- |
+| `IdentityUser`, `IdentityUserDescriptor` | One person's account: the name the person signs in with, display and person names, an email address, and whether the account is enabled. Concrete and immutable, created by `IdentityUser.Create(descriptor)`. A user holds no credential |
+| `IdentityGroup`, `IdentityGroupDescriptor` | A named set of users that other objects point at. A group does not list its members |
+| `IIdentityHubDirectory`, `IdentityHubDirectory`, `IdentityHubDirectoryDescriptor` | The directory: `Users` and `Groups`, created over a store and the objects defined in code |
+| `IIdentityUserRegistry`, `IIdentityGroupRegistry` | Find by identifier or by name, list, and the conditional writes for one kind |
+| `IIdentityObjectRegistry<TObject, TId>` | The registry contract every kind of identity object shares |
+| `IdentityObjectPage<TObject>`, `IdentityObjectWriteResult`, `IdentityObjectWriteStatus` | A page of a listing, and the outcome of a write: `Written`, `Removed`, `Locked`, `IdConflict`, `VersionConflict`, `NameConflict` |
+| `IdentityUserId`, `IdentityGroupId` | A GUID. `FromName` derives it from a name, the same on every machine and different for a user and a group of one name; `New` makes a random one |
+| `IdentityUserName`, `IdentityGroupName` | Generated value objects. A name is unique within its kind and compares without regard to case |
+
+A user or a group defined in code is locked, and one added through its registry is stored and
+changes only at the version that was read, exactly as for a registration. A stored one may be
+renamed; its identifier never changes. A user or a group created at run time under a name is
+adopted by code that later defines that name.
+
+```csharp
+IdentityHubDirectory directory = IdentityHubDirectory.Create(store);
+
+IdentityObjectWriteResult added = await directory.Users.TryAddAsync(
+    IdentityUser.Create(new() { Name = "grace@contoso.example" }),
+    cancellationToken);
+
+IdentityUser grace = (await directory.Users.FindByNameAsync("grace@contoso.example", cancellationToken))!;
+IdentityUserDescriptor change = IdentityUserDescriptor.From(grace);
+change.IsEnabled = false;
+await directory.Users.TryReplaceAsync(IdentityUser.Create(change), grace.Version!.Value, cancellationToken);
+```
+
 ### Store seam
 
 | Type | Role |
@@ -119,18 +179,24 @@ value is hashed before it becomes a key (DESIGN.md, "Security rules").
 
 ### What is not here yet
 
-Only the app registrations consume the store seam today, and nothing consumes the registrations.
-`IdentityHub.Hosting` still keeps its device authorizations, signing key, and clients in its own
-internal types and issues tokens from `AddClient`: a registration defined with
-`IdentityClient.Create` is not yet a client the token endpoint knows. The builder has no verb for
-a store, a registry, or a code-first registration (`AddClient(IdentityClientId, ...)` is designed
-and lands with the token endpoint's move), no web API manages stored registrations, and durable stores are separate
-packages that do not exist yet. Each is tracked as a follow-up work item, and DESIGN.md lists the
-decisions that are still open, tenancy in the record address first among them.
+The app registrations and the directory consume the store seam today. The directory is served by
+a built application; nothing consumes the registrations yet. `IdentityHub.Hosting` still keeps
+its device authorizations, signing key, and clients in its own internal types and issues tokens
+from `AddClient`: a registration defined with `IdentityClient.Create` is not yet a client the
+token endpoint knows, and the builder has no verb for a code-first registration
+(`AddClient(IdentityClientId, ...)` is designed and lands with the token endpoint's move).
+
+A user defined today can be read and cannot sign in: the hub issues tokens to applications only.
+Group membership and assignments, authentication methods and user sign-in, identity providers,
+sign-in flows, and conditional access are planned in that order, each with its builder verb
+(DESIGN.md, "The identity object catalog"). No web API manages stored objects, and durable stores
+are separate packages that do not exist yet. Each is tracked as a follow-up work item, and
+DESIGN.md lists the decisions that are still open, tenancy in the record address first among
+them.
 
 ## Hosting-free application contract (O34)
 
-The root contracts are hosting-free (O34): `IIdentityHubApplication` exposes `Context`, `StartAsync`, and `StopAsync`; `IIdentityHubApplicationContext` exposes `ContentRootPath`. `IIdentityHubApplicationBuilder` owns area declarations and `Build()`. The root and feature packages reference no `Assimalign.Cohesion.Hosting*` library; COHRES004 enforces the boundary.
+The root contracts are hosting-free (O34): `IIdentityHubApplication` exposes `Context`, `StartAsync`, and `StopAsync`; `IIdentityHubApplicationContext` exposes `ContentRootPath` and `Directory`. `IIdentityHubApplicationBuilder` owns area declarations and `Build()`. The root and feature packages reference no `Assimalign.Cohesion.Hosting*` library; COHRES004 enforces the boundary.
 
 `IdentityHubApplication.CreateBuilder(args)` returns the public concrete `IdentityHubApplicationBuilder`; its `Build()` returns the public `IdentityHubApplication : Host<IdentityHubApplicationContext>`. The public `IdentityHubApplicationContext` implements `IIdentityHubApplicationContext`, reading `ContentRootPath` from the host environment. The application explicitly forwards the root lifecycle contract to `IHost`, and consumers use the concrete application for `RunAsync` and `await using`. Runtime options and supporting services remain internal.
 
