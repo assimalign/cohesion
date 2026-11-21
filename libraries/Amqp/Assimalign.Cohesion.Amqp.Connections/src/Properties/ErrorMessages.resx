@@ -4,10 +4,481 @@
   <resheader name="version"><value>2.0</value></resheader>
   <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value></resheader>
   <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value></resheader>
-  <data name="SymbolInvalid" xml:space="preserve">
-    <value>An AMQP symbol must be non-null seven-bit ASCII text.</value>
+  <data name="CarrierNotReliableStream" xml:space="preserve">
+    <value>An AMQP connection needs a reliable, ordered byte-stream carrier.</value>
+  </data>
+  <data name="CarrierStreamNotAcquired" xml:space="preserve">
+    <value>The AMQP connection's stream has not been opened or accepted yet.</value>
+  </data>
+  <data name="CarrierStreamNotBidirectional" xml:space="preserve">
+    <value>An AMQP connection needs a bidirectional stream, but the first stream is unidirectional.</value>
+  </data>
+  <data name="HandshakeTimedOut" xml:space="preserve">
+    <value>The AMQP connection was not established within the handshake timeout of {0}.</value>
+  </data>
+  <data name="ValueTruncated" xml:space="preserve">
+    <value>The encoded AMQP value ends before its declared length.</value>
+  </data>
+  <data name="ValueNestingTooDeep" xml:space="preserve">
+    <value>The AMQP value nests compound or described values more deeply than allowed.</value>
+  </data>
+  <data name="ValueTypeUnsupported" xml:space="preserve">
+    <value>The type '{0}' has no AMQP representation.</value>
+  </data>
+  <data name="FormatCodeUnsupported" xml:space="preserve">
+    <value>The AMQP format code '0x{0:x2}' is not supported.</value>
+  </data>
+  <data name="ValueNotBoolean" xml:space="preserve">
+    <value>The encoded AMQP value is not a boolean.</value>
+  </data>
+  <data name="ValueNotUByte" xml:space="preserve">
+    <value>The encoded AMQP value is not an unsigned byte.</value>
+  </data>
+  <data name="ValueNotUShort" xml:space="preserve">
+    <value>The encoded AMQP value is not an unsigned short.</value>
+  </data>
+  <data name="ValueNotUInt" xml:space="preserve">
+    <value>The encoded AMQP value is not an unsigned integer.</value>
+  </data>
+  <data name="ValueNotULong" xml:space="preserve">
+    <value>The encoded AMQP value is not an unsigned long.</value>
+  </data>
+  <data name="ValueNotString" xml:space="preserve">
+    <value>The encoded AMQP value is not a string.</value>
+  </data>
+  <data name="ValueNotSymbol" xml:space="preserve">
+    <value>The encoded AMQP value is not a symbol.</value>
+  </data>
+  <data name="ValueNotSymbolArray" xml:space="preserve">
+    <value>The encoded AMQP value is neither a symbol nor an array of symbols.</value>
+  </data>
+  <data name="ValueNotBinary" xml:space="preserve">
+    <value>The encoded AMQP value is not binary.</value>
+  </data>
+  <data name="ValueNotTimestamp" xml:space="preserve">
+    <value>The encoded AMQP value is not a timestamp.</value>
+  </data>
+  <data name="ValueNotList" xml:space="preserve">
+    <value>The encoded AMQP value is not a list.</value>
+  </data>
+  <data name="ValueNotMap" xml:space="preserve">
+    <value>The encoded AMQP value is not a map.</value>
+  </data>
+  <data name="BooleanInvalid" xml:space="preserve">
+    <value>An encoded AMQP boolean holds a value other than 0 or 1.</value>
+  </data>
+  <data name="CharInvalid" xml:space="preserve">
+    <value>An encoded AMQP char is not a Unicode scalar value.</value>
+  </data>
+  <data name="CharSurrogate" xml:space="preserve">
+    <value>The char U+{0:X4} is half of a surrogate pair, not a Unicode scalar value, so it has no AMQP char encoding; write the pair as a Rune or a string.</value>
+  </data>
+  <data name="StringNotUtf8" xml:space="preserve">
+    <value>An encoded AMQP string is not valid UTF-8.</value>
+  </data>
+  <data name="StringSurrogateUnpaired" xml:space="preserve">
+    <value>The string holds half of a surrogate pair at index {0}, so it has no UTF-8 encoding; AMQP strings carry Unicode text only.</value>
+  </data>
+  <data name="ArrayElementNull" xml:space="preserve">
+    <value>Element {0} of the array is null, which an AMQP array cannot hold; a list can.</value>
+  </data>
+  <data name="ArrayElementTypeMismatch" xml:space="preserve">
+    <value>Element {0} of the array is a '{1}', which is not a value of the array's element type, {2}; every element of an AMQP array has the one type its constructor names.</value>
+  </data>
+  <data name="ArrayOfNullNotEmpty" xml:space="preserve">
+    <value>An AMQP array of null holds no elements: its element constructor has no width, so a reader could not count them.</value>
+  </data>
+  <data name="TimestampOutOfRange" xml:space="preserve">
+    <value>An encoded AMQP timestamp is outside the range a DateTimeOffset represents.</value>
+  </data>
+  <data name="SymbolNotAscii" xml:space="preserve">
+    <value>An encoded AMQP symbol contains a byte outside seven-bit ASCII.</value>
+  </data>
+  <data name="CompoundSizeInvalid" xml:space="preserve">
+    <value>The size of an encoded AMQP list, map or array is smaller than its count field.</value>
+  </data>
+  <data name="CompoundCountInvalid" xml:space="preserve">
+    <value>The element count of an encoded AMQP list, map or array exceeds the bytes that carry it.</value>
+  </data>
+  <data name="ArrayElementWidthInvalid" xml:space="preserve">
+    <value>An encoded AMQP array uses an element constructor that has no width.</value>
+  </data>
+  <data name="MapElementCountOdd" xml:space="preserve">
+    <value>An encoded AMQP map has an odd number of elements.</value>
+  </data>
+  <data name="MapKeyNull" xml:space="preserve">
+    <value>An encoded AMQP map has a null key.</value>
+  </data>
+  <data name="MapKeyDuplicate" xml:space="preserve">
+    <value>An encoded AMQP map repeats a key.</value>
+  </data>
+  <data name="MapKeyMissing" xml:space="preserve">
+    <value>A key of the map is null or a default symbol, and the codec neither writes nor reads a map with a null key.</value>
+  </data>
+  <data name="AnnotationKeyReserved" xml:space="preserve">
+    <value>The annotation key {0} is an unsigned long, which AMQP reserves for future use and the codec does not understand (Part 3, section 3.2.10).</value>
+  </data>
+  <data name="AnnotationKeyInvalid" xml:space="preserve">
+    <value>An encoded annotations map has a key that is neither a symbol nor an unsigned long.</value>
+  </data>
+  <data name="RejectedAnnotationInvalid" xml:space="preserve">
+    <value>The delivery annotation 'rejected' holds {0}, but AMQP reserves the key for an error (Part 3, section 3.2.2).</value>
+  </data>
+  <data name="MapKeyNotSymbol" xml:space="preserve">
+    <value>An encoded AMQP map that must be keyed by symbols has a key of another type.</value>
+  </data>
+  <data name="MapKeyNotString" xml:space="preserve">
+    <value>An encoded AMQP map that must be keyed by strings has a key of another type.</value>
+  </data>
+  <data name="DescriptorInvalid" xml:space="preserve">
+    <value>The descriptor of an encoded AMQP described value is neither a symbol nor an unsigned long.</value>
+  </data>
+  <data name="DescriptorUnexpected" xml:space="preserve">
+    <value>The encoded AMQP value does not carry the descriptor its field requires.</value>
+  </data>
+  <data name="MandatoryFieldMissing" xml:space="preserve">
+    <value>The mandatory field '{0}' of the AMQP type '{1}' is missing.</value>
+  </data>
+  <data name="ErrorConditionMissing" xml:space="preserve">
+    <value>An AMQP error must carry a condition before it is encoded.</value>
+  </data>
+  <data name="DeliveryStateInvalid" xml:space="preserve">
+    <value>The encoded AMQP value is not a delivery state.</value>
+  </data>
+  <data name="OutcomeInvalid" xml:space="preserve">
+    <value>The encoded AMQP delivery state is not an outcome.</value>
+  </data>
+  <data name="TargetInvalid" xml:space="preserve">
+    <value>The encoded AMQP value is neither a target nor a coordinator.</value>
+  </data>
+  <data name="DeliveryTagInvalid" xml:space="preserve">
+    <value>An AMQP delivery tag is not binary of at most 32 bytes.</value>
+  </data>
+  <data name="SenderSettleModeInvalid" xml:space="preserve">
+    <value>The sender settle mode is not one AMQP defines.</value>
+  </data>
+  <data name="ReceiverSettleModeInvalid" xml:space="preserve">
+    <value>The receiver settle mode is not one AMQP defines.</value>
+  </data>
+  <data name="SectionNotDescribed" xml:space="preserve">
+    <value>An AMQP message section is not a described value.</value>
+  </data>
+  <data name="SectionDescriptorUnsupported" xml:space="preserve">
+    <value>An AMQP message section has a descriptor that is not a message section.</value>
+  </data>
+  <data name="SectionOrderInvalid" xml:space="preserve">
+    <value>The AMQP message's {0} section follows its {1} section, which AMQP 1.0 orders after it.</value>
+  </data>
+  <data name="SectionRepeated" xml:space="preserve">
+    <value>The AMQP message carries a second {0} section.</value>
+  </data>
+  <data name="BodyMixed" xml:space="preserve">
+    <value>The AMQP message body mixes {0} and {1} sections; a body is data sections, amqp-sequence sections or one amqp-value section.</value>
+  </data>
+  <data name="ApplicationPropertyNotSimple" xml:space="preserve">
+    <value>The application property '{0}' holds a {1}; application properties hold only simple values, not lists, maps or arrays.</value>
+  </data>
+  <data name="MessageIdInvalid" xml:space="preserve">
+    <value>An AMQP message id or correlation id is not an unsigned long, UUID, binary or string.</value>
   </data>
   <data name="FrameSizeInvalid" xml:space="preserve">
-    <value>The AMQP maximum frame size must be at least 512 bytes.</value>
+    <value>An AMQP frame declares a size smaller than its header.</value>
+  </data>
+  <data name="FrameTooLarge" xml:space="preserve">
+    <value>An AMQP frame of {0} bytes exceeds the maximum frame size of {1} bytes.</value>
+  </data>
+  <data name="FrameDataOffsetInvalid" xml:space="preserve">
+    <value>An AMQP frame declares a data offset outside the frame.</value>
+  </data>
+  <data name="PerformativeNotDescribed" xml:space="preserve">
+    <value>An AMQP frame body does not begin with a described performative.</value>
+  </data>
+  <data name="PerformativeUnknown" xml:space="preserve">
+    <value>The AMQP performative '{0}' is not one this endpoint supports.</value>
+  </data>
+  <data name="ConnectionNotByteStream" xml:space="preserve">
+    <value>An AMQP connection carries frames, not a byte stream: use its sessions and links.</value>
+  </data>
+  <data name="ConnectionClosed" xml:space="preserve">
+    <value>The AMQP connection is closed.</value>
+  </data>
+  <data name="ConnectionClosedWithError" xml:space="preserve">
+    <value>The AMQP connection was closed with the error '{0}'.</value>
+  </data>
+  <data name="ConnectionCarrierEnded" xml:space="preserve">
+    <value>The carrier of the AMQP connection ended.</value>
+  </data>
+  <data name="ChannelsExhausted" xml:space="preserve">
+    <value>Every channel up to the connection's channel maximum of {0} is in use.</value>
+  </data>
+  <data name="ChannelOutOfRange" xml:space="preserve">
+    <value>The peer used the channel {0}, above the connection's channel maximum of {1}.</value>
+  </data>
+  <data name="ChannelUnmapped" xml:space="preserve">
+    <value>The peer sent a frame on the channel {0}, which carries no session.</value>
+  </data>
+  <data name="ChannelInUse" xml:space="preserve">
+    <value>The peer began a session on the channel {0}, which already carries one.</value>
+  </data>
+  <data name="BeginUnsolicited" xml:space="preserve">
+    <value>The peer answered a begin on the local channel {0}, which sent none.</value>
+  </data>
+  <data name="FrameTypeUnexpected" xml:space="preserve">
+    <value>The peer sent a frame of type 0x{0:x2} where only AMQP frames are allowed.</value>
+  </data>
+  <data name="PerformativeUnexpected" xml:space="preserve">
+    <value>The peer sent '{0}', which is not allowed in the current state.</value>
+  </data>
+  <data name="IdleTimeoutExpired" xml:space="preserve">
+    <value>The peer sent nothing for longer than the idle timeout of {0}.</value>
+  </data>
+  <data name="PeerIdleTimeoutTooShort" xml:space="preserve">
+    <value>The peer asked for an idle timeout of {0} ms, below the {1} ms this endpoint can keep.</value>
+  </data>
+  <data name="IdleTimeoutTooShort" xml:space="preserve">
+    <value>The idle timeout must be zero, which disables it, or at least {0}.</value>
+  </data>
+  <data name="SessionEnded" xml:space="preserve">
+    <value>The AMQP session has ended.</value>
+  </data>
+  <data name="SessionEndedWithError" xml:space="preserve">
+    <value>The AMQP session was ended with the error '{0}'.</value>
+  </data>
+  <data name="HandlesExhausted" xml:space="preserve">
+    <value>Every handle up to the peer's handle maximum of {0} is in use.</value>
+  </data>
+  <data name="HandleOutOfRange" xml:space="preserve">
+    <value>The peer used the handle {0}, above the session's handle maximum of {1}.</value>
+  </data>
+  <data name="HandleUnattached" xml:space="preserve">
+    <value>The peer sent a frame for the handle {0}, which has no attached link.</value>
+  </data>
+  <data name="HandleInUse" xml:space="preserve">
+    <value>The peer attached a link on the handle {0}, which is already in use.</value>
+  </data>
+  <data name="WindowViolation" xml:space="preserve">
+    <value>The peer sent a transfer beyond the session's incoming window.</value>
+  </data>
+  <data name="DeliveryIdDuplicate" xml:space="preserve">
+    <value>The peer reused the delivery-id {0} of an unsettled delivery.</value>
+  </data>
+  <data name="DispositionRangeInvalid" xml:space="preserve">
+    <value>The peer sent a disposition whose last delivery-id {0} precedes its first delivery-id {1}.</value>
+  </data>
+  <data name="LinkDetached" xml:space="preserve">
+    <value>The AMQP link is detached.</value>
+  </data>
+  <data name="LinkDetachedWithError" xml:space="preserve">
+    <value>The AMQP link was detached with the error '{0}'.</value>
+  </data>
+  <data name="LinkRefused" xml:space="preserve">
+    <value>The peer refused to attach the AMQP link.</value>
+  </data>
+  <data name="LinkNameInUse" xml:space="preserve">
+    <value>A link named '{0}' is already attached in this role.</value>
+  </data>
+  <data name="LinkRoleUnexpected" xml:space="preserve">
+    <value>The peer sent a frame its role on the link does not allow.</value>
+  </data>
+  <data name="LinkRequestAnswered" xml:space="preserve">
+    <value>The link request was already answered.</value>
+  </data>
+  <data name="LinkRequestNeedsReceiver" xml:space="preserve">
+    <value>The peer is attaching as a sender, so the request must be accepted as a receiver.</value>
+  </data>
+  <data name="LinkRequestNeedsSender" xml:space="preserve">
+    <value>The peer is attaching as a receiver, so the request must be accepted as a sender.</value>
+  </data>
+  <data name="DeliverySettleModeConflict" xml:space="preserve">
+    <value>The delivery's settled flag contradicts the link's sender settlement mode '{0}'.</value>
+  </data>
+  <data name="DeliveryResumeTagRequired" xml:space="preserve">
+    <value>A resumed delivery requires an explicit delivery tag.</value>
+  </data>
+  <data name="MessageSizeExceeded" xml:space="preserve">
+    <value>The delivery of {0} bytes exceeds the peer's maximum message size of {1} bytes.</value>
+  </data>
+  <data name="DeliveryStateTooLarge" xml:space="preserve">
+    <value>The delivery's state does not fit in a transfer frame of {0} bytes.</value>
+  </data>
+  <data name="TransferDeliveryIdMissing" xml:space="preserve">
+    <value>The first transfer of a delivery carries no delivery-id or delivery-tag.</value>
+  </data>
+  <data name="TransferDeliveryIdMismatch" xml:space="preserve">
+    <value>The peer continued the delivery {0} with a transfer for the delivery {1}.</value>
+  </data>
+  <data name="TransferCreditExhausted" xml:space="preserve">
+    <value>The peer sent a transfer without link credit.</value>
+  </data>
+  <data name="TransferSettleModeInvalid" xml:space="preserve">
+    <value>The peer asked for receiver settlement mode second on a link that settles first.</value>
+  </data>
+  <data name="IncomingMessageTooLarge" xml:space="preserve">
+    <value>The peer sent a delivery larger than the link's maximum message size of {0} bytes.</value>
+  </data>
+  <data name="ProtocolHeaderInvalid" xml:space="preserve">
+    <value>The peer sent bytes that are not an AMQP protocol header.</value>
+  </data>
+  <data name="ProtocolHeaderUnsupported" xml:space="preserve">
+    <value>The peer asked for the AMQP protocol {0} version {1}.{2}.{3}, which this endpoint does not support.</value>
+  </data>
+  <data name="SaslRequired" xml:space="preserve">
+    <value>The endpoint requires SASL authentication, but the peer started without it.</value>
+  </data>
+  <data name="SaslNotOffered" xml:space="preserve">
+    <value>The peer does not offer SASL authentication.</value>
+  </data>
+  <data name="SaslMechanismNotOffered" xml:space="preserve">
+    <value>The peer does not offer the SASL mechanism '{0}'.</value>
+  </data>
+  <data name="SaslMechanismUnknown" xml:space="preserve">
+    <value>The peer chose the SASL mechanism '{0}', which this endpoint does not offer.</value>
+  </data>
+  <data name="SaslAuthenticationFailed" xml:space="preserve">
+    <value>SASL authentication ended with the outcome '{0}'.</value>
+  </data>
+  <data name="SaslFrameUnexpected" xml:space="preserve">
+    <value>The peer sent '{0}' where the SASL exchange expects '{1}'.</value>
+  </data>
+  <data name="SaslFrameTypeInvalid" xml:space="preserve">
+    <value>The peer sent a frame of type 0x{0:x2} during the SASL exchange, where only SASL frames are allowed.</value>
+  </data>
+  <data name="SaslAuthenticationRequired" xml:space="preserve">
+    <value>The peer requires SASL authentication, but no SASL mechanism is configured.</value>
+  </data>
+  <data name="HandshakeTruncated" xml:space="preserve">
+    <value>The peer closed the connection during the AMQP handshake.</value>
+  </data>
+  <data name="OpenExpected" xml:space="preserve">
+    <value>The peer sent '{0}' where the AMQP handshake expects 'open'.</value>
+  </data>
+  <data name="OpenChannelInvalid" xml:space="preserve">
+    <value>The peer sent its 'open' on the channel {0}; it belongs on channel 0.</value>
+  </data>
+  <data name="OpenTooLarge" xml:space="preserve">
+    <value>The local 'open' encodes to {0} bytes, above the {1} bytes a peer accepts before the connection opens.</value>
+  </data>
+  <data name="SaslMechanismNull" xml:space="preserve">
+    <value>The SASL mechanisms contain a null entry.</value>
+  </data>
+  <data name="SaslMechanismDuplicate" xml:space="preserve">
+    <value>The SASL mechanism '{0}' is configured more than once.</value>
+  </data>
+  <data name="PeerSaslFrameTooLarge" xml:space="preserve">
+    <value>The peer sent a SASL frame of {0} bytes, above the {1} bytes AMQP 1.0 allows any SASL frame.</value>
+  </data>
+  <data name="SaslFrameTooLarge" xml:space="preserve">
+    <value>The local '{0}' encodes to a SASL frame of {1} bytes, above the {2} bytes AMQP 1.0 allows any SASL frame.</value>
+  </data>
+  <data name="SaslFrameEmpty" xml:space="preserve">
+    <value>The peer sent an empty frame during the SASL exchange, which AMQP 1.0 makes an irrecoverable error.</value>
+  </data>
+  <data name="TerminusDurabilityInvalid" xml:space="preserve">
+    <value>The peer sent the terminus durability {0}, which AMQP 1.0 does not define.</value>
+  </data>
+  <data name="TerminusExpiryPolicyInvalid" xml:space="preserve">
+    <value>The peer sent the terminus expiry policy '{0}', which AMQP 1.0 does not define.</value>
+  </data>
+  <data name="FilterNotDescribed" xml:space="preserve">
+    <value>The filter '{0}' is neither null nor a described type that can be a filter (Part 3, section 3.5.8).</value>
+  </data>
+  <data name="LifetimePolicyInvalid" xml:space="preserve">
+    <value>The {0}'s lifetime-policy node property is not a lifetime policy (Part 3, section 3.5.9).</value>
+  </data>
+  <data name="SupportedDistributionModesInvalid" xml:space="preserve">
+    <value>The {0}'s supported-dist-modes node property is not one or more symbols (Part 3, section 3.5.9).</value>
+  </data>
+  <data name="SaslCodeInvalid" xml:space="preserve">
+    <value>The peer sent the SASL outcome code {0}, which AMQP 1.0 does not define.</value>
+  </data>
+  <data name="InitialDeliveryCountMissing" xml:space="preserve">
+    <value>The sender's attach carries no initial-delivery-count.</value>
+  </data>
+  <data name="DynamicNodePropertiesUnexpected" xml:space="preserve">
+    <value>The {0} carries dynamic-node-properties but is not dynamic.</value>
+  </data>
+  <data name="DynamicAddressUnexpected" xml:space="preserve">
+    <value>The attach asks for a dynamic {0} and names its address, which the endpoint that creates the node assigns.</value>
+  </data>
+  <data name="DynamicAddressMissing" xml:space="preserve">
+    <value>The attach creates a dynamic {0} but does not name the address it assigned.</value>
+  </data>
+  <data name="SaslFrameBodyInvalid" xml:space="preserve">
+    <value>The peer sent a SASL frame whose body holds more than one value.</value>
+  </data>
+  <data name="CoordinatorTransferSettled" xml:space="preserve">
+    <value>The peer sent a settled transfer to the transaction coordinator, which answers every declare and discharge with an outcome.</value>
+  </data>
+  <data name="CoordinatorTransferTransactional" xml:space="preserve">
+    <value>The peer sent transactional work on the link to the transaction coordinator, which carries none.</value>
+  </data>
+  <data name="CoordinatorDispositionTransactional" xml:space="preserve">
+    <value>The peer settled a delivery on the link to the transaction coordinator with a transactional state; that link carries no transactional work.</value>
+  </data>
+  <data name="DeliveryTransactionChanged" xml:space="preserve">
+    <value>The sender of delivery {0} changed the transaction the delivery belongs to.</value>
+  </data>
+  <data name="FlowTransactionUnsupported" xml:space="preserve">
+    <value>The peer asked for transactional acquisition on a link that does not support it.</value>
+  </data>
+  <data name="FlowTransactionIdInvalid" xml:space="preserve">
+    <value>The peer's flow names a txn-id that is not binary.</value>
+  </data>
+  <data name="CoordinatorLinkSettled" xml:space="preserve">
+    <value>A link to a transaction coordinator cannot send settled: every declare and discharge needs the coordinator's outcome.</value>
+  </data>
+  <data name="CoordinatorLinkResumed" xml:space="preserve">
+    <value>A link to a transaction coordinator cannot be resumed, so its attach lists no unsettled deliveries.</value>
+  </data>
+  <data name="CoordinatorDeliverySettled" xml:space="preserve">
+    <value>A declare or discharge cannot be sent settled: the coordinator's outcome is its answer.</value>
+  </data>
+  <data name="CoordinatorDeliveryTransactional" xml:space="preserve">
+    <value>Work on the link to a transaction coordinator cannot be part of a transaction.</value>
+  </data>
+  <data name="CoordinatorOutcomeTransactional" xml:space="preserve">
+    <value>A transaction coordinator answers a declare or discharge with an outcome, not with a transactional state.</value>
+  </data>
+  <data name="CoordinatorLinkAcquisition" xml:space="preserve">
+    <value>A link to a transaction coordinator acquires nothing, so it names no transaction for acquisition.</value>
+  </data>
+  <data name="CoordinatorAnswerTransactional" xml:space="preserve">
+    <value>The peer answered a declare or discharge with a transactional state; the link to a transaction coordinator carries no transactional work.</value>
+  </data>
+  <data name="DeliveryReceivedNotResumed" xml:space="preserve">
+    <value>Only a resumed delivery can carry the received state, on its first frame.</value>
+  </data>
+  <data name="DeliveryResumeTagUnknown" xml:space="preserve">
+    <value>The link's unsettled maps do not list the delivery {0} as resumable, or it was already resumed or aborted.</value>
+  </data>
+  <data name="DeliveryNewWhileUnsettledIncomplete" xml:space="preserve">
+    <value>An unsettled map of the link's attach was incomplete, so only resumed deliveries can be sent until the link attaches again with complete maps.</value>
+  </data>
+  <data name="DeliveryTagAwaitsResume" xml:space="preserve">
+    <value>The receiver waits for the delivery {0} from an earlier attachment to be resumed, so a new delivery cannot take its tag.</value>
+  </data>
+  <data name="TransferReceivedNotResumed" xml:space="preserve">
+    <value>The peer sent the received state on a delivery it did not resume.</value>
+  </data>
+  <data name="TransferReceivedNotFirst" xml:space="preserve">
+    <value>The peer sent the received state on a later frame of the delivery {0}.</value>
+  </data>
+  <data name="TransferNewWhileUnsettledIncomplete" xml:space="preserve">
+    <value>The peer sent a new delivery while an unsettled map of the link's attach was incomplete.</value>
+  </data>
+  <data name="TransferTagAwaitsResume" xml:space="preserve">
+    <value>The peer sent a new delivery under the tag {0} of a delivery it must resume.</value>
+  </data>
+  <data name="TransferDeliveryTagMismatch" xml:space="preserve">
+    <value>The peer continued the delivery tagged {0} with a transfer tagged {1}.</value>
+  </data>
+  <data name="TransferMessageFormatMismatch" xml:space="preserve">
+    <value>The peer continued the delivery {0} of message format {1} with a transfer of message format {2}.</value>
+  </data>
+  <data name="DispositionReceivedFromSender" xml:space="preserve">
+    <value>The peer sent the received state in a sender's disposition.</value>
+  </data>
+  <data name="DeliveryOutcomeChanged" xml:space="preserve">
+    <value>The sender of delivery {0} changed the terminal outcome it stated for the delivery.</value>
   </data>
 </root>

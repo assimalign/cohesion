@@ -581,8 +581,10 @@ that wire-level behavior change. HTTP-specific API changes are recorded in Http.
   connection whose client reset it before the accept, which Windows reports by failing the
   accept (#1308), and it waits and retries when the process runs out of descriptors or buffers,
   which clears once connections close (#1312).
-- Three teardown paths: complete `Output` for a graceful half-close; `DisposeAsync()` to close;
-  `Abort(Exception?)` to tear down immediately, discarding in-flight data. A multiplexed transport's
+- Three teardown paths: complete `Output` for a graceful half-close; `DisposeAsync()` to close
+  without discarding what was already written (TCP waits at most its close timeout for a peer that
+  does not read, then aborts, #1086); `Abort(Exception?)` to tear down immediately, discarding
+  in-flight data. A multiplexed transport's
   streams and connections can also abort with a transport-specific application error code. Optional
   directional aborts end one stream direction at a time (see "Application error codes", above). `ConnectionClosed` is
   signaled on closure. A stream of a multiplexed connection also signals it when its peer abandons
@@ -729,8 +731,9 @@ string payloads. Fully NativeAOT compatible.
   driver's own internal event source. There is no separate toolbox assembly and no
   `InternalsVisibleTo` between shipped assemblies.
 - **`Assimalign.Cohesion.Connections.Security`** — TLS as `TlsConnectionLayer` / `UpgradeToTlsAsync`.
-- **`Assimalign.Cohesion.Http.Connections` / `Assimalign.Cohesion.Amqp.Transports`** — application
-  protocols consuming these contracts by capability.
+- **`Assimalign.Cohesion.Http.Connections` / `Assimalign.Cohesion.Amqp.Connections`** — application
+  protocols consuming these contracts by capability. AMQP establishes its connections as an
+  `IConnectionLayer` on the layered listener and factory, as TLS does.
 
 ## Driver composition seams
 
