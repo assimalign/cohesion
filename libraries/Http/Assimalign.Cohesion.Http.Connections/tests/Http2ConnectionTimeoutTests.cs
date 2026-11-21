@@ -231,6 +231,157 @@ public class Http2ConnectionTimeoutTests
         peer.Output.Frames.ShouldNotContain(frame => frame.IsGoAway);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2 Timeouts: A deadline callback that runs after its deadline was cleared should not cancel the next read")]
+    public void Token_OnDeadlineCallbackRunningAfterDeadlineCleared_ShouldStayUncancelled()
+    {
+        // Arrange — the request-headers deadline falls due while the head is processed and the timer is
+        // dispatched, but a busy thread pool holds its callback back.
+        ManualTimeProvider time = new();
+        using CancellationTokenSource pump = new();
+        using Http2ConnectionTimeout timeout = new(_longTimeout, _shortTimeout, time, pump.Token);
+        timeout.OnHeaderBlockStarted();
+        CancellationToken payload = timeout.Token;
+        Action lateCallback = time.AdvanceDeferringCallbacks(_shortTimeout * 2);
+
+        // The head's stream makes the connection busy and the block ends, which clears the deadline before
+        // the pump takes the token for its next read.
+        timeout.SetBusy(true);
+        timeout.OnHeaderBlockEnded();
+        CancellationToken next = timeout.Token;
+
+        // Act — the callback runs only now, while that read waits.
+        lateCallback();
+
+        // Assert
+        payload.IsCancellationRequested.ShouldBeFalse();
+        next.IsCancellationRequested.ShouldBeFalse();
+        timeout.TimedOut.ShouldBeFalse();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2 Timeouts: A deadline callback that runs after its deadline moved should wait for the deadline carried now")]
+    public void Token_OnDeadlineCallbackRunningAfterDeadlineMoved_ShouldWaitForDeadlineCarriedNow()
+    {
+        // Arrange — a field block on an idle connection, which opens no stream, ends just as its
+        // request-headers deadline falls due: the connection is back on its keep-alive deadline when the
+        // held-back callback runs.
+        ManualTimeProvider time = new();
+        using CancellationTokenSource pump = new();
+        using Http2ConnectionTimeout timeout = new(_longTimeout, _shortTimeout, time, pump.Token);
+        timeout.OnHeaderBlockStarted();
+        Action lateCallback = time.AdvanceDeferringCallbacks(_shortTimeout);
+        timeout.OnHeaderBlockEnded();
+        CancellationToken read = timeout.Token;
+
+        // Act
+        lateCallback();
+        bool cancelledByLateCallback = read.IsCancellationRequested;
+        time.Advance(_longTimeout - _shortTimeout);
+
+        // Assert — the keep-alive deadline, measured from the connection's acceptance, still fires.
+        cancelledByLateCallback.ShouldBeFalse();
+        read.IsCancellationRequested.ShouldBeTrue();
+        timeout.TimedOut.ShouldBeTrue();
+        timeout.RequestHeadersTimedOut.ShouldBeFalse();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2 Timeouts: A deadline callback that runs early should leave the deadline to fire on time")]
+    public void Token_OnDeadlineCallbackRunningEarly_ShouldCancelAtDeadline()
+    {
+        // Arrange — a timer whose clock is coarser than the time provider's can run its callback early.
+        ManualTimeProvider time = new();
+        using CancellationTokenSource pump = new();
+        using Http2ConnectionTimeout timeout = new(_shortTimeout, _longTimeout, time, pump.Token);
+        CancellationToken read = timeout.Token;
+        time.Advance(_shortTimeout / 2);
+
+        // Act
+        time.FireArmedTimersEarly();
+        bool cancelledEarly = read.IsCancellationRequested;
+        time.Advance(_shortTimeout / 2);
+
+        // Assert
+        cancelledEarly.ShouldBeFalse();
+        read.IsCancellationRequested.ShouldBeTrue();
+        timeout.TimedOut.ShouldBeTrue();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2 Timeouts: A field block that outlives the request-headers deadline should cancel the read with that deadline")]
+    public void Token_OnRequestHeadersDeadlineElapsed_ShouldCancelWithRequestHeadersDeadline()
+    {
+        // Arrange
+        ManualTimeProvider time = new();
+        using CancellationTokenSource pump = new();
+        using Http2ConnectionTimeout timeout = new(_longTimeout, _shortTimeout, time, pump.Token);
+        timeout.OnHeaderBlockStarted();
+        CancellationToken read = timeout.Token;
+
+        // Act
+        time.Advance(_shortTimeout);
+
+        // Assert
+        read.IsCancellationRequested.ShouldBeTrue();
+        timeout.TimedOut.ShouldBeTrue();
+        timeout.RequestHeadersTimedOut.ShouldBeTrue();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2 Timeouts: An idle connection that outlives the keep-alive deadline should cancel the read with that deadline")]
+    public void Token_OnKeepAliveDeadlineElapsed_ShouldCancelWithKeepAliveDeadline()
+    {
+        // Arrange
+        ManualTimeProvider time = new();
+        using CancellationTokenSource pump = new();
+        using Http2ConnectionTimeout timeout = new(_shortTimeout, _longTimeout, time, pump.Token);
+        CancellationToken read = timeout.Token;
+
+        // Act
+        time.Advance(_shortTimeout);
+
+        // Assert
+        read.IsCancellationRequested.ShouldBeTrue();
+        timeout.TimedOut.ShouldBeTrue();
+        timeout.RequestHeadersTimedOut.ShouldBeFalse();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2 Timeouts: A deadline that fired for a state the connection has left should give the next read a fresh token")]
+    public void Token_OnDeadlineFiredForStateLeft_ShouldBeReplaced()
+    {
+        // Arrange — the request-headers deadline fires while the head is processed.
+        ManualTimeProvider time = new();
+        using CancellationTokenSource pump = new();
+        using Http2ConnectionTimeout timeout = new(_longTimeout, _shortTimeout, time, pump.Token);
+        timeout.OnHeaderBlockStarted();
+        CancellationToken payload = timeout.Token;
+        time.Advance(_shortTimeout * 2);
+
+        // Act — the head's stream makes the connection busy, and the block ends.
+        timeout.SetBusy(true);
+        timeout.OnHeaderBlockEnded();
+        CancellationToken next = timeout.Token;
+
+        // Assert
+        payload.IsCancellationRequested.ShouldBeTrue();
+        next.IsCancellationRequested.ShouldBeFalse();
+        timeout.TimedOut.ShouldBeFalse();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http2 Timeouts: A deadline callback that runs after the deadline was disposed should do nothing")]
+    public void Dispose_OnDeadlineCallbackRunningAfterDispose_ShouldDoNothing()
+    {
+        // Arrange — the keep-alive deadline falls due as the connection ends.
+        ManualTimeProvider time = new();
+        using CancellationTokenSource pump = new();
+        Http2ConnectionTimeout timeout = new(_shortTimeout, _longTimeout, time, pump.Token);
+        CancellationToken read = timeout.Token;
+        Action lateCallback = time.AdvanceDeferringCallbacks(_shortTimeout);
+
+        // Act
+        timeout.Dispose();
+
+        // Assert — cancelling a disposed source would throw on the timer's thread.
+        Should.NotThrow(lateCallback);
+        read.IsCancellationRequested.ShouldBeFalse();
+    }
+
     private static int GetLastStreamId(Http2WireFrame goAway)
     {
         return (int)(BinaryPrimitives.ReadUInt32BigEndian(goAway.Payload) & 0x7FFFFFFF);
