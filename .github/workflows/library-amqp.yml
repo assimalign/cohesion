@@ -11,6 +11,9 @@ on:
       - 'libraries/Connections/Assimalign.Cohesion.Connections/src/**'
       - 'libraries/Connections/Assimalign.Cohesion.Connections.InMemory/src/**'
       - 'libraries/Connections/Assimalign.Cohesion.Connections.Tcp/src/**'
+      # The TLS layer the in-band TLS tests negotiate with (#1935), and the TLS facts they check.
+      - 'libraries/Connections/Assimalign.Cohesion.Connections.Security/src/**'
+      - 'libraries/Connections/Assimalign.Cohesion.Connections.Tls/src/**'
       # Shared build infrastructure that every project in this workflow compiles with.
       - '.github/actions/build/**'
       - 'global.json'

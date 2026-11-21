@@ -168,6 +168,12 @@ internal sealed class AmqpConnectionEndpoint : DuplexConnection, IAmqpConnection
     /// </summary>
     internal TimeSpan CloseTimeout => _settings.CloseTimeout;
 
+    /// <summary>
+    /// Gets the links the listener's connections hold, when the listener that accepted this connection allows link
+    /// stealing; otherwise <see langword="null"/>.
+    /// </summary>
+    internal AmqpLinkRegistry? LinkRegistry => _settings.LinkRegistry;
+
     protected override IConnectionFeatureCollection? InnerFeatures => _carrier.Features;
 
     protected override void ConfigureFeatures(IConnectionFeatureCollection features)

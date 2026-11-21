@@ -4,8 +4,8 @@
 
 The AMQP 1.0 engine for Cohesion. `AmqpConnectionListener` and `AmqpConnectionFactory` establish
 AMQP connections over carrier connections produced by the `Assimalign.Cohesion.Connections`
-contracts, and return each one open: protocol headers exchanged, SASL done when configured, and
-both `open` frames exchanged. The connections they return implement the root package's
+contracts, and return each one open: protocol headers exchanged, TLS and SASL done when configured,
+and both `open` frames exchanged. The connections they return implement the root package's
 `IAmqpConnection`, and the engine behind them runs the connection, session and link state machines,
 checks every frame against the specification, and encodes the Part 1 type system and the Part 3
 message format.
@@ -77,6 +77,11 @@ For TLS, compose the TLS layer on the carrier, below AMQP:
 `Assimalign.Cohesion.Connections.Security`. The TLS facts are then on the AMQP connection's
 features, and SASL EXTERNAL authenticates the client certificate.
 
+A peer that negotiates TLS inside AMQP, with the TLS protocol header, needs the layer in band
+instead: set `TlsLayer` to a `TlsConnectionLayer` in the listener's or the factory's options, and
+`RequireTls` on the listener to refuse clients that do not ask for it. A factory with a layer
+never continues without TLS. See "In-band TLS" in [DESIGN.md](DESIGN.md).
+
 Disposing the listener disposes the carrier listener and any connection still being established,
 but not the connections it already returned: their owners dispose them. Disposing a connection
 closes it with the `close` exchange; `Abort` ends it at once.
@@ -90,7 +95,7 @@ src/
 │   ├── Carriers/      the multiplexed carrier adapters
 │   ├── Encoding/      the Part 1 encoder and reader, the message format, terminus rules
 │   ├── Engine/        the connection, session and link state machines, deliveries, the frame writer
-│   ├── Establishment/ the handshake (headers, SASL, open), the listener's layer, settings
+│   ├── Establishment/ the handshake (headers, TLS, SASL, open), the listener's layer, settings
 │   ├── Extensions/    carrier capability gating, exception helpers
 │   ├── Frames/        frame layout and size checks
 │   └── Performatives/ the Part 2 and Part 5 performatives

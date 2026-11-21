@@ -20,7 +20,9 @@ namespace Assimalign.Cohesion.Amqp.Connections;
 /// <see cref="ConnectionCapabilities.IsOrdered"/>). Over a single-stream carrier each connected
 /// <see cref="IDuplexConnection"/> carries one AMQP connection. Over a multiplexed carrier each connected
 /// <see cref="IMultiplexedConnection"/> carries one AMQP connection, on a bidirectional stream the factory
-/// opens. TLS is the carrier's concern: compose the carrier factory with a TLS layer first.
+/// opens. TLS either secures the carrier before AMQP starts, by composing the carrier factory with a TLS layer
+/// first, or follows the AMQP TLS protocol header, through <see cref="AmqpConnectionFactoryOptions.TlsLayer"/>
+/// (AMQP 1.0 Part 5, sections 5.2 and 5.2.1).
 /// </para>
 /// <para>
 /// <see cref="ConnectionFactory{TConnection}.ConnectAsync(EndPoint, CancellationToken)"/> connects a new
@@ -48,9 +50,11 @@ public sealed class AmqpConnectionFactory : ConnectionFactory<IAmqpConnection>, 
     /// <inheritdoc />
     /// <remarks>
     /// The carrier factory's capabilities; over a multiplexed carrier, those of one of its streams, so
-    /// <see cref="ConnectionCapabilities.IsMultiplexed"/> is <see langword="false"/>.
+    /// <see cref="ConnectionCapabilities.IsMultiplexed"/> is <see langword="false"/>. With
+    /// <see cref="AmqpConnectionFactoryOptions.TlsLayer"/>, they are those the layer describes, since every
+    /// connection goes through it.
     /// </remarks>
-    public override ConnectionCapabilities Capabilities => _factory.Capabilities;
+    public override ConnectionCapabilities Capabilities => _settings.TlsLayer?.Describe(_factory.Capabilities) ?? _factory.Capabilities;
 
     /// <inheritdoc />
     public string ContainerId => _settings.ContainerId;
@@ -93,11 +97,16 @@ public sealed class AmqpConnectionFactory : ConnectionFactory<IAmqpConnection>, 
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="endPoint"/> is <see langword="null"/>.</exception>
     /// <exception cref="AmqpException">
     /// Thrown with <see cref="AmqpErrorCode.ProtocolViolation"/> when the peer's protocol header, SASL frames
-    /// or <c>open</c> break the protocol; with <see cref="AmqpErrorCode.AuthenticationFailed"/> when SASL
-    /// authentication fails or one side requires it and the other does not use it; with
-    /// <see cref="AmqpErrorCode.ConnectionClosed"/> when the peer closes the carrier during establishment.
+    /// or <c>open</c> break the protocol, or when one side requires TLS and the other does not use it; with
+    /// <see cref="AmqpErrorCode.AuthenticationFailed"/> when SASL authentication fails or one side requires it
+    /// and the other does not use it; with <see cref="AmqpErrorCode.ConnectionClosed"/> when the peer closes the
+    /// carrier during establishment.
     /// </exception>
     /// <exception cref="TimeoutException">Thrown when establishment exceeds <see cref="AmqpConnectionFactoryOptions.HandshakeTimeout"/>.</exception>
+    /// <exception cref="System.Security.Authentication.AuthenticationException">
+    /// Thrown when the TLS handshake of a <c>TlsConnectionLayer</c> set as
+    /// <see cref="AmqpConnectionFactoryOptions.TlsLayer"/> fails; another layer throws its own exception.
+    /// </exception>
     protected override async ValueTask<IAmqpConnection> ConnectCoreAsync(EndPoint endPoint, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(endPoint);
@@ -134,6 +143,7 @@ public sealed class AmqpConnectionFactory : ConnectionFactory<IAmqpConnection>, 
             ChannelMax = options.ChannelMax,
             IdleTimeout = options.IdleTimeout,
             HandshakeTimeout = options.HandshakeTimeout,
+            TlsLayer = options.TlsLayer,
             ClientMechanism = options.SaslMechanism,
             SessionSettings = AmqpSessionSettings.From(options.SessionOptions),
             OfferedCapabilities = options.OfferedCapabilities,

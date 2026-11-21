@@ -673,6 +673,46 @@ public sealed class AmqpNetLiteClientInteropTests : IDisposable
         await peer.CloseAsync();
     }
 
+    [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - Interop AcceptLinkAsync: Should take AMQPNetLite's attach of a link name the broker refused as a new link, though it carries no unsettled map")]
+    public async Task AcceptLinkAsync_OnNetLiteAttachAfterRefusal_ShouldTakeItAsANewLink()
+    {
+        // Arrange: the broker refuses the client's link, as it does for a node that does not exist yet.
+        using CancellationTokenSource timeout = new(_testTimeout);
+        await using AmqpInteropBroker broker = await AmqpInteropBroker.StartAsync(null, timeout.Token);
+        (IAmqpConnection server, NetLite.Connection peer) = await ConnectAsync(broker, timeout.Token);
+        await using IAmqpConnection serverConnection = server;
+        Task<IAmqpSession> accept = AcceptSessionWithPeerAsync(server, peer, out NetLite.Session peerSession, timeout.Token);
+        TaskCompletionSource<NetLiteFraming.Error?> refused = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        NetLite.SenderLink first = new(peerSession, "orders-sender", "orders");
+        first.AddClosedCallback((_, error) => refused.TrySetResult(error));
+        IAmqpSession session = await accept;
+        IAmqpLinkRequest request = await session.AcceptLinkAsync(timeout.Token);
+        await request.RejectAsync(new AmqpError(AmqpErrorCondition.NotFound, "no such node"), timeout.Token);
+        NetLiteFraming.Error? error = await refused.Task.WaitAsync(timeout.Token);
+
+        // Act: the client tries the node again on the same session, with the same link name.
+        Task<IAmqpReceiver> attach = AcceptReceiverAsync(session, timeout.Token);
+        NetLite.SenderLink second = new(peerSession, "orders-sender", "orders");
+        IAmqpReceiver receiver = await attach;
+        Task send = second.SendAsync(new NetLite.Message("retried"));
+        IAmqpDelivery delivery = await ReceiveFromPeerAsync(receiver, send, timeout.Token);
+        await delivery.AcceptAsync(timeout.Token);
+        await send.WaitAsync(timeout.Token);
+
+        // Assert: the client's second attach carried no unsettled map, and the broker took it as an ordinary link.
+        string[] attaches = [.. _trace.Frames.Where(frame => frame.StartsWith("SEND", StringComparison.Ordinal) && frame.Contains(") attach(", StringComparison.Ordinal))];
+        _trace.LinkFrames.ShouldBe(["SEND attach", "RECV attach", "RECV detach closed", "SEND detach closed", "SEND attach", "RECV attach"]);
+        error.ShouldNotBeNull().Condition.ToString().ShouldBe(NetLite.ErrorCode.NotFound);
+        attaches.Length.ShouldBe(2);
+        attaches[1].ShouldNotContain(",unsettled:", Case.Sensitive);
+        receiver.Name.ShouldBe("orders-sender");
+        delivery.GetMessage().Body.ShouldBeOfType<AmqpValueBody>().Value.ShouldBe("retried");
+        session.SessionEnded.IsCancellationRequested.ShouldBeFalse();
+        server.ConnectionClosed.IsCancellationRequested.ShouldBeFalse();
+
+        await peer.CloseAsync();
+    }
+
     [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - Interop CloseAsync: Should give AMQPNetLite the error the broker closed with")]
     public async Task CloseAsync_WithErrorToNetLite_ShouldReachThePeer()
     {
@@ -858,6 +898,42 @@ public sealed class AmqpNetLiteClientInteropTests : IDisposable
         received.Body.ShouldBe("after the first drain");
         peerReceiver.Accept(received);
         (await sent.WaitAsync(timeout.Token)).ShouldBeOfType<AmqpAccepted>();
+
+        await peer.CloseAsync();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - Interop DetachAsync: Should end an AMQPNetLite link at the closing detach that answers its suspending one, and keep the connection")]
+    public async Task DetachAsync_OnNetLiteClientLink_ShouldEndItAndKeepTheConnection()
+    {
+        // Arrange
+        using CancellationTokenSource timeout = new(_testTimeout);
+        await using AmqpInteropBroker broker = await AmqpInteropBroker.StartAsync(null, timeout.Token);
+        (IAmqpConnection server, NetLite.Connection peer) = await ConnectAsync(broker, timeout.Token);
+        await using IAmqpConnection serverConnection = server;
+        Task<IAmqpSession> accept = AcceptSessionWithPeerAsync(server, peer, out NetLite.Session peerSession, timeout.Token);
+        NetLite.ReceiverLink suspended = new(peerSession, "suspend-receiver", "suspend");
+        IAmqpSession session = await accept;
+        IAmqpSender sender = await AcceptSenderAsync(session, null, timeout.Token);
+
+        // Act: AMQPNetLite answers the broker's suspending detach by closing its link. A second link then shows the
+        // connection and the session still carry links: AMQPNetLite closes the connection on an attach it did not
+        // ask for, so a broker that attached the link again to close it would end both.
+        await sender.DetachAsync(cancellationToken: timeout.Token);
+        Task<IAmqpSender> attach = AcceptSenderAsync(session, null, timeout.Token);
+        NetLite.ReceiverLink peerReceiver = new(peerSession, "after-receiver", "after");
+        IAmqpSender after = await attach;
+        Task<AmqpDeliveryState?> send = after.SendAsync(new AmqpMessage { Body = new AmqpValueBody("after") }, cancellationToken: timeout.Token).AsTask();
+        NetLite.Message message = (await peerReceiver.ReceiveAsync(_peerTimeout)).ShouldNotBeNull();
+        peerReceiver.Accept(message);
+        AmqpDeliveryState? state = await send.WaitAsync(timeout.Token);
+
+        // Assert: the client's view: its attach and the broker's answer, the broker's suspending detach and the
+        // client's closing answer, then the second link's attaches, with no attach from the broker in between.
+        _trace.LinkFrames.ShouldBe(["SEND attach", "RECV attach", "RECV detach", "SEND detach closed", "SEND attach", "RECV attach"]);
+        suspended.IsClosed.ShouldBeTrue();
+        message.Body.ShouldBe("after");
+        state.ShouldBeOfType<AmqpAccepted>();
+        server.ConnectionClosed.IsCancellationRequested.ShouldBeFalse();
 
         await peer.CloseAsync();
     }

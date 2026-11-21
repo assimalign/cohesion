@@ -12,13 +12,15 @@ namespace Assimalign.Cohesion.Amqp.Connections.Tests;
 /// <param name="Sasl">The SASL mechanism the engine is configured with.</param>
 /// <param name="Script">The peer's steps, in order.</param>
 /// <param name="Outcome">How establishment ends.</param>
+/// <param name="Tls">The TLS the engine negotiates after the TLS protocol header, through <see cref="AmqpTestTlsLayer"/>.</param>
 internal sealed record AmqpHeaderPhaseCase(
     string Name,
     string Rule,
     AmqpHeaderPhaseRole Role,
     AmqpHeaderPhaseSasl Sasl,
     IReadOnlyList<AmqpHeaderPhaseStep> Script,
-    AmqpHeaderPhaseOutcome Outcome)
+    AmqpHeaderPhaseOutcome Outcome,
+    AmqpHeaderPhaseTls Tls = AmqpHeaderPhaseTls.None)
 {
     /// <summary>
     /// Gets whether the engine refuses the case: establishment fails, or the engine ends the script by closing the
@@ -52,4 +54,20 @@ internal enum AmqpHeaderPhaseSasl
 
     /// <summary>The engine authenticates with the test mechanism <c>X-CHALLENGE</c>, which runs one challenge.</summary>
     Challenge
+}
+
+/// <summary>
+/// The TLS a header-phase case configures the engine with, through <see cref="AmqpTestTlsLayer"/>, whose stand-in
+/// handshake a script plays as bytes.
+/// </summary>
+internal enum AmqpHeaderPhaseTls
+{
+    /// <summary>The engine has no TLS layer: a listener declines TLS, a factory does not ask for it.</summary>
+    None,
+
+    /// <summary>The engine has a TLS layer: a listener secures a peer that asks for TLS, a factory asks for it first.</summary>
+    Layer,
+
+    /// <summary>The engine is a listener with a TLS layer that requires TLS of every peer.</summary>
+    Required
 }

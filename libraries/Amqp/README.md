@@ -34,8 +34,10 @@ and `Assimalign.Cohesion.Core`. The full reference graph is in
 
 The area is L1. It depends only on `libraries/Connections` and `libraries/Core`, and it consumes
 connections by capability: an AMQP connection runs over any carrier that delivers a reliable,
-ordered byte stream, and never branches on the protocol under it. Transport security is composed
-below AMQP, with `UseTls` from `Assimalign.Cohesion.Connections.Security`, never inside it.
+ordered byte stream, and never branches on the protocol under it. Transport security is a
+connection layer, never implemented here: composed below AMQP with `UseTls` from
+`Assimalign.Cohesion.Connections.Security`, or run in band after the AMQP TLS protocol header
+through the engine's `TlsLayer` option, which takes any `IConnectionLayer`.
 Services under `resources/` that speak AMQP build on this area; libraries never depend on them
 (COHLIB001).
 

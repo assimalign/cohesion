@@ -79,7 +79,8 @@ configured) and `open` frames are done. The application begins and accepts sessi
 - **`IAmqpConnection` is an `IConnection`, not an `IDuplexConnection`.** Its traffic is frames
   multiplexed into sessions, not a byte stream, so it exposes no pipe. It shares the carrier's id,
   endpoints and capabilities, and its feature collection falls back to the carrier's, so the facts
-  a lower layer registered, such as TLS (`connection.Tls`), stay visible. After SASL it adds
+  a lower layer registered, such as TLS (`connection.Tls`), stay visible. After in-band TLS, the
+  carrier is the connection the TLS layer returned. After SASL it adds
   `IAmqpSaslConnectionInfo` (`connection.AmqpSasl`).
 - **The implementation derives from `DuplexConnection` anyway**, because the Connections layered
   listener carries upgraded connections as `IDuplexConnection`. Its `Input` and `Output` throw
@@ -95,10 +96,12 @@ configured) and `open` frames are done. The application begins and accepts sessi
 
 1. on a multiplexed carrier, the AMQP stream is acquired (see "A multiplexed carrier is adapted to
    the duplex shape");
-2. with a SASL mechanism configured, the SASL header is exchanged and the SASL exchange runs;
-3. the AMQP header is exchanged, and each side sends its `open` right behind its header, without
+2. with a TLS layer configured and asked for, the TLS header is exchanged and the layer secures the
+   carrier, and every later step runs over the connection it returns (see "In-band TLS");
+3. with a SASL mechanism configured, the SASL header is exchanged and the SASL exchange runs;
+4. the AMQP header is exchanged, and each side sends its `open` right behind its header, without
    waiting for the peer's (Part 2 §2.4.1 permits this pipelining);
-4. the peer's `open` is read and checked, and the connection starts its read and write loops.
+5. the peer's `open` is read and checked, and the connection starts its read and write loops.
 
 This sequence shows a client and a server that both use SASL:
 
@@ -143,6 +146,66 @@ sequenceDiagram
   inner exception, so a caller can tell a slow peer from its own cancellation. The message format is
   read once into a static field, because a stalled peer can make every handshake time out.
 
+### In-band TLS (#1935)
+
+A peer may ask for TLS inside AMQP: it sends the TLS protocol header (protocol id 2) before the SASL
+and AMQP headers, and the TLS handshake follows it (Part 5 §5.2). The listener and the factory each
+take a TLS layer for this, an `IConnectionLayer` such as `TlsConnectionLayer` from
+`Assimalign.Cohesion.Connections.Security`, the same layer `UseTls` composes below AMQP. This
+sequence shows a client and a server that negotiate TLS in band and then use SASL:
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant Server
+    Client->>Server: TLS protocol header
+    Server->>Client: TLS protocol header
+    Note over Client,Server: The TLS handshake, run by each side's TLS layer
+    Client->>Server: SASL protocol header, over TLS
+    Server->>Client: SASL protocol header, then sasl-mechanisms, over TLS
+    Note over Client,Server: SASL, the AMQP headers and open, as above, all over TLS
+```
+
+- **A listener offers TLS with `TlsLayer` and requires it with `RequireTls`.** With a layer, a first
+  header that asks for TLS is answered with the TLS header, the layer's handshake runs over the
+  carrier, and the peer's next header is read over the connection the layer returns. Without a
+  layer, the TLS header is answered with the header the listener supports and refused (H3), as
+  before. With `RequireTls`, any other first header from a carrier that is not secured is answered
+  with the TLS header and refused with `ProtocolViolation`, so the client learns what the server
+  needs. A carrier the layer below AMQP secured, one whose capabilities report
+  `ConnectionSecurity.Tls`, meets the requirement without the TLS header, so one setting covers
+  both establishments §5.2.1 allows. `RequireTls` without a layer, over a carrier listener that
+  does not secure its connections, would refuse every client, so `Create` refuses it with
+  `ArgumentException`.
+- **A factory asks for TLS with `TlsLayer`.** It sends the TLS header, waits for the answer, runs
+  the layer's handshake when the answer is the TLS header, and continues over the secured
+  connection. A listener that answers with the SASL or AMQP header has declined TLS, and the
+  factory fails with `ProtocolViolation`. A factory without a layer whose first header is answered
+  with the TLS header fails with a message saying the peer requires TLS.
+- **TLS is negotiated once.** After TLS, a TLS header from either side is a header the engine does
+  not support (H21).
+- **The layer owns the handshake and its failures.** Its exception, such as the
+  `AuthenticationException` for a certificate the client does not trust, reaches the `ConnectAsync`
+  caller unchanged; on a listener it is an `UpgradeFailed` like any other. The handshake runs within
+  the AMQP `HandshakeTimeout`, as well as any timeout of the layer's own, and on a listener it holds
+  one of the `MaxConcurrentHandshakes` slots.
+  Bytes a peer sends right behind its TLS header stay in the carrier for the layer to read. When
+  establishment fails after the layer returned a connection, that connection is disposed as well as
+  the carrier.
+- **The connection reports the secured connection's facts.** Its features and capabilities fall back
+  to the connection the layer returned, so `connection.Tls` and `Security == ConnectionSecurity.Tls`
+  hold as they do with TLS below AMQP. A listener's `Capabilities` report TLS only when every
+  connection it produces is secured: when its carrier listener's do, or with `RequireTls` and a
+  layer. A factory with a layer always reports it.
+- **Rejected: a factory that continues without TLS when the server declines it.** Anyone on the path
+  could force that by rewriting the server's eight-byte answer, and the application would not know.
+  A client that can do without TLS configures no layer.
+- **Rejected: TLS inside this package.** The engine sends and reads the TLS header and hands the
+  carrier to the layer it was given; the layer does the cryptography, as it does below AMQP.
+- **TLS below AMQP stays the common composition.** AMQPNetLite 2.5.5 accepts only protocol id 0 in
+  its connection and secures a carrier with `SslStream` before the first header, the "amqps"
+  composition on port 5671. In-band TLS therefore has no interop test.
+
 ### On a listener: a connection layer
 
 The listener composes `AmqpConnectionLayer : IConnectionLayer` onto its carrier listener with
@@ -176,6 +239,10 @@ sequenceDiagram
   `AmqpConnectionListener.Create(tcpListener.UseTls(tlsServerOptions), amqpOptions)`. The TLS handshake
   runs under `TlsServerOptions.HandshakeTimeout` and `MaxConcurrentHandshakes`; the AMQP
   `HandshakeTimeout` starts only once the AMQP layer has a connection whose TLS handshake completed.
+  In-band TLS is the exception: its handshake is a step of the AMQP establishment, so it runs within
+  the AMQP `HandshakeTimeout` and holds one of the AMQP listener's `MaxConcurrentHandshakes` slots.
+  The layer's own `HandshakeTimeout` still bounds the TLS handshake itself, while
+  `TlsServerOptions.MaxConcurrentHandshakes`, which only `UseTls` reads, does not apply.
 - **Rejected: an accept loop of AMQP's own.** It would rebuild the pump's concurrency, bound,
   containment, disposal and diagnostics, and drift from TLS. The Connections design calls the
   layered listener the one place that knows which failures belong to a connection.
@@ -232,10 +299,12 @@ throws `ArgumentException`, with `ParamName` `listener` or `factory`, otherwise.
 - **Options are split by role.** `AmqpConnectionListenerOptions` and `AmqpConnectionFactoryOptions`
   share `ContainerId`, `MaxFrameSize` (default 262,144 bytes, at least 512), `ChannelMax` (default
   255), `IdleTimeout` (default one minute), `HandshakeTimeout` (default 10 seconds),
-  `SessionOptions`, and the `open`'s `OfferedCapabilities`, `DesiredCapabilities` and `Properties`.
-  The listener adds `MaxConcurrentHandshakes` (default 512, at least 1: TLS's default and the TCP
-  listener's default backlog) and `SaslMechanisms`, the server mechanisms it offers in order. The
-  factory adds `HostName` and `SaslMechanism`, the one client mechanism it uses.
+  `SessionOptions`, the `open`'s `OfferedCapabilities`, `DesiredCapabilities` and `Properties`, and
+  `TlsLayer` (none by default, see "In-band TLS"). The listener adds `MaxConcurrentHandshakes`
+  (default 512, at least 1: TLS's default and the TCP listener's default backlog), `RequireTls`
+  (default off), `SaslMechanisms`, the server mechanisms it offers in order, and
+  `AllowLinkStealing` (default off, see "Links"). The factory adds `HostName` and `SaslMechanism`,
+  the one client mechanism it uses.
 - **Options are read once**, at `Create`, into an internal immutable `AmqpConnectionSettings`.
   Changing an options object afterwards does not affect a listener or factory created from it.
 - **Timeouts have floors and ceilings.** A non-positive `HandshakeTimeout` disables the limit, and a
@@ -255,6 +324,12 @@ An open connection is one `AmqpConnectionEndpoint` with its `AmqpSessionEndpoint
   frames that span levels, such as a `disposition` that settles deliveries of several links or an
   `end` that detaches every link of a session, for no gain the carrier would notice: encoding a frame
   is cheap next to writing it.
+- **One lock reaches across connections, and only beneath theirs.** A listener that allows link
+  stealing shares an `AmqpLinkRegistry` among its connections, with a lock of its own that is taken
+  under a connection's lock and never the other way round: the registry calls into nothing. A link
+  stolen from another connection is closed on a thread-pool thread that takes that connection's lock
+  after the thief's is released, because two connections stealing from each other at once would
+  otherwise each wait for the other's lock.
 - **No application code runs under the lock.** Every completion the engine signals
   (`TaskCompletionSource` with `RunContinuationsAsynchronously`, the waiters, the accept channels)
   runs its continuations asynchronously.
@@ -293,12 +368,21 @@ sequenceDiagram
   peer's answering `begin`; a session the peer begins is answered at once and handed to
   `AcceptSessionAsync`. It stops carrying links as soon as either peer sends `end`, and has ended
   once both have.
-- **The incoming window is refilled at half.** The engine declares `AmqpSessionOptions.IncomingWindow`
-  (2,048 by default) and sends a `flow` that restores it once half is used, as transfers arrive and
-  whether or not the application has taken them. The window paces the peer between two `flow`
-  frames; it does not bound what the session holds, which link credit and each receiver's
-  `MaxMessageSize` do. Because the engine restores it before it runs out, it never refuses a peer
-  with `amqp:session:window-violation` (gap G5, #1934).
+- **The incoming window bounds what the session holds.** The engine declares
+  `AmqpSessionOptions.IncomingWindow` (2,048 by default). A frame keeps its place in the window
+  until the application takes the delivery it belongs to, or that delivery's link stops; a frame
+  the session keeps nothing of, such as one of an aborted or ignored delivery, frees its place at
+  once. The engine sends a `flow` that restores the window once half of it is free, never shrinks
+  what it granted, and ends the session with `amqp:session:window-violation` when the peer sends
+  past it (S12, #1934). Until 2026-11 it restored the window at half use as transfers arrived, so
+  the window never closed and the violation was unreachable.
+- **A delivery being reassembled holds no place.** If its frames held places, a delivery larger
+  than the window could never complete, so its link's `MaxMessageSize` bounds it instead, 16 MiB
+  for a receiver by default. What a session buffers is therefore at most `IncomingWindow` times
+  the connection's own maximum frame size, plus one delivery of up to its link's `MaxMessageSize`
+  for each receiver. The window is shared, so a receiver whose deliveries the application leaves
+  untaken holds back every link on the session: an application that waits on one receiver while
+  another fills the window stalls, and gives such receivers sessions of their own.
 - **The engine never limits itself by an outgoing window.** It declares `int.MaxValue`, the largest
   value peers that read the field as signed still accept, and sends within the peer's incoming
   window.
@@ -331,6 +415,37 @@ sequenceDiagram
 - **A delivery is reassembled under the lock and handed out whole.** Its payload never changes after
   its last frame arrives. A delivery the sender aborts is discarded, unless it was resumed (see
   "Compliance maps", the resume map).
+- **A suspended link's deliveries stay live.** A link detached without closing and without an error
+  (`DetachAsync()`, or the peer's `detach` without `closed` or an error) leaves its unsettled
+  deliveries tracked on the session, because a `disposition` may still name them and its state must
+  be applied (Part 2 §2.7.6): a pending send completes with the receiver's outcome, and the
+  application can still settle a delivery it took (DS7, #1933). They end, failing with
+  `LinkDetached`, when the link closes or detaches with an error at either end, a peer's answer to a
+  suspension included; when it attaches again under its name on the session, since they then carry
+  over to the new attachment's unsettled maps and a `disposition` no longer names them by their old
+  delivery-ids; or when the session ends. A link attached again on another session leaves them to
+  the first session's end. A delivery whose frames were not all sent or received ends at once,
+  because it cannot complete on that attachment. A `disposition` that breaks a rule for a suspended
+  link's delivery is not applied, since the link has no handle left to detach. Until 2026-11 a
+  detach of any kind failed the link's deliveries.
+- **A listener can let a peer steal a link** (L15, #1930), with `AllowLinkStealing`. A link is
+  identified by its source container, its target container and its name (Part 2 §2.6.1), so it
+  is active on one connection at a time. With the option off, the default, each session keeps its
+  own names and refuses a second attach of a name and direction it holds (L2). With it on, the
+  listener keys every link its connections hold by both container identifiers, the name and the
+  direction, from the moment its `attach` is sent or received until it stops. A peer's `attach` of
+  a link held elsewhere, on another connection or session, becomes a new link request, and the
+  earlier attachment closes with `amqp:link:stolen`: an unanswered request is refused, an attached
+  link is closed, and an attach the peer has not answered fails the application's call at once and
+  closes when the answer arrives. What waits on the old link fails with `LinkDetached` carrying the
+  condition. Of two attaches at once, the one the registry takes second keeps the link. A link that
+  is detaching or suspended is not held, so attaching it again resumes it rather than stealing it;
+  a stolen close the peer answers by suspending follows the crossed-detach rule below, so the
+  peer's attach that closes it ends the close and steals nothing back. The application's own attach
+  of a link held elsewhere throws `InvalidOperationException` before anything is sent, as a
+  duplicate on its own session does: the application holds that link and closes it first. This is
+  what a broker needs when a client whose connection died attaches its links again from a new one
+  while the old connection waits for its idle timeout.
 
 ### Closing, ending and detaching
 
@@ -345,6 +460,32 @@ sequenceDiagram
   condition.
 - **An error too large for a frame still closes**, without its details: the engine sends the
   condition alone.
+- **Crossed detaches end with the link closed** (L12 to L14, #1932). When one end closes a link
+  while the other detaches it without closing, the end that did not close attaches the link again
+  and closes it (Part 2 §2.6.6). When the engine closed, it keeps the link's handle and name, waits
+  for the peer's `attach`, answers it with its own `attach` and a closing `detach`, and the peer's
+  closing `detach` ends the link. A peer that never attaches again ends the wait at the close
+  timeout; an attach of the name after that is a new link. When the engine suspended a link it
+  attached itself, it sends `attach` again on the same handle, with no unsettled map, and closes the
+  link once the peer answers. A link the peer attached ends at the peer's closing `detach` instead,
+  without a second attach (L14, a leniency): a peer that only initiates links can refuse an attach it
+  did not ask for, and AMQPNetLite's plain `Connection` closes the whole connection with
+  `amqp:not-found` (see "Interoperability"). Either crossing is handled once: a `detach` that
+  follows the exchange ends the link whatever it says. Until 2026-11 the engine took either crossing
+  `detach` as the answer to its own.
+- **A link detached with an error can be attached again as a new link** (L16, #1931, a leniency).
+  Part 2 §2.6.5 destroys a link endpoint detached with an error: the peer must resume it, with an
+  unsettled map that tells the resume from a pipelined re-attach, and a re-attach without one ends
+  the session with `amqp:session:errant-link` (§2.8.17). The engine does not enforce that, and takes
+  such an attach as a new link. A refused attach is also a detach with an error, so enforcing it
+  would end the whole session of a client that tries a node again once it exists, under the same
+  name, and AMQPNetLite never sends an unsettled map at all (the interop test shows its second
+  attach). Nothing is lost by attaching anew: the engine already destroyed the old endpoint and failed
+  its deliveries. An attach that does carry an unsettled map is a resume, which the Resume map's
+  rules reconcile against what the engine still holds, and for a link that failed that is nothing.
+  Decided 2026-11-21; the alternative, remembering for some period the names of links detached with
+  an error, was rejected for the session it costs a well-behaved retry. Input the peer sent for the
+  old link before it read the error is still discarded (L8).
 
 ### Idle timeout
 
@@ -366,16 +507,16 @@ deleting one breaks the build. Rules that record a leniency say so.
 
 | Map | Evidence | Rules | Covers |
 |---|---|---|---|
-| Header phase | `AmqpHeaderPhaseComplianceTests` over `AmqpHeaderPhaseCorpus` | H1 to H20 | protocol headers, the SASL exchange and its frames, the `open` exchange, idle timeouts, channels and frame layout |
+| Header phase | `AmqpHeaderPhaseComplianceTests` over `AmqpHeaderPhaseCorpus` | H1 to H21 | protocol headers, in-band TLS, the SASL exchange and its frames, the `open` exchange, idle timeouts, channels and frame layout |
 | Type system | `AmqpTypeSystemComplianceTests` over `AmqpTypeSystemCorpus` | one per type, with a case per constructor, CLR type and refusal | the Part 1 type surface (see "The type surface") |
 | Message format | `AmqpMessageFormatComplianceTests` over `AmqpMessageFormatCorpus` | MF1 to MF9 | section order, repetition and body kinds, descriptors, message ids, annotation and property keys |
 | Termini | `AmqpTerminusComplianceTests` over `AmqpTerminusCorpus` | T1 to T10 | terminus defaults, dynamic nodes and their owner, node properties, filters, durability, expiry, default outcomes |
 | Performatives | `AmqpPerformativeTests` | P1 to P8 | field order and defaults, mandatory fields, descriptors, restricted values, multiple-valued fields, delivery tags, errors, a zero `max-message-size` |
 | Connection | `AmqpConnectionComplianceTests` | C1 to C8 | the negotiated frame size and channels, a frame too large to write, what may follow `open`, closing and crossed closes, a carrier that ends first, idle timeouts |
-| Session | `AmqpSessionComplianceTests` | S1 to S11 | beginning on a channel, channel and handle limits, handles in use and unattached, the incoming window, ending, crossed ends, ending with an error |
-| Link | `AmqpLinkComplianceTests` | L1 to L11 | attaching with roles and handles, link names, contradictory attaches, refusing a link, closing and suspending, link errors, who may transfer, flow echoes |
+| Session | `AmqpSessionComplianceTests` | S1 to S12 | beginning on a channel, channel and handle limits, handles in use and unattached, the incoming window and what it holds, ending, crossed ends, ending with an error |
+| Link | `AmqpLinkComplianceTests` | L1 to L16 | attaching with roles and handles, link names, contradictory attaches, refusing a link, closing and suspending, link errors and attaching after one, who may transfer, flow echoes, crossed detaches, link stealing |
 | Transfer | `AmqpTransferComplianceTests` | F1 to F20 | splitting and reassembly, settlement on frames, aborts, malformed fragmentation, terminal outcomes, credit and drains |
-| Settlement | `AmqpSettlementComplianceTests` | DS1 to DS6 | terminal outcomes, sender and receiver settle modes, disposition ranges and the deliveries they cover |
+| Settlement | `AmqpSettlementComplianceTests` | DS1 to DS7 | terminal outcomes, sender and receiver settle modes, disposition ranges and the deliveries they cover, deliveries of a suspended link |
 | Resume | `AmqpResumeComplianceTests` | R1 to R11 | unsettled-map comparison at both ends, resuming and aborting, the `received` state, new deliveries while maps are incomplete, the Part 3 §3.4.6 example end to end |
 | Transactions | `AmqpTransactionComplianceTests` | T1 to T14 | declare and discharge, transactional work on transfers and dispositions, acquisition, identifiers, capabilities |
 
@@ -410,13 +551,20 @@ The leniencies, each accepted because the meaning is clear and nothing is at ris
   link on it.
 - **L11:** a session `flow` that carries link fields, which only a link `flow` may, is read as the
   session's: no handle says which link the fields would belong to.
+- **L14:** a closing `detach` that answers the engine's suspending one ends a link the peer
+  attached, without the second attach Part 2 §2.6.6 asks the engine to send: the peer closed the
+  link, and a peer that only initiates links may refuse an attach it did not ask for.
+- **L16:** an `attach` of a name whose link the engine detached with an error, a refused attach
+  included, is a new link when it carries no unsettled map, rather than a pipelined re-attach that
+  ends the session with `amqp:session:errant-link`: the old endpoint is gone, so nothing is resumed
+  or lost, and the session's other links live on.
 - **DS6:** a peer's transfer is settled or unsettled by its own `settled` flag, even where that
   contradicts the sender settle mode the peer declared: the flag states what the sender did, and
   refusing it would strand the delivery.
 
 ### The matrix (#431)
 
-`AmqpComplianceMatrix` in the tests reads every map into one list, 153 rules in 12 maps, and keeps
+`AmqpComplianceMatrix` in the tests reads every map into one list, 161 rules in 12 maps, and keeps
 the gaps beside them (below). `AmqpComplianceMatrixTests` checks the list:
 
 - **Each rule cites its Parts.** A reference reads `Part N, section X`, `Part N, sections X and Y`
@@ -429,15 +577,15 @@ the gaps beside them (below). `AmqpComplianceMatrixTests` checks the list:
   the test output. A rule that cites several Parts counts under each, so the Parts' totals add up to
   more than the number of rules.
 
-The report on 2026-11-20:
+The report on 2026-11-21:
 
 | Part | Rules | Maps | Leniencies | Gaps |
 |---|---|---|---|---|
 | 1, Types | 32 | 4 | 0 | 0 |
-| 2, Transport | 86 | 8 | 10 | 5 |
+| 2, Transport | 94 | 8 | 12 | 0 |
 | 3, Messaging | 24 | 5 | 2 | 0 |
 | 4, Transactions | 14 | 1 | 2 | 0 |
-| 5, Security | 10 | 2 | 0 | 1 |
+| 5, Security | 11 | 2 | 0 | 0 |
 
 A new map adds its rules once, in `AmqpComplianceMatrix.CreateEntries`. The checks, the report and
 the regression register's lookup of the rule each defect broke then cover it.
@@ -448,14 +596,16 @@ the regression register's lookup of the rule each defect broke then cover it.
 each with the sections it cites and the work item that tracks it. A gap names no evidence: once the
 engine holds the rule, the rule moves into a map with its tests.
 
-| Gap | The specification | The engine | Work item |
+The list is empty. The matrix first found six gaps, and each became rules in a map:
+
+| Gap | The specification | Now | Work item |
 |---|---|---|---|
-| G1 | A second attach of a link may steal it, closing the first with `amqp:link:stolen` (Part 2 §2.6.1). | Keeps no registry beyond the session, and refuses a second attach of a name it holds on the session with `amqp:not-allowed` (L2). A host that lets a reconnecting client take over its link closes the old link with `amqp:link:stolen` itself. | #1930 |
-| G2 | An attach of a link detached with an error must resume it with an unsettled map, and a pipelined re-attach without one ends the session with `amqp:session:errant-link` (Part 2 §2.6.5 and §2.8.17). | Accepts it as a new attach. | #1931 |
-| G3 | When one end closes a link while the other suspends it, the end that suspended reattaches the link and then closes it (Part 2 §2.6.6). | Takes either crossing `detach` as the answer to its own: it does not reattach to close a link it suspended, and a peer that reattaches to close a link the engine closed reaches the application as a new link request. | #1932 |
-| G4 | A peer may open TLS in band, with the AMQP TLS header (protocol id 2) and the TLS handshake after it (Part 5 §5.2 and §5.2.1). | Answers that header with the one it supports and closes (H3). TLS comes from the carrier instead, the alternative establishment §5.2.1 allows. | #1935 |
-| G5 | A peer that sends past the incoming window breaks the session with `amqp:session:window-violation` (Part 2 §2.5.6 and §2.8.17). | Widens its window at half use as transfers arrive (S8), so it never sees the window run out. What it buffers is bounded by link credit and a receiver's `MaxMessageSize`, which has no default. | #1934 |
-| G6 | A delivery on a link detached without closing and without an error stays live, and a disposition that names it applies (Part 2 §2.7.6). | Fails a suspended link's deliveries when the link detaches and passes over a later disposition for them. Resuming the link reconciles their state through the unsettled maps instead. | #1933 |
+| G1 | A second attach of a link may steal it, closing the first with `amqp:link:stolen` (Part 2 §2.6.1). | L15, on a listener that sets `AllowLinkStealing` | #1930 |
+| G2 | An attach of a link detached with an error must resume it with an unsettled map, and a pipelined re-attach without one ends the session with `amqp:session:errant-link` (Part 2 §2.6.5 and §2.8.17). | L16, a leniency: such an attach is a new link | #1931 |
+| G3 | When one end closes a link while the other suspends it, the end that suspended reattaches the link and then closes it (Part 2 §2.6.6). | L12 and L13, and L14, a leniency for a link the peer attached | #1932 |
+| G4 | A peer may open TLS in band, with the AMQP TLS header (protocol id 2) and the TLS handshake after it (Part 5 §5.2 and §5.2.1). | H21, with `TlsLayer` and `RequireTls` | #1935 |
+| G5 | A peer that sends past the incoming window breaks the session with `amqp:session:window-violation` (Part 2 §2.5.6 and §2.8.17). | S12, with F7's default `MaxMessageSize` of 16 MiB | #1934 |
+| G6 | A delivery on a link detached without closing and without an error stays live, and a disposition that names it applies (Part 2 §2.7.6). | DS7 | #1933 |
 
 ## Regression register (#433)
 
@@ -523,8 +673,8 @@ them alone and `--filter "Category!=Interop"` leaves them out; CI runs both.
 
 | Direction | Tests | Scenarios |
 |---|---|---|
-| AMQPNetLite client, Cohesion listener | `AmqpNetLiteClientInteropTests` (20) | SASL PLAIN and ANONYMOUS; a refused password while the listener keeps accepting; each outcome and pre-settled transfers both ways; every type AMQPNetLite encodes, through both codecs; every message section both ways; messages split across frames both ways; order across sessions and links; a refused link; a close with an error both ways; a committed and an abandoned `TransactionScope` through the broker's coordinator; drain; idle timeout kept with empty frames |
-| Cohesion client, AMQPNetLite `ContainerHost` | `AmqpNetLiteHostInteropTests` (11) | SASL PLAIN and ANONYMOUS; a refused password; close; each outcome from a message processor; 50 sends within a credit of 5, in order; split sends; settlements reported to a message source; 300 messages within a prefetch of 50, in order; split receives; a link refused with `amqp:not-found` |
+| AMQPNetLite client, Cohesion listener | `AmqpNetLiteClientInteropTests` (22) | SASL PLAIN and ANONYMOUS; a refused password while the listener keeps accepting; each outcome and pre-settled transfers both ways; every type AMQPNetLite encodes, through both codecs; every message section both ways; messages split across frames both ways; order across sessions and links; a refused link, and the same name attached again on the session; a close with an error both ways; a committed and an abandoned `TransactionScope` through the broker's coordinator; drain; a suspending detach the client answers by closing, with the connection kept; idle timeout kept with empty frames |
+| Cohesion client, AMQPNetLite `ContainerHost` | `AmqpNetLiteHostInteropTests` (12) | SASL PLAIN and ANONYMOUS; a refused password; close; each outcome from a message processor; 50 sends within a credit of 5, in order; split sends; settlements reported to a message source; 300 messages within a prefetch of 50, in order; split receives; a link refused with `amqp:not-found`; a suspending detach the host answers by closing, attached again and closed |
 
 **Reading a failure.** Each test prints every frame AMQPNetLite sent and received. A failure is
 Cohesion's when its frames break a rule, which the compliance maps name; it is the peer's when
@@ -554,9 +704,17 @@ What the suite does not cover, and why:
   type corpus pins these encodings against byte vectors instead.
 - **A list that ends in `null`.** AMQPNetLite drops the trailing nulls of every list it encodes,
   which shortens a plain list; the type test puts the null inside.
+- **The second attach that closes a link an AMQPNetLite client attached.** AMQPNetLite answers a
+  peer's `detach` with `closed` set unless its own application detached the link, so it closes a
+  link the engine suspends. Part 2 §2.6.6 then asks the engine to attach the link again and close
+  it, but a plain AMQPNetLite `Connection` with no link listener refuses an `attach` it did not ask
+  for by closing the connection with `amqp:not-found`. The engine ends a link the peer attached at
+  the peer's closing `detach` instead (L14), which the client test shows keeps the connection.
+  `ContainerHost` accepts the second attach of a link the engine attached and completes the
+  exchange, which the host test shows frame by frame.
 - **Not exercised here:** resuming a link (AMQPNetLite keeps no unsettled map), Cohesion as a
-  transaction controller (`ContainerHost` has no coordinator), multiplexed carriers, TLS and SASL
-  EXTERNAL.
+  transaction controller (`ContainerHost` has no coordinator), multiplexed carriers, TLS (in-band
+  TLS is not in AMQPNetLite, and TLS below AMQP is the carrier's) and SASL EXTERNAL.
 
 ## Framing and the codec
 
@@ -776,10 +934,9 @@ any IL warning, a non-zero exit, or a summary line that does not report every ch
 - **No claims-based security (CBS) and no management draft.** Both are message exchanges over
   ordinary links, so they build on the model without changes here. CBS, which MessageHub needs for
   the Azure clients, is tracked outside the engine by #1936.
-- **No TLS inside this package.** Security is a connection layer composed below AMQP, with
-  `UseTls` from `Assimalign.Cohesion.Connections.Security`; the AMQP header's TLS protocol id (2) is
-  never sent. Accepting that header in band is a gap, not a non-goal (G4, #1935), and even then the
-  TLS session would come from the connection layer, not from this package.
+- **No TLS implementation in this package.** TLS is a connection layer, composed below AMQP with
+  `UseTls` or run in band by establishment through `TlsLayer` (see "In-band TLS"). The engine sends
+  and answers the TLS protocol header, and the layer it is given does the cryptography.
 - **No AMQP 0-9-1 (RabbitMQ classic) compatibility.** This is AMQP 1.0 only.
 - **No sharing of one multiplexed carrier between AMQP connections.**
 
@@ -791,7 +948,9 @@ any IL warning, a non-zero exit, or a summary line that does not report every ch
   capability, the listener and factory bases, `DuplexConnection`, `IConnectionLayer` and the
   layered listener that runs establishment.
 - **`Assimalign.Cohesion.Connections.Security`**: TLS as a `UseTls` layer composed on the carrier
-  listener or factory, below AMQP.
+  listener or factory, below AMQP, or as the `TlsConnectionLayer` an AMQP listener or factory runs
+  in band. The engine does not reference it: `TlsLayer` takes any `IConnectionLayer`, and the tests
+  reference it to negotiate real TLS.
 - **`Assimalign.Cohesion.Http.Connections`**: the sibling application protocol. Both consume the
   connection contracts by capability, with TLS composed below them.
 

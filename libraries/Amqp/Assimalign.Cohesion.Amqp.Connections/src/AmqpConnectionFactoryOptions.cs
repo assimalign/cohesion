@@ -5,6 +5,7 @@ using System.Globalization;
 
 using Assimalign.Cohesion.Amqp;
 using Assimalign.Cohesion.Amqp.Connections.Internal;
+using Assimalign.Cohesion.Connections;
 
 namespace Assimalign.Cohesion.Amqp.Connections;
 
@@ -138,6 +139,32 @@ public sealed class AmqpConnectionFactoryOptions
     }
 
     /// <summary>
+    /// Gets or sets the TLS layer that secures every connection the factory opens after the AMQP TLS protocol
+    /// header, before SASL and AMQP (AMQP 1.0 Part 5, section 5.2), or <see langword="null"/> to connect without it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Defaults to <see langword="null"/>. With a layer, a connection starts with the TLS protocol header; once the
+    /// peer answers with its own, the factory hands the carrier connection to
+    /// <see cref="IConnectionLayer.UpgradeAsync(IDuplexConnection, System.Threading.CancellationToken)"/>, which runs
+    /// the TLS handshake, and continues with SASL or AMQP over the connection the layer returns, whose features the
+    /// connection then carries, such as its TLS facts. The layer is typically a <c>TlsConnectionLayer</c> built with
+    /// client options, from <c>Assimalign.Cohesion.Connections.Security</c>; those options name the server the
+    /// handshake authenticates, since <see cref="HostName"/> does not reach the layer. The handshake counts against
+    /// <see cref="HandshakeTimeout"/>, and one that fails throws the layer's own exception, such as an
+    /// <see cref="System.Security.Authentication.AuthenticationException"/>.
+    /// </para>
+    /// <para>
+    /// A peer that declines TLS by answering with another protocol header fails establishment with
+    /// <see cref="AmqpErrorCode.ProtocolViolation"/>. The factory never falls back to an unsecured connection, since
+    /// anyone on the path could force that fallback by rewriting the peer's answer. A service that expects TLS
+    /// before any AMQP byte (Part 5, section 5.2.1, usually on port 5671) needs a carrier factory composed with a TLS
+    /// layer instead.
+    /// </para>
+    /// </remarks>
+    public IConnectionLayer? TlsLayer { get; set; }
+
+    /// <summary>
     /// Gets or sets the SASL mechanism connections authenticate with (AMQP 1.0 Part 5, section 5.3), or
     /// <see langword="null"/> to connect without authentication.
     /// </summary>
@@ -189,6 +216,7 @@ public sealed class AmqpConnectionFactoryOptions
         public ushort ChannelMax => _options.ChannelMax;
         public TimeSpan IdleTimeout => _options.IdleTimeout;
         public TimeSpan HandshakeTimeout => _options.HandshakeTimeout;
+        public IConnectionLayer? TlsLayer => _options.TlsLayer;
         public IAmqpSaslClientMechanism? SaslMechanism => _options.SaslMechanism;
         public AmqpSessionOptions? SessionOptions => _options.SessionOptions;
         public IReadOnlyList<AmqpSymbol>? OfferedCapabilities => _options.OfferedCapabilities;
