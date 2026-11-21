@@ -91,6 +91,28 @@ public class AmqpLinkComplianceTests
         new("L11", "A session flow that carries link fields, which only a link flow may, is read as the session's: no handle says which link its link fields would belong to, so they are ignored.", "Part 2, section 2.7.4",
             Tests: [nameof(OnFlow_OnSessionFlowWithLinkFields_ShouldReadOnlyTheSessionState)],
             Refusals: [],
+            Leniency: true),
+        new("L12", "When the peer detaches without closing a link the engine closed, the peer's detach crossed the engine's, and the end that did not close attaches the link again and closes it: the engine answers that attach and closing detach as the end of its close, not as a new link, and waits for them for the close timeout, after which an attach of the name is a new link.", "Part 2, sections 2.6.6 and 2.7.7",
+            Tests:
+            [
+                nameof(CloseAsync_OnLinkThePeerSuspendsMeanwhile_ShouldEndOnThePeersAttachAndClosingDetach),
+                nameof(CloseAsync_OnLinkThePeerSuspendsAndNeverAttachesAgain_ShouldEndAtTheCloseTimeout)
+            ],
+            Refusals: []),
+        new("L13", "When the peer closes a link the engine attached while the engine detaches it without closing, the engine attaches the link again, on its handle and with its termini but no unsettled map, and closes it once the peer answers; the application sees the link end.", "Part 2, sections 2.6.6 and 2.7.7",
+            Tests:
+            [
+                nameof(DetachAsync_OnLinkItAttachedThatThePeerClosesMeanwhile_ShouldAttachItAgainAndCloseIt),
+                nameof(AmqpNetLiteHostInteropTests.DetachAsync_OnLinkTheNetLiteHostCloses_ShouldAttachItAgainAndCloseIt)
+            ],
+            Refusals: []),
+        new("L14", "A closing detach that answers the engine's non-closing detach of a link the peer attached ends the link, and the engine does not attach it again to close it: such an answer cannot be told from a crossing, AMQPNetLite answers every non-closing detach that way, and a peer that only initiates links can refuse an attach it did not ask for, as an AMQPNetLite client does by closing the connection with amqp:not-found.", "Part 2, sections 2.6.6 and 2.7.7",
+            Tests:
+            [
+                nameof(DetachAsync_OnLinkThePeerAttachedThatThePeerCloses_ShouldEndItWithoutAttachingAgain),
+                nameof(AmqpNetLiteClientInteropTests.DetachAsync_OnNetLiteClientLink_ShouldEndItAndKeepTheConnection)
+            ],
+            Refusals: [],
             Leniency: true)
     ];
 
@@ -419,5 +441,166 @@ public class AmqpLinkComplianceTests
         sender.Credit.ShouldBe(0u);
         sender.LinkDetached.IsCancellationRequested.ShouldBeFalse();
         session.SessionEnded.IsCancellationRequested.ShouldBeFalse();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - CloseAsync: Should end its close on the attach and closing detach of a peer whose suspending detach crossed it")]
+    public async Task CloseAsync_OnLinkThePeerSuspendsMeanwhile_ShouldEndOnThePeersAttachAndClosingDetach()
+    {
+        // Arrange
+        using CancellationTokenSource timeout = new(_testTimeout);
+        await using AmqpScriptedHost host = await AmqpScriptedHost.AcceptAsync(cancellationToken: timeout.Token);
+        AmqpTestPeer peer = host.Peer;
+        IAmqpSession session = await BeginAsync(host, timeout.Token);
+        AmqpAttachPerformative peerAttach = CreateReceiverAttach(new AmqpTarget { Address = "peer" });
+        IAmqpSender sender = await AttachPeerReceiverAsync(peer, session, peerAttach, null, timeout.Token);
+
+        // Act: the peer suspends the link as the engine's closing detach reaches it, then attaches the link again
+        // and closes it.
+        Task close = sender.CloseAsync(cancellationToken: timeout.Token).AsTask();
+        AmqpDetachPerformative engineClose = await ReadUntilAsync<AmqpDetachPerformative>(peer, timeout.Token);
+        await peer.WriteFrameAsync(0, new AmqpDetachPerformative { Handle = 0, Closed = false }, timeout.Token);
+        await SyncAsync(peer, timeout.Token);
+        bool endedBeforeTheAttach = close.IsCompleted;
+        await peer.WriteFrameAsync(0, peerAttach, timeout.Token);
+        AmqpAttachPerformative answer = await ReadUntilAsync<AmqpAttachPerformative>(peer, timeout.Token);
+        AmqpPerformative closing = (await peer.ReadNonEmptyFrameAsync(timeout.Token)).Performative!;
+        await peer.WriteFrameAsync(0, new AmqpDetachPerformative { Handle = 0, Closed = true }, timeout.Token);
+        await close;
+        IAmqpLinkRequest next = await AcceptProbeAsync(peer, session, timeout.Token);
+
+        // Assert: the engine answers the attach and closes the link at once, and raises no link request for it.
+        engineClose.Closed.ShouldBeTrue();
+        endedBeforeTheAttach.ShouldBeFalse();
+        answer.Name.ShouldBe("link");
+        answer.Role.ShouldBe(AmqpRole.Sender);
+        answer.Handle.ShouldBe(sender.Handle);
+        answer.Source.ShouldNotBeNull().Address.ShouldBe("queue");
+        AmqpDetachPerformative detach = closing.ShouldBeOfType<AmqpDetachPerformative>();
+        detach.Handle.ShouldBe(sender.Handle);
+        detach.Closed.ShouldBeTrue();
+        detach.Error.ShouldBeNull();
+        next.Name.ShouldBe("probe");
+        sender.LinkDetached.IsCancellationRequested.ShouldBeTrue();
+        session.SessionEnded.IsCancellationRequested.ShouldBeFalse();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - CloseAsync: Should end at the close timeout a close whose crossing peer never attaches the link again, and free the link's name")]
+    public async Task CloseAsync_OnLinkThePeerSuspendsAndNeverAttachesAgain_ShouldEndAtTheCloseTimeout()
+    {
+        // Arrange: a close timeout of two seconds.
+        using CancellationTokenSource timeout = new(_testTimeout);
+        AmqpConnectionListenerOptions options = new() { HandshakeTimeout = TimeSpan.FromSeconds(2) };
+        await using AmqpScriptedHost host = await AmqpScriptedHost.AcceptAsync(options, cancellationToken: timeout.Token);
+        AmqpTestPeer peer = host.Peer;
+        IAmqpSession session = await BeginAsync(host, timeout.Token);
+        AmqpAttachPerformative peerAttach = CreateReceiverAttach(new AmqpTarget { Address = "peer" });
+        IAmqpSender sender = await AttachPeerReceiverAsync(peer, session, peerAttach, null, timeout.Token);
+
+        // Act: the peer suspends the link as the engine's closing detach reaches it, and attaches the link again
+        // only once the close ended.
+        Task close = sender.CloseAsync(cancellationToken: timeout.Token).AsTask();
+        await ReadUntilAsync<AmqpDetachPerformative>(peer, timeout.Token);
+        await peer.WriteFrameAsync(0, new AmqpDetachPerformative { Handle = 0, Closed = false }, timeout.Token);
+        await close;
+        await peer.WriteFrameAsync(0, peerAttach, timeout.Token);
+        IAmqpLinkRequest request = await session.AcceptLinkAsync(timeout.Token);
+
+        // Assert: an attach that comes after the close ended is a new link.
+        request.Name.ShouldBe("link");
+        request.Role.ShouldBe(AmqpRole.Sender);
+        sender.LinkDetached.IsCancellationRequested.ShouldBeTrue();
+        session.SessionEnded.IsCancellationRequested.ShouldBeFalse();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - DetachAsync: Should attach a link it attached again and close it when the peer's closing detach crosses its suspending one")]
+    public async Task DetachAsync_OnLinkItAttachedThatThePeerClosesMeanwhile_ShouldAttachItAgainAndCloseIt()
+    {
+        // Arrange: the engine attaches a receiver, which grants its prefetch credit once the peer answers.
+        using CancellationTokenSource timeout = new(_testTimeout);
+        await using AmqpScriptedHost host = await AmqpScriptedHost.AcceptAsync(cancellationToken: timeout.Token);
+        AmqpTestPeer peer = host.Peer;
+        IAmqpSession session = await BeginAsync(host, timeout.Token);
+        Task<IAmqpReceiver> attach = session.AttachReceiverAsync(
+            new AmqpReceiverOptions { Name = "orders", Source = new AmqpSource { Address = "queue" } },
+            timeout.Token).AsTask();
+        AmqpAttachPerformative engineAttach = await ReadUntilAsync<AmqpAttachPerformative>(peer, timeout.Token);
+        AmqpAttachPerformative peerAttach = new()
+        {
+            Name = "orders",
+            Handle = 0,
+            Role = AmqpRole.Sender,
+            Source = engineAttach.Source,
+            Target = engineAttach.Target,
+            InitialDeliveryCount = 0
+        };
+        await peer.WriteFrameAsync(0, peerAttach, timeout.Token);
+        IAmqpReceiver receiver = await attach;
+        await SyncAsync(peer, timeout.Token);
+
+        // Act: the peer closes the link as the engine's suspending detach reaches it, answers the engine's attach,
+        // then answers its closing detach.
+        Task detach = receiver.DetachAsync(cancellationToken: timeout.Token).AsTask();
+        AmqpDetachPerformative suspend = await ReadUntilAsync<AmqpDetachPerformative>(peer, timeout.Token);
+        await peer.WriteFrameAsync(0, new AmqpDetachPerformative { Handle = 0, Closed = true }, timeout.Token);
+        AmqpAttachPerformative reattach = await ReadUntilAsync<AmqpAttachPerformative>(peer, timeout.Token);
+        await peer.WriteFrameAsync(0, peerAttach, timeout.Token);
+        AmqpPerformative closing = (await peer.ReadNonEmptyFrameAsync(timeout.Token)).Performative!;
+        await peer.WriteFrameAsync(0, new AmqpDetachPerformative { Handle = 0, Closed = true }, timeout.Token);
+        await detach;
+        IAmqpLinkRequest next = await AcceptProbeAsync(peer, session, timeout.Token);
+
+        // Assert: the attach names the link and its terminus on the same handle and resumes nothing, and the closing
+        // detach follows the peer's answer at once, with no credit granted in between.
+        suspend.Closed.ShouldBeFalse();
+        reattach.Name.ShouldBe("orders");
+        reattach.Role.ShouldBe(AmqpRole.Receiver);
+        reattach.Handle.ShouldBe(engineAttach.Handle);
+        reattach.Source.ShouldNotBeNull().Address.ShouldBe("queue");
+        reattach.Unsettled.ShouldBeNull();
+        AmqpDetachPerformative close = closing.ShouldBeOfType<AmqpDetachPerformative>();
+        close.Handle.ShouldBe(engineAttach.Handle);
+        close.Closed.ShouldBeTrue();
+        close.Error.ShouldBeNull();
+        next.Name.ShouldBe("probe");
+        receiver.LinkDetached.IsCancellationRequested.ShouldBeTrue();
+        session.SessionEnded.IsCancellationRequested.ShouldBeFalse();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - DetachAsync: Should end a link the peer attached at a closing detach that answers its suspending one, without attaching it again")]
+    public async Task DetachAsync_OnLinkThePeerAttachedThatThePeerCloses_ShouldEndItWithoutAttachingAgain()
+    {
+        // Arrange
+        using CancellationTokenSource timeout = new(_testTimeout);
+        await using AmqpScriptedHost host = await AmqpScriptedHost.AcceptAsync(cancellationToken: timeout.Token);
+        AmqpTestPeer peer = host.Peer;
+        IAmqpSession session = await BeginAsync(host, timeout.Token);
+        IAmqpSender sender = await AttachPeerReceiverAsync(peer, session, null, timeout.Token);
+
+        // Act: the peer answers the engine's suspending detach by closing the link, as AMQPNetLite always does.
+        Task detach = sender.DetachAsync(cancellationToken: timeout.Token).AsTask();
+        AmqpDetachPerformative suspend = await ReadUntilAsync<AmqpDetachPerformative>(peer, timeout.Token);
+        await peer.WriteFrameAsync(0, new AmqpDetachPerformative { Handle = 0, Closed = true }, timeout.Token);
+        await detach;
+        AmqpPerformative next = await ReadNextAfterEchoAsync(peer, timeout.Token);
+
+        // Assert: the next frame after the detaches is the echo, not an attach.
+        suspend.Closed.ShouldBeFalse();
+        next.ShouldBeOfType<AmqpFlowPerformative>().Handle.ShouldBeNull();
+        sender.LinkDetached.IsCancellationRequested.ShouldBeTrue();
+        session.SessionEnded.IsCancellationRequested.ShouldBeFalse();
+    }
+
+    /// <summary>
+    /// The peer attaches a sending link named <c>probe</c>; returns the first link request the session raises, which
+    /// is the probe's only when the session raised none before it.
+    /// </summary>
+    private static async Task<IAmqpLinkRequest> AcceptProbeAsync(AmqpTestPeer peer, IAmqpSession session, CancellationToken cancellationToken)
+    {
+        AmqpAttachPerformative probe = CreateSenderAttach(new AmqpTarget { Address = "queue" });
+
+        probe.Name = "probe";
+        probe.Handle = 7;
+        await peer.WriteFrameAsync(0, probe, cancellationToken);
+        return await session.AcceptLinkAsync(cancellationToken);
     }
 }

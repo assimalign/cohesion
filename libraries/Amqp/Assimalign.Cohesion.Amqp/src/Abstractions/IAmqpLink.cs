@@ -120,6 +120,11 @@ public interface IAmqpLink : IAsyncDisposable
     /// Without an error the link is suspended, and its unsettled deliveries stay live: a pending send still
     /// completes with the receiver's outcome, and a delivery taken from a receiver can still be settled (AMQP
     /// 1.0 Part 2, section 2.7.6). With an error they end, as they do when the link closes.
+    /// <para>
+    /// A peer whose answering <c>detach</c> closes the link closes it at both ends. When this end attached the
+    /// link, it attaches the link again and closes it (AMQP 1.0 Part 2, section 2.6.6), and the task completes
+    /// once that exchange ends.
+    /// </para>
     /// </remarks>
     ValueTask DetachAsync(AmqpError? error = null, CancellationToken cancellationToken = default);
 
@@ -130,5 +135,10 @@ public interface IAmqpLink : IAsyncDisposable
     /// <param name="error">The error to report to the peer, or <see langword="null"/>.</param>
     /// <param name="cancellationToken">A token that ends the wait for the peer's <c>detach</c>.</param>
     /// <returns>A task that completes when the link is closed.</returns>
+    /// <remarks>
+    /// A peer whose answering <c>detach</c> does not close the link attaches it again to close it (AMQP 1.0 Part 2,
+    /// section 2.6.6). The link keeps its name until then, and the task completes once that exchange ends or the
+    /// wait for it does.
+    /// </remarks>
     ValueTask CloseAsync(AmqpError? error = null, CancellationToken cancellationToken = default);
 }

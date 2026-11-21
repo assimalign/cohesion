@@ -30,8 +30,6 @@ internal static partial class AmqpComplianceMatrix
             WorkItem: "#1930"),
         new("G2", "An attach of a link the engine detached with an error must resume it with an unsettled map, and a pipelined re-attach without one ends the session with amqp:session:errant-link. The engine accepts it as a new attach.", "Part 2, sections 2.6.5 and 2.8.17",
             WorkItem: "#1931"),
-        new("G3", "When one end closes a link while the other suspends it, the end that suspended reattaches the link and then closes it. The engine takes either crossing detach as the answer to its own: it does not reattach to close a link it suspended, and a peer that reattaches to close a link the engine closed reaches the application as a new link request.", "Part 2, section 2.6.6",
-            WorkItem: "#1932"),
         new("G4", "A peer may open TLS in band, by sending the AMQP TLS header (protocol id 2) and starting the TLS handshake after it. The engine answers that header with the one it supports and closes (header-phase rule H3); TLS comes from the carrier instead, as the alternative establishment allows.", "Part 5, sections 5.2 and 5.2.1",
             WorkItem: "#1935")
     ];

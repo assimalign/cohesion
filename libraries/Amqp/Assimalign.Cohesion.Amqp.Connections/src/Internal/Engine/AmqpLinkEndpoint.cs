@@ -28,6 +28,13 @@ namespace Assimalign.Cohesion.Amqp.Connections.Internal;
 /// They end when the link closes or detaches with an error, when it attaches again under its name, or when
 /// the session ends.
 /// </para>
+/// <para>
+/// When one end closes the link while the other detaches it without closing, the end that did not close
+/// attaches the link again and then closes it (AMQP 1.0 Part 2, section 2.6.6). This endpoint attaches again only
+/// a link it attached itself, whose peer has shown it accepts the link's attach; a link the peer attached ends at
+/// the peer's closing detach. The link keeps its handle and name until that closing exchange ends. When this
+/// endpoint closed, it waits for the peer's attach for the close timeout, then releases them.
+/// </para>
 /// </remarks>
 [DebuggerDisplay("AmqpLink {Name,nq} ({Role}, {State})")]
 [DebuggerTypeProxy(typeof(DebugView))]
@@ -38,6 +45,7 @@ internal abstract class AmqpLinkEndpoint : IAmqpLink
     private readonly string _name;
     private readonly uint _handle;
     private readonly AmqpRole _role;
+    private readonly bool _initiatedLocally;
     private readonly TaskCompletionSource _attached;
     private readonly TaskCompletionSource _detached;
     private readonly CancellationTokenSource _detachedSource;
@@ -47,6 +55,7 @@ internal abstract class AmqpLinkEndpoint : IAmqpLink
     private AmqpException? _detachedException;
     private bool _stopped;
     private bool _keepsDeliveries;
+    private bool? _sentDetachClosed;
     private bool _closeWhenAttached;
     private AmqpSource? _localSource;
     private IAmqpTarget? _localTarget;
@@ -81,6 +90,7 @@ internal abstract class AmqpLinkEndpoint : IAmqpLink
         _senderSettleMode = options.SenderSettleMode;
         _receiverSettleMode = options.ReceiverSettleMode;
         _state = AmqpLinkState.AttachSent;
+        _initiatedLocally = true;
         ApplyLocalOptions(options);
     }
 
@@ -374,9 +384,55 @@ internal abstract class AmqpLinkEndpoint : IAmqpLink
                     _session.FailDeliveriesLocked(this, AmqpException.LinkDetached(detach.Error));
                 }
 
+                // One end closed the link while the other detached it without closing, so the end that did not
+                // close attaches the link again and closes it (AMQP 1.0 Part 2, section 2.6.6). That exchange
+                // happens once: a detach that follows it ends the link whatever it says. This endpoint attaches
+                // again only a link it attached itself, which the peer has shown it accepts: a peer that only
+                // initiates links can refuse an attach it did not ask for (AMQPNetLite closes the connection with
+                // amqp:not-found), so a link the peer attached ends at the peer's closing detach.
+                if (_sentDetachClosed is bool sentClosed && sentClosed != detach.Closed && (sentClosed || _initiatedLocally))
+                {
+                    _sentDetachClosed = null;
+                    _remoteHandle = null;
+
+                    if (sentClosed)
+                    {
+                        _state = AmqpLinkState.AwaitingReattach;
+                        _ = EndUnansweredCloseAsync();
+                    }
+                    else
+                    {
+                        WriteReattachLocked();
+                        _state = AmqpLinkState.ReattachSent;
+                    }
+
+                    break;
+                }
+
                 DetachedLocked(_detachedException ?? AmqpException.LinkDetached(detach.Error), _keepsDeliveries);
                 break;
         }
+    }
+
+    /// <summary>
+    /// Applies the peer's <c>attach</c> of a link whose detach crossed the peer's: the peer answers the attach this
+    /// endpoint sent to close the link, or attaches the link again to close it itself (AMQP 1.0 Part 2, section
+    /// 2.6.6). Either way this endpoint closes the link, and the peer's closing <c>detach</c> ends it. The session
+    /// already mapped the peer's handle.
+    /// </summary>
+    internal void OnReattachLocked(AmqpAttachPerformative attach)
+    {
+        Debug.Assert(_state is AmqpLinkState.ReattachSent or AmqpLinkState.AwaitingReattach);
+
+        _remoteHandle = attach.Handle;
+
+        if (_state == AmqpLinkState.AwaitingReattach)
+        {
+            WriteReattachLocked();
+        }
+
+        WriteDetachLocked(true, null);
+        _state = AmqpLinkState.DetachSent;
     }
 
     /// <summary>
@@ -435,6 +491,7 @@ internal abstract class AmqpLinkEndpoint : IAmqpLink
 
         WriteDetachLocked(closed, error);
         _state = AmqpLinkState.DetachSent;
+        _sentDetachClosed = closed;
         StopLocked(AmqpException.LinkDetached(error), IsSuspension(closed, error));
     }
 
@@ -539,11 +596,47 @@ internal abstract class AmqpLinkEndpoint : IAmqpLink
         catch (TimeoutException)
         {
             // The peer never answered. The link already stopped; its handle is released when the peer
-            // answers or the session ends.
+            // answers or the session ends. A close the peer answered without closing, and never followed with
+            // its attach, ends here.
+            lock (_sync)
+            {
+                EndUnansweredCloseLocked();
+            }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             // The token ends the wait only.
+        }
+    }
+
+    /// <summary>
+    /// Ends a close the peer answered with a detach that does not close the link, if the peer has not attached the
+    /// link again to close it once the close timeout passes.
+    /// </summary>
+    private async Task EndUnansweredCloseAsync()
+    {
+        try
+        {
+            await _detached.Task.WaitAsync(_session.CloseTimeout).ConfigureAwait(false);
+        }
+        catch (TimeoutException)
+        {
+            lock (_sync)
+            {
+                EndUnansweredCloseLocked();
+            }
+        }
+    }
+
+    /// <summary>
+    /// Ends a close that still waits for the peer's attach: the link's handle and name are released, and an attach
+    /// of its name that comes later is a new link.
+    /// </summary>
+    private void EndUnansweredCloseLocked()
+    {
+        if (_state == AmqpLinkState.AwaitingReattach)
+        {
+            DetachedLocked(GetDetachedExceptionLocked(), keepDeliveries: false);
         }
     }
 
@@ -589,6 +682,19 @@ internal abstract class AmqpLinkEndpoint : IAmqpLink
 
         _detached.TrySetResult();
         _session.OnLinkDetachedLocked(this);
+    }
+
+    /// <summary>
+    /// Writes the <c>attach</c> that reopens the link only to close it: its own termini on its own handle, which
+    /// its detach freed at the peer, and no unsettled map, because nothing on the link is resumed.
+    /// </summary>
+    private void WriteReattachLocked()
+    {
+        AmqpAttachPerformative attach = CreateAttach(_localSource, _localTarget);
+
+        attach.Unsettled = null;
+        attach.IncompleteUnsettled = false;
+        _session.WriteFrameLocked(attach);
     }
 
     private void WriteRefusalLocked()
@@ -796,6 +902,18 @@ internal enum AmqpLinkState
     /// The link sent <c>detach</c> and waits for the peer's.
     /// </summary>
     DetachSent,
+
+    /// <summary>
+    /// The link detached without closing while the peer closed it, so it sent <c>attach</c> again to close it and
+    /// waits for the peer's answer (AMQP 1.0 Part 2, section 2.6.6).
+    /// </summary>
+    ReattachSent,
+
+    /// <summary>
+    /// The link closed while the peer detached it without closing, so it waits for the peer to attach it again and
+    /// close it (AMQP 1.0 Part 2, section 2.6.6), for the close timeout at most.
+    /// </summary>
+    AwaitingReattach,
 
     /// <summary>
     /// Both peers detached the link, or its session stopped.

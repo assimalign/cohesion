@@ -883,12 +883,19 @@ internal sealed class AmqpSessionEndpoint : IAmqpSession
 
         if (_linksByName.TryGetValue((attach.Name, role), out AmqpLinkEndpoint? link))
         {
-            if (link.State == AmqpLinkState.AttachSent)
+            switch (link.State)
             {
-                // The peer answers a link this endpoint attached, or attached the same link at the same time.
-                _remoteLinks.Add(attach.Handle, link);
-                link.OnAttachAnsweredLocked(attach);
-                return;
+                case AmqpLinkState.AttachSent:
+                    // The peer answers a link this endpoint attached, or attached the same link at the same time.
+                    _remoteLinks.Add(attach.Handle, link);
+                    link.OnAttachAnsweredLocked(attach);
+                    return;
+                case AmqpLinkState.ReattachSent or AmqpLinkState.AwaitingReattach:
+                    // The peer answers, or sends, the attach that closes a link whose detach crossed the peer's
+                    // (AMQP 1.0 Part 2, section 2.6.6): it ends the close, not a new link.
+                    _remoteLinks.Add(attach.Handle, link);
+                    link.OnReattachLocked(attach);
+                    return;
             }
 
             // Names identify links between the two containers, so a second link of the same name and

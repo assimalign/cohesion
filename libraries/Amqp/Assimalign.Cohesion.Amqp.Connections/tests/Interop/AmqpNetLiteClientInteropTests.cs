@@ -862,6 +862,42 @@ public sealed class AmqpNetLiteClientInteropTests : IDisposable
         await peer.CloseAsync();
     }
 
+    [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - Interop DetachAsync: Should end an AMQPNetLite link at the closing detach that answers its suspending one, and keep the connection")]
+    public async Task DetachAsync_OnNetLiteClientLink_ShouldEndItAndKeepTheConnection()
+    {
+        // Arrange
+        using CancellationTokenSource timeout = new(_testTimeout);
+        await using AmqpInteropBroker broker = await AmqpInteropBroker.StartAsync(null, timeout.Token);
+        (IAmqpConnection server, NetLite.Connection peer) = await ConnectAsync(broker, timeout.Token);
+        await using IAmqpConnection serverConnection = server;
+        Task<IAmqpSession> accept = AcceptSessionWithPeerAsync(server, peer, out NetLite.Session peerSession, timeout.Token);
+        NetLite.ReceiverLink suspended = new(peerSession, "suspend-receiver", "suspend");
+        IAmqpSession session = await accept;
+        IAmqpSender sender = await AcceptSenderAsync(session, null, timeout.Token);
+
+        // Act: AMQPNetLite answers the broker's suspending detach by closing its link. A second link then shows the
+        // connection and the session still carry links: AMQPNetLite closes the connection on an attach it did not
+        // ask for, so a broker that attached the link again to close it would end both.
+        await sender.DetachAsync(cancellationToken: timeout.Token);
+        Task<IAmqpSender> attach = AcceptSenderAsync(session, null, timeout.Token);
+        NetLite.ReceiverLink peerReceiver = new(peerSession, "after-receiver", "after");
+        IAmqpSender after = await attach;
+        Task<AmqpDeliveryState?> send = after.SendAsync(new AmqpMessage { Body = new AmqpValueBody("after") }, cancellationToken: timeout.Token).AsTask();
+        NetLite.Message message = (await peerReceiver.ReceiveAsync(_peerTimeout)).ShouldNotBeNull();
+        peerReceiver.Accept(message);
+        AmqpDeliveryState? state = await send.WaitAsync(timeout.Token);
+
+        // Assert: the client's view: its attach and the broker's answer, the broker's suspending detach and the
+        // client's closing answer, then the second link's attaches, with no attach from the broker in between.
+        _trace.LinkFrames.ShouldBe(["SEND attach", "RECV attach", "RECV detach", "SEND detach closed", "SEND attach", "RECV attach"]);
+        suspended.IsClosed.ShouldBeTrue();
+        message.Body.ShouldBe("after");
+        state.ShouldBeOfType<AmqpAccepted>();
+        server.ConnectionClosed.IsCancellationRequested.ShouldBeFalse();
+
+        await peer.CloseAsync();
+    }
+
     [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - Interop IdleTimeout: Should keep an idle connection to AMQPNetLite open with empty frames")]
     public async Task IdleTimeout_DeclaredByBothEnds_ShouldKeepAnIdleConnectionOpen()
     {

@@ -99,7 +99,9 @@ flowchart TD
   `LinkDetached` and fails every operation waiting on that object with the matching
   `AmqpErrorCode`; ending a connection ends its sessions, and ending a session detaches its links.
   The one exception is a suspended link's unsettled deliveries, which stay live (see "Resuming a
-  link").
+  link"). When one end closes a link while the other suspends it, the link still ends closed (Part 2
+  §2.6.6), and the waiting call completes once that closing exchange ends; the engine's design says
+  which end attaches the link again to close it.
 - **Remote state is read-only.** What the peer announced (capabilities, properties, container id,
   maximum message size, unsettled map) is exposed on each object as `Remote*` properties; what the
   local end announces is set through options before the performative is sent.
