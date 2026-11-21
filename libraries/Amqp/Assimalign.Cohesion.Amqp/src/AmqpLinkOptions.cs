@@ -84,6 +84,11 @@ public abstract class AmqpLinkOptions
     /// <see langword="null"/> for no limit. A receiver detaches the link with
     /// <see cref="AmqpErrorCondition.MessageSizeExceeded"/> when a larger delivery arrives.
     /// </summary>
+    /// <remarks>
+    /// Defaults to 16 MiB (16,777,216 bytes) for <see cref="AmqpReceiverOptions"/>, which a link the peer attaches
+    /// also takes when the application answers it without options, and to <see langword="null"/> for
+    /// <see cref="AmqpSenderOptions"/>, whose value only tells the peer what the sender accepts.
+    /// </remarks>
     /// <exception cref="ArgumentOutOfRangeException">Thrown when the assigned value is zero; use <see langword="null"/> for no limit.</exception>
     public ulong? MaxMessageSize
     {

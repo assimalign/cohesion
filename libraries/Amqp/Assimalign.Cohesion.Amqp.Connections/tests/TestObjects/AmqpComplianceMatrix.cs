@@ -34,8 +34,6 @@ internal static partial class AmqpComplianceMatrix
             WorkItem: "#1932"),
         new("G4", "A peer may open TLS in band, by sending the AMQP TLS header (protocol id 2) and starting the TLS handshake after it. The engine answers that header with the one it supports and closes (header-phase rule H3); TLS comes from the carrier instead, as the alternative establishment allows.", "Part 5, sections 5.2 and 5.2.1",
             WorkItem: "#1935"),
-        new("G5", "A peer that sends past the incoming window the engine granted breaks the session with amqp:session:window-violation. The engine widens its window at half use as transfers arrive, so it never sees the window run out: what it buffers is bounded by link credit and a receiver's max-message-size, and max-message-size has no default.", "Part 2, sections 2.5.6 and 2.8.17",
-            WorkItem: "#1934"),
         new("G6", "A delivery on a link detached without closing and without an error stays live, and a disposition that names it is applied. The engine fails a suspended link's deliveries when the link detaches and passes over a later disposition for them; resuming the link reconciles their state through the unsettled maps instead.", "Part 2, section 2.7.6",
             WorkItem: "#1933")
     ];

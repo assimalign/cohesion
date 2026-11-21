@@ -65,12 +65,8 @@ public class AmqpSessionComplianceTests
                 nameof(AmqpEngineViolationTests.OnFlow_OnUnattachedHandle_ShouldEndSessionWithUnattachedHandle),
                 nameof(AmqpEngineViolationTests.OnDetach_OnUnattachedHandle_ShouldEndSessionWithUnattachedHandle)
             ]),
-        new("S8", "Each transfer takes a place in the receiving session's incoming window: the engine sends no transfer while the peer's window is closed and waits for a flow that opens it, and widens its own window with a flow once half of it is used.", "Part 2, section 2.5.6",
-            Tests:
-            [
-                nameof(SendAsync_OnClosedRemoteIncomingWindow_ShouldWaitForFlow),
-                nameof(OnTransfer_OnHalfIncomingWindowUsed_ShouldWidenItWithFlow)
-            ],
+        new("S8", "Each transfer takes a place in the receiving session's incoming window: the engine sends no transfer while the peer's window is closed and waits for a flow that opens it.", "Part 2, section 2.5.6",
+            Tests: [nameof(SendAsync_OnClosedRemoteIncomingWindow_ShouldWaitForFlow)],
             Refusals: []),
         new("S9", "A session ends with an end from each end: the engine answers a peer's end, and an end it sends completes when the peer's end arrives.", "Part 2, sections 2.5.2 and 2.7.8",
             Tests: [nameof(AmqpConnectionTests.EndAsync_OnSession_ShouldEndPeerSessionAndDetachLinks)],
@@ -80,7 +76,16 @@ public class AmqpSessionComplianceTests
             Refusals: []),
         new("S11", "A session that ends with an error discards every frame the peer sends on it until the peer's end, then frees its channel.", "Part 2, section 2.5.4",
             Tests: [nameof(OnEnd_AfterSessionError_ShouldDiscardFramesUntilThePeerEnds)],
-            Refusals: [])
+            Refusals: []),
+        new("S12", "The engine's incoming window bounds what its session holds: a frame keeps its place until the application takes the delivery it belongs to or that delivery's link stops, a frame the session keeps nothing of frees its place at once, and the frames of a delivery still being reassembled hold none, so a delivery larger than the window completes. The engine restores the window with a flow once half of it is free, never shrinks what it granted, and ends the session with amqp:session:window-violation when the peer sends past it.", "Part 2, sections 2.5.6 and 2.8.17",
+            Tests:
+            [
+                nameof(ReceiveAsync_OnHalfIncomingWindowTaken_ShouldRestoreItWithFlow),
+                nameof(ReceiveAsync_OnSlowConsumer_ShouldKeepIncomingWindowClosedUntilItTakesDeliveries),
+                nameof(OnTransfer_OnDeliveryLargerThanIncomingWindow_ShouldCompleteIt),
+                nameof(DetachAsync_OnReceiverHoldingIncomingWindow_ShouldGiveItsPlacesBack)
+            ],
+            Refusals: [nameof(OnTransfer_PastIncomingWindow_ShouldEndSessionWithWindowViolation)])
     ];
 
     [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - OnBegin: Should close the connection when a begin answers a begin the engine never sent")]
@@ -195,8 +200,8 @@ public class AmqpSessionComplianceTests
         afterFlow.DeliveryId.ShouldBe(first.DeliveryId + 1);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - OnTransfer: Should widen the session's incoming window with a flow once half of it is used")]
-    public async Task OnTransfer_OnHalfIncomingWindowUsed_ShouldWidenItWithFlow()
+    [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - ReceiveAsync: Should restore the session's incoming window with a flow once the application took half of it")]
+    public async Task ReceiveAsync_OnHalfIncomingWindowTaken_ShouldRestoreItWithFlow()
     {
         // Arrange
         using CancellationTokenSource timeout = new(_testTimeout);
@@ -205,17 +210,133 @@ public class AmqpSessionComplianceTests
         AmqpTestPeer peer = host.Peer;
         AmqpBeginPerformative engineBegin = await peer.BeginAsync(null, timeout.Token);
         IAmqpSession session = await host.Connection.AcceptSessionAsync(timeout.Token);
-        await AttachPeerSenderAsync(peer, session, new AmqpTarget { Address = "queue" }, null, timeout.Token);
+        IAmqpReceiver receiver = await AttachPeerSenderAsync(peer, session, new AmqpTarget { Address = "queue" }, null, timeout.Token);
 
-        // Act: the peer's begin counts transfers from 1, and two of them use half the window.
+        // Act: the peer's begin counts transfers from 1, and two deliveries the application has not taken hold half
+        // the window.
         await peer.WriteFrameAsync(0, CreateTransfer(deliveryId: 0, settled: true), timeout.Token, payload: _payload);
         await peer.WriteFrameAsync(0, CreateTransfer(deliveryId: 1, settled: true), timeout.Token, payload: _payload);
-        AmqpFlowPerformative widened = await ReadSessionFlowAsync(peer, timeout.Token);
+        AmqpFlowPerformative beforeTaking = await EchoSessionFlowAsync(peer, timeout.Token);
+        await receiver.ReceiveAsync(timeout.Token);
+        await receiver.ReceiveAsync(timeout.Token);
+        AmqpFlowPerformative restored = await ReadSessionFlowAsync(peer, timeout.Token);
 
-        // Assert: the first session flow follows the second transfer, not the first.
+        // Assert: the window stayed half used until the application took both deliveries.
         engineBegin.IncomingWindow.ShouldBe(4u);
-        widened.NextIncomingId.ShouldBe(3u);
-        widened.IncomingWindow.ShouldBe(4u);
+        beforeTaking.NextIncomingId.ShouldBe(3u);
+        beforeTaking.IncomingWindow.ShouldBe(2u);
+        restored.NextIncomingId.ShouldBe(3u);
+        restored.IncomingWindow.ShouldBe(4u);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - ReceiveAsync: Should keep the session's incoming window closed until the application takes a delivery")]
+    public async Task ReceiveAsync_OnSlowConsumer_ShouldKeepIncomingWindowClosedUntilItTakesDeliveries()
+    {
+        // Arrange
+        using CancellationTokenSource timeout = new(_testTimeout);
+        AmqpConnectionListenerOptions options = new() { SessionOptions = new AmqpSessionOptions { IncomingWindow = 2 } };
+        await using AmqpScriptedHost host = await AmqpScriptedHost.AcceptAsync(options, null, timeout.Token);
+        AmqpTestPeer peer = host.Peer;
+        IAmqpSession session = await BeginAsync(host, timeout.Token);
+        IAmqpReceiver receiver = await AttachPeerSenderAsync(peer, session, new AmqpTarget { Address = "queue" }, null, timeout.Token);
+
+        // Act: two deliveries fill the window, and the application is slow to take them.
+        await peer.WriteFrameAsync(0, CreateTransfer(deliveryId: 0, settled: true), timeout.Token, payload: _payload);
+        await peer.WriteFrameAsync(0, CreateTransfer(deliveryId: 1, settled: true), timeout.Token, payload: _payload);
+        await Task.Delay(100, timeout.Token);
+        AmqpFlowPerformative whileUntaken = await EchoSessionFlowAsync(peer, timeout.Token);
+        IAmqpDelivery first = await receiver.ReceiveAsync(timeout.Token);
+        AmqpFlowPerformative afterTaking = await ReadSessionFlowAsync(peer, timeout.Token);
+
+        // Assert: taking one delivery frees half the window.
+        whileUntaken.NextIncomingId.ShouldBe(3u);
+        whileUntaken.IncomingWindow.ShouldBe(0u);
+        first.Payload.ToArray().ShouldBe(_payload);
+        afterTaking.NextIncomingId.ShouldBe(3u);
+        afterTaking.IncomingWindow.ShouldBe(1u);
+        session.SessionEnded.IsCancellationRequested.ShouldBeFalse();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - OnTransfer: Should complete a delivery of more frames than the session's incoming window")]
+    public async Task OnTransfer_OnDeliveryLargerThanIncomingWindow_ShouldCompleteIt()
+    {
+        // Arrange
+        using CancellationTokenSource timeout = new(_testTimeout);
+        AmqpConnectionListenerOptions options = new() { SessionOptions = new AmqpSessionOptions { IncomingWindow = 2 } };
+        await using AmqpScriptedHost host = await AmqpScriptedHost.AcceptAsync(options, null, timeout.Token);
+        AmqpTestPeer peer = host.Peer;
+        IAmqpSession session = await BeginAsync(host, timeout.Token);
+        IAmqpReceiver receiver = await AttachPeerSenderAsync(peer, session, new AmqpTarget { Address = "queue" }, null, timeout.Token);
+        List<uint> windows = [];
+
+        // Act: the peer keeps to the window, sending each frame of five only once a flow lets it.
+        await peer.WriteFrameAsync(0, First(CreateTransfer(deliveryId: 0, settled: true)), timeout.Token, payload: new byte[] { 0 });
+
+        for (byte index = 1; index < 5; index++)
+        {
+            windows.Add((await ReadSessionFlowAsync(peer, timeout.Token)).IncomingWindow);
+            await peer.WriteFrameAsync(0, Continuation(more: index < 4), timeout.Token, payload: new byte[] { index });
+        }
+
+        IAmqpDelivery delivery = await receiver.ReceiveAsync(timeout.Token);
+
+        // Assert: the frames of the delivery held no place until it was complete.
+        windows.ShouldBe([2u, 2u, 2u, 2u]);
+        delivery.Payload.ToArray().ShouldBe(new byte[] { 0, 1, 2, 3, 4 });
+        session.SessionEnded.IsCancellationRequested.ShouldBeFalse();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - DetachAsync: Should give back the places in the session's incoming window that a detached receiver's deliveries held")]
+    public async Task DetachAsync_OnReceiverHoldingIncomingWindow_ShouldGiveItsPlacesBack()
+    {
+        // Arrange: two deliveries the application has not taken close the window.
+        using CancellationTokenSource timeout = new(_testTimeout);
+        AmqpConnectionListenerOptions options = new() { SessionOptions = new AmqpSessionOptions { IncomingWindow = 2 } };
+        await using AmqpScriptedHost host = await AmqpScriptedHost.AcceptAsync(options, null, timeout.Token);
+        AmqpTestPeer peer = host.Peer;
+        IAmqpSession session = await BeginAsync(host, timeout.Token);
+        IAmqpReceiver receiver = await AttachPeerSenderAsync(peer, session, new AmqpTarget { Address = "queue" }, null, timeout.Token);
+        await peer.WriteFrameAsync(0, CreateTransfer(deliveryId: 0, settled: true), timeout.Token, payload: _payload);
+        await peer.WriteFrameAsync(0, CreateTransfer(deliveryId: 1, settled: true), timeout.Token, payload: _payload);
+        await SyncAsync(peer, timeout.Token);
+
+        // Act
+        Task detach = receiver.DetachAsync(cancellationToken: timeout.Token).AsTask();
+        AmqpDetachPerformative engineDetach = await ReadUntilAsync<AmqpDetachPerformative>(peer, timeout.Token);
+        AmqpFlowPerformative restored = await ReadSessionFlowAsync(peer, timeout.Token);
+        await peer.WriteFrameAsync(0, new AmqpDetachPerformative { Handle = 0 }, timeout.Token);
+        await detach;
+
+        // Assert: what the detached link still buffers can be taken, but holds the window no longer.
+        engineDetach.Closed.ShouldBeFalse();
+        restored.IncomingWindow.ShouldBe(2u);
+        receiver.TryReceive(out IAmqpDelivery? buffered).ShouldBeTrue();
+        buffered.ShouldNotBeNull().Payload.ToArray().ShouldBe(_payload);
+        session.SessionEnded.IsCancellationRequested.ShouldBeFalse();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - OnTransfer: Should end the session with amqp:session:window-violation when the peer sends past the incoming window")]
+    public async Task OnTransfer_PastIncomingWindow_ShouldEndSessionWithWindowViolation()
+    {
+        // Arrange
+        using CancellationTokenSource timeout = new(_testTimeout);
+        AmqpConnectionListenerOptions options = new() { SessionOptions = new AmqpSessionOptions { IncomingWindow = 2 } };
+        await using AmqpScriptedHost host = await AmqpScriptedHost.AcceptAsync(options, null, timeout.Token);
+        AmqpTestPeer peer = host.Peer;
+        IAmqpSession session = await BeginAsync(host, timeout.Token);
+        await AttachPeerSenderAsync(peer, session, new AmqpTarget { Address = "queue" }, null, timeout.Token);
+
+        // Act: the peer ignores the window and sends a third delivery while the first two are untaken.
+        await peer.WriteFrameAsync(0, CreateTransfer(deliveryId: 0, settled: true), timeout.Token, payload: _payload);
+        await peer.WriteFrameAsync(0, CreateTransfer(deliveryId: 1, settled: true), timeout.Token, payload: _payload);
+        await peer.WriteFrameAsync(0, CreateTransfer(deliveryId: 2, settled: true), timeout.Token, payload: _payload);
+        AmqpEndPerformative end = await ReadUntilAsync<AmqpEndPerformative>(peer, timeout.Token);
+
+        // Assert
+        end.Error.ShouldNotBeNull().Condition.ShouldBe(AmqpErrorCondition.WindowViolation);
+        end.Error.Description.ShouldBe(ErrorMessages.WindowViolation);
+        session.SessionEnded.IsCancellationRequested.ShouldBeTrue();
+        host.Connection.State.ShouldBe(ConnectionState.Open);
     }
 
     [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - EndAsync: Should take an end the peer sent at the same time as the answer to its own")]
@@ -268,6 +389,18 @@ public class AmqpSessionComplianceTests
         answer.Header.Channel.ShouldBe((ushort)0);
         session.SessionEnded.IsCancellationRequested.ShouldBeTrue();
         host.Connection.State.ShouldBe(ConnectionState.Open);
+    }
+
+    /// <summary>
+    /// Writes a session <c>flow</c> that asks for an echo and returns the first session <c>flow</c> the engine writes
+    /// from then on, skipping the links': the echo, which the engine writes once it applied every frame before it,
+    /// unless it restored its incoming window first.
+    /// </summary>
+    private static async Task<AmqpFlowPerformative> EchoSessionFlowAsync(AmqpTestPeer peer, CancellationToken cancellationToken)
+    {
+        await peer.WriteFrameAsync(0, new AmqpFlowPerformative { IncomingWindow = 100, NextOutgoingId = 1, OutgoingWindow = 100, Echo = true }, cancellationToken);
+
+        return await ReadSessionFlowAsync(peer, cancellationToken);
     }
 
     /// <summary>

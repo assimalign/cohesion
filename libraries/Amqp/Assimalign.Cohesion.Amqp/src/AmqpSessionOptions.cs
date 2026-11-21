@@ -25,14 +25,23 @@ public sealed class AmqpSessionOptions
     }
 
     /// <summary>
-    /// Gets or sets how many <c>transfer</c> frames the peer may send before the session grants more.
-    /// Defaults to 2,048.
+    /// Gets or sets how many <c>transfer</c> frames the session holds or lets the peer send before it grants
+    /// more. Defaults to 2,048.
     /// </summary>
     /// <remarks>
-    /// The session restores the window once half of it is used, as transfers arrive and whether or not the
-    /// application has taken them, so the value bounds the frames in flight between two of the session's
-    /// <c>flow</c> frames, not the frames in total, and not what the session holds: link credit and each
-    /// receiver's <see cref="AmqpLinkOptions.MaxMessageSize"/> bound that.
+    /// <para>
+    /// A frame keeps its place in the window until the application takes the delivery it belongs to, or until
+    /// that delivery's link stops; a frame the session keeps nothing of, such as one of an aborted delivery,
+    /// frees its place at once. The session restores the window with a <c>flow</c> once half of it is free, and
+    /// ends with <see cref="AmqpErrorCondition.WindowViolation"/> when the peer sends past what it granted.
+    /// </para>
+    /// <para>
+    /// The window is shared by every link on the session, so a receiver whose deliveries the application does not
+    /// take holds back the others. The frames of a delivery still being reassembled hold no place, or a delivery
+    /// larger than the window could never complete; each receiver's <see cref="AmqpLinkOptions.MaxMessageSize"/>
+    /// bounds it instead. What the session buffers is therefore bounded by this value times the connection's
+    /// maximum frame size, plus one delivery of up to its link's maximum message size for each receiver.
+    /// </para>
     /// </remarks>
     /// <exception cref="ArgumentOutOfRangeException">Thrown when the assigned value is zero.</exception>
     public uint IncomingWindow

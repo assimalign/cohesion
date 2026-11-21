@@ -293,12 +293,21 @@ sequenceDiagram
   peer's answering `begin`; a session the peer begins is answered at once and handed to
   `AcceptSessionAsync`. It stops carrying links as soon as either peer sends `end`, and has ended
   once both have.
-- **The incoming window is refilled at half.** The engine declares `AmqpSessionOptions.IncomingWindow`
-  (2,048 by default) and sends a `flow` that restores it once half is used, as transfers arrive and
-  whether or not the application has taken them. The window paces the peer between two `flow`
-  frames; it does not bound what the session holds, which link credit and each receiver's
-  `MaxMessageSize` do. Because the engine restores it before it runs out, it never refuses a peer
-  with `amqp:session:window-violation` (gap G5, #1934).
+- **The incoming window bounds what the session holds.** The engine declares
+  `AmqpSessionOptions.IncomingWindow` (2,048 by default). A frame keeps its place in the window
+  until the application takes the delivery it belongs to, or that delivery's link stops; a frame
+  the session keeps nothing of, such as one of an aborted or ignored delivery, frees its place at
+  once. The engine sends a `flow` that restores the window once half of it is free, never shrinks
+  what it granted, and ends the session with `amqp:session:window-violation` when the peer sends
+  past it (S12, #1934). Until 2026-11 it restored the window at half use as transfers arrived, so
+  the window never closed and the violation was unreachable.
+- **A delivery being reassembled holds no place.** If its frames held places, a delivery larger
+  than the window could never complete, so its link's `MaxMessageSize` bounds it instead, 16 MiB
+  for a receiver by default. What a session buffers is therefore at most `IncomingWindow` times
+  the connection's own maximum frame size, plus one delivery of up to its link's `MaxMessageSize`
+  for each receiver. The window is shared, so a receiver whose deliveries the application leaves
+  untaken holds back every link on the session: an application that waits on one receiver while
+  another fills the window stalls, and gives such receivers sessions of their own.
 - **The engine never limits itself by an outgoing window.** It declares `int.MaxValue`, the largest
   value peers that read the field as signed still accept, and sends within the peer's incoming
   window.
@@ -372,7 +381,7 @@ deleting one breaks the build. Rules that record a leniency say so.
 | Termini | `AmqpTerminusComplianceTests` over `AmqpTerminusCorpus` | T1 to T10 | terminus defaults, dynamic nodes and their owner, node properties, filters, durability, expiry, default outcomes |
 | Performatives | `AmqpPerformativeTests` | P1 to P8 | field order and defaults, mandatory fields, descriptors, restricted values, multiple-valued fields, delivery tags, errors, a zero `max-message-size` |
 | Connection | `AmqpConnectionComplianceTests` | C1 to C8 | the negotiated frame size and channels, a frame too large to write, what may follow `open`, closing and crossed closes, a carrier that ends first, idle timeouts |
-| Session | `AmqpSessionComplianceTests` | S1 to S11 | beginning on a channel, channel and handle limits, handles in use and unattached, the incoming window, ending, crossed ends, ending with an error |
+| Session | `AmqpSessionComplianceTests` | S1 to S12 | beginning on a channel, channel and handle limits, handles in use and unattached, the incoming window and what it holds, ending, crossed ends, ending with an error |
 | Link | `AmqpLinkComplianceTests` | L1 to L11 | attaching with roles and handles, link names, contradictory attaches, refusing a link, closing and suspending, link errors, who may transfer, flow echoes |
 | Transfer | `AmqpTransferComplianceTests` | F1 to F20 | splitting and reassembly, settlement on frames, aborts, malformed fragmentation, terminal outcomes, credit and drains |
 | Settlement | `AmqpSettlementComplianceTests` | DS1 to DS6 | terminal outcomes, sender and receiver settle modes, disposition ranges and the deliveries they cover |
@@ -454,7 +463,6 @@ engine holds the rule, the rule moves into a map with its tests.
 | G2 | An attach of a link detached with an error must resume it with an unsettled map, and a pipelined re-attach without one ends the session with `amqp:session:errant-link` (Part 2 §2.6.5 and §2.8.17). | Accepts it as a new attach. | #1931 |
 | G3 | When one end closes a link while the other suspends it, the end that suspended reattaches the link and then closes it (Part 2 §2.6.6). | Takes either crossing `detach` as the answer to its own: it does not reattach to close a link it suspended, and a peer that reattaches to close a link the engine closed reaches the application as a new link request. | #1932 |
 | G4 | A peer may open TLS in band, with the AMQP TLS header (protocol id 2) and the TLS handshake after it (Part 5 §5.2 and §5.2.1). | Answers that header with the one it supports and closes (H3). TLS comes from the carrier instead, the alternative establishment §5.2.1 allows. | #1935 |
-| G5 | A peer that sends past the incoming window breaks the session with `amqp:session:window-violation` (Part 2 §2.5.6 and §2.8.17). | Widens its window at half use as transfers arrive (S8), so it never sees the window run out. What it buffers is bounded by link credit and a receiver's `MaxMessageSize`, which has no default. | #1934 |
 | G6 | A delivery on a link detached without closing and without an error stays live, and a disposition that names it applies (Part 2 §2.7.6). | Fails a suspended link's deliveries when the link detaches and passes over a later disposition for them. Resuming the link reconciles their state through the unsettled maps instead. | #1933 |
 
 ## Regression register (#433)

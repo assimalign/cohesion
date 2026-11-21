@@ -80,11 +80,17 @@ internal abstract class AmqpLinkEndpoint : IAmqpLink
     /// <summary>
     /// Creates the endpoint of a link the peer attaches, which the application has yet to answer.
     /// </summary>
-    private protected AmqpLinkEndpoint(AmqpSessionEndpoint session, uint handle, AmqpRole role, AmqpAttachPerformative attach)
+    /// <param name="session">The session the link is attached on.</param>
+    /// <param name="handle">The local handle the link takes.</param>
+    /// <param name="role">The local role.</param>
+    /// <param name="attach">The peer's <c>attach</c>.</param>
+    /// <param name="localMaxMessageSize">The largest message the local endpoint accepts until the application answers with options of its own, or <see langword="null"/> for no limit.</param>
+    private protected AmqpLinkEndpoint(AmqpSessionEndpoint session, uint handle, AmqpRole role, AmqpAttachPerformative attach, ulong? localMaxMessageSize)
         : this(session, handle, attach.Name, role)
     {
         // Until the application answers, the peer's proposal stands for both settlement modes.
         _remoteHandle = attach.Handle;
+        _localMaxMessageSize = localMaxMessageSize;
         _senderSettleMode = attach.SenderSettleMode;
         _receiverSettleMode = attach.ReceiverSettleMode;
         _state = AmqpLinkState.RemoteAttached;

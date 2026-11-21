@@ -24,6 +24,11 @@ public class AmqpTransferComplianceTests
 {
     private static readonly TimeSpan _testTimeout = TimeSpan.FromSeconds(10);
 
+    // The max-message-size a receiver declares unless the application sets another, and the payload of each frame
+    // the tests split a delivery that large into.
+    private const int _defaultMaxMessageSize = 16 * 1024 * 1024;
+    private const int _frameSize = 128 * 1024;
+
     public static TheoryData<string> DeliveryFields => new() { "delivery-id", "delivery-tag" };
 
     public static TheoryData<string> ChangedFields => new() { "delivery-id", "delivery-tag", "message-format" };
@@ -59,12 +64,17 @@ public class AmqpTransferComplianceTests
         new("F6", "Each delivery takes one unit of link credit, with its first frame: a receiver detaches a link whose sender starts a delivery without credit with amqp:transfer-limit-exceeded.", "Part 2, section 2.6.7",
             Tests: [nameof(OnTransfer_OnSplitDelivery_ShouldTakeOneUnitOfCredit)],
             Refusals: [nameof(AmqpEngineViolationTests.OnTransfer_WithoutCredit_ShouldDetachWithTransferLimitExceeded)]),
-        new("F7", "A receiver measures a delivery across its frames against its max-message-size, and detaches the link with amqp:message-size-exceeded once the delivery grows past it.", "Part 2, section 2.7.3",
-            Tests: [nameof(OnTransfer_OnSplitDeliveryAtMaxMessageSize_ShouldDeliverIt)],
+        new("F7", "A receiver measures a delivery across its frames against its max-message-size, 16 MiB unless the application sets another or none, which its attach declares; it detaches the link with amqp:message-size-exceeded once the delivery grows past it.", "Part 2, section 2.7.3",
+            Tests:
+            [
+                nameof(OnTransfer_OnSplitDeliveryAtMaxMessageSize_ShouldDeliverIt),
+                nameof(OnTransfer_OnDeliveryAtDefaultMaxMessageSize_ShouldDeliverIt)
+            ],
             Refusals:
             [
                 nameof(OnTransfer_OnSplitDeliveryAboveMaxMessageSize_ShouldDetachWithMessageSizeExceeded),
-                nameof(AmqpEngineViolationTests.OnTransfer_AboveMaxMessageSize_ShouldDetachWithMessageSizeExceeded)
+                nameof(AmqpEngineViolationTests.OnTransfer_AboveMaxMessageSize_ShouldDetachWithMessageSizeExceeded),
+                nameof(OnTransfer_OnDeliveryAboveDefaultMaxMessageSize_ShouldDetachWithMessageSizeExceeded)
             ]),
         new("F8", "An aborted delivery is discarded and settled implicitly: the aborting frame's payload is ignored, nothing reaches the application or stays buffered, the delivery's credit stays spent, and the link keeps receiving.", "Part 2, sections 2.6.14 and 2.7.5",
             Tests:
@@ -369,6 +379,44 @@ public class AmqpTransferComplianceTests
 
         // Act
         await peer.WriteFrameAsync(0, Continuation(), timeout.Token, payload: new byte[10]);
+        AmqpDetachPerformative detach = await ReadUntilAsync<AmqpDetachPerformative>(peer, timeout.Token);
+
+        // Assert
+        detach.Error.ShouldNotBeNull().Condition.ShouldBe(AmqpErrorCondition.MessageSizeExceeded);
+        receiver.TryReceive(out _).ShouldBeFalse();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - OnTransfer: Should deliver a delivery of 16 MiB, the default max-message-size a receiver answered without options declares")]
+    public async Task OnTransfer_OnDeliveryAtDefaultMaxMessageSize_ShouldDeliverIt()
+    {
+        // Arrange
+        using CancellationTokenSource timeout = new(_testTimeout);
+        await using AmqpScriptedHost host = await AmqpScriptedHost.AcceptAsync(cancellationToken: timeout.Token);
+        AmqpTestPeer peer = host.Peer;
+        (IAmqpReceiver receiver, AmqpAttachPerformative answer) = await AttachReceiverWithoutOptionsAsync(host, timeout.Token);
+
+        // Act: 128 frames of 128 KiB.
+        await WriteDeliveryAsync(peer, _defaultMaxMessageSize, timeout.Token);
+        IAmqpDelivery delivery = await receiver.ReceiveAsync(timeout.Token);
+
+        // Assert
+        answer.MaxMessageSize.ShouldBe((ulong)_defaultMaxMessageSize);
+        delivery.Payload.Length.ShouldBe(_defaultMaxMessageSize);
+        delivery.Payload.Span[^1].ShouldBe((byte)(_defaultMaxMessageSize / _frameSize));
+        receiver.LinkDetached.IsCancellationRequested.ShouldBeFalse();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - OnTransfer: Should detach a receiver answered without options with amqp:message-size-exceeded once a delivery grows past 16 MiB")]
+    public async Task OnTransfer_OnDeliveryAboveDefaultMaxMessageSize_ShouldDetachWithMessageSizeExceeded()
+    {
+        // Arrange
+        using CancellationTokenSource timeout = new(_testTimeout);
+        await using AmqpScriptedHost host = await AmqpScriptedHost.AcceptAsync(cancellationToken: timeout.Token);
+        AmqpTestPeer peer = host.Peer;
+        (IAmqpReceiver receiver, _) = await AttachReceiverWithoutOptionsAsync(host, timeout.Token);
+
+        // Act: one byte past the limit, in a frame of its own.
+        await WriteDeliveryAsync(peer, _defaultMaxMessageSize + 1, timeout.Token);
         AmqpDetachPerformative detach = await ReadUntilAsync<AmqpDetachPerformative>(peer, timeout.Token);
 
         // Assert
@@ -914,5 +962,41 @@ public class AmqpTransferComplianceTests
         IAmqpSession session = await BeginAsync(host, cancellationToken);
 
         return await AttachPeerSenderAsync(host.Peer, session, new AmqpTarget { Address = "queue" }, options, cancellationToken);
+    }
+
+    /// <summary>
+    /// The peer attaches a sending link, and the application answers it without options; returns the receiver and
+    /// the engine's answering <c>attach</c>.
+    /// </summary>
+    private static async Task<(IAmqpReceiver Receiver, AmqpAttachPerformative Answer)> AttachReceiverWithoutOptionsAsync(AmqpScriptedHost host, CancellationToken cancellationToken)
+    {
+        IAmqpSession session = await BeginAsync(host, cancellationToken);
+
+        await host.Peer.WriteFrameAsync(0, CreateSenderAttach(new AmqpTarget { Address = "queue" }), cancellationToken);
+
+        IAmqpLinkRequest request = await session.AcceptLinkAsync(cancellationToken);
+        IAmqpReceiver receiver = await request.AcceptReceiverAsync(null, cancellationToken);
+        AmqpAttachPerformative answer = await ReadUntilAsync<AmqpAttachPerformative>(host.Peer, cancellationToken);
+
+        return (receiver, answer);
+    }
+
+    /// <summary>
+    /// Writes one delivery of the specified size on handle 0, in frames of <see cref="_frameSize"/> bytes and a last
+    /// frame with the rest; each frame's bytes hold the frame's number.
+    /// </summary>
+    private static async Task WriteDeliveryAsync(AmqpTestPeer peer, int size, CancellationToken cancellationToken)
+    {
+        int frames = (size + _frameSize - 1) / _frameSize;
+
+        for (int index = 0; index < frames; index++)
+        {
+            int length = Math.Min(_frameSize, size - (index * _frameSize));
+            byte[] payload = new byte[length];
+            bool more = index < frames - 1;
+
+            Array.Fill(payload, (byte)(index + 1));
+            await peer.WriteFrameAsync(0, index == 0 ? (more ? First(CreateTransfer(deliveryId: 0, settled: true)) : CreateTransfer(deliveryId: 0, settled: true)) : Continuation(more), cancellationToken, payload: payload);
+        }
     }
 }

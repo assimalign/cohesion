@@ -50,7 +50,7 @@ public class AmqpOptionsTests
         options.IncompleteUnsettled.ShouldBeFalse();
     }
 
-    [Fact(DisplayName = "Cohesion Test [Amqp] - ReceiverOptions: Should default to a prefetch of 100 messages")]
+    [Fact(DisplayName = "Cohesion Test [Amqp] - ReceiverOptions: Should default to a prefetch of 100 messages and a 16 MiB size limit")]
     public void ReceiverOptions_OnConstruction_ShouldUseDefaults()
     {
         // Act
@@ -58,6 +58,7 @@ public class AmqpOptionsTests
 
         // Assert
         options.Prefetch.ShouldBe(100u);
+        options.MaxMessageSize.ShouldBe(16ul * 1024 * 1024);
         options.SenderSettleMode.ShouldBe(AmqpSenderSettleMode.Mixed);
         options.ReceiverSettleMode.ShouldBe(AmqpReceiverSettleMode.First);
     }

@@ -149,6 +149,13 @@ The engine enforces one principle, and the model's contracts state it where it s
 - **A delivery is whole when it is received.** `ReceiveAsync` and `TryReceive` return deliveries
   whose last frame has arrived. An aborted delivery is discarded and never returned, unless it was
   resumed from an earlier attachment (see "Resuming a link").
+- **What a receiver holds is bounded by default.** Because a delivery is reassembled before it is
+  returned, `AmqpReceiverOptions.MaxMessageSize` defaults to 16 MiB, the value RabbitMQ 4 also
+  chose, and a link the peer attaches takes it when the application answers without options. A
+  larger delivery detaches the link with `amqp:message-size-exceeded`; `null` removes the limit.
+  Across a session's links, `AmqpSessionOptions.IncomingWindow` bounds the frames of deliveries the
+  application has not taken (see the engine's design, "Sessions"). A sender's `MaxMessageSize`
+  stays `null`: it only tells the peer what the sender would accept.
 - **Settlement verbs map to outcomes.** `AcceptAsync`, `RejectAsync`, `ReleaseAsync` and
   `ModifyAsync` send the matching outcome; `SettleAsync` sends any state, including a
   transactional one. Under the first settle mode the receiver settles at once; under the second it

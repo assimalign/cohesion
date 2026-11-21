@@ -25,6 +25,11 @@ namespace Assimalign.Cohesion.Amqp.Connections.Internal;
 /// Unsettled deliveries are tracked here, by delivery-id, because a <c>disposition</c> names a range of
 /// deliveries on the session rather than a link.
 /// </para>
+/// <para>
+/// The incoming window bounds what the session holds: a frame keeps its place in the window until the delivery
+/// it belongs to is taken by the application, or at once when the session keeps nothing of it, and the session
+/// restores the window with a <c>flow</c> once half of it is free again (AMQP 1.0 Part 2, section 2.5.6).
+/// </para>
 /// </remarks>
 [DebuggerDisplay("AmqpSession {Channel} ({State})")]
 [DebuggerTypeProxy(typeof(DebugView))]
@@ -64,6 +69,7 @@ internal sealed class AmqpSessionEndpoint : IAmqpSession
     private uint _remoteIncomingWindow;
     private uint _nextIncomingId;
     private uint _incomingWindow;
+    private long _heldIncomingFrames;
     private uint _remoteHandleMax;
     private uint _nextDeliveryId;
     private IReadOnlyList<AmqpSymbol>? _remoteOfferedCapabilities;
@@ -511,6 +517,31 @@ internal sealed class AmqpSessionEndpoint : IAmqpSession
     }
 
     /// <summary>
+    /// Keeps the places of a complete delivery's frames in the incoming window, while a receiver buffers the
+    /// delivery for the application.
+    /// </summary>
+    internal void HoldIncomingFramesLocked(long frames)
+    {
+        _heldIncomingFrames += frames;
+    }
+
+    /// <summary>
+    /// Gives back places in the incoming window, because the application took the deliveries that held them or
+    /// their link stopped, and restores the window once half of it is free.
+    /// </summary>
+    internal void ReleaseIncomingFramesLocked(long frames)
+    {
+        Debug.Assert(frames <= _heldIncomingFrames);
+
+        _heldIncomingFrames -= frames;
+
+        if (RestoreIncomingWindowLocked())
+        {
+            _writer.Schedule();
+        }
+    }
+
+    /// <summary>
     /// Fails the deliveries of a link that stopped and wakes the senders waiting for the window, so each
     /// sees that its link stopped.
     /// </summary>
@@ -872,6 +903,7 @@ internal sealed class AmqpSessionEndpoint : IAmqpSession
             return;
         }
 
+        // The window the engine granted is all the peer may send (AMQP 1.0 Part 2, sections 2.5.6 and 2.8.17).
         if (_incomingWindow == 0)
         {
             EndWithErrorLocked(AmqpErrorCondition.WindowViolation, ErrorMessages.WindowViolation);
@@ -883,12 +915,39 @@ internal sealed class AmqpSessionEndpoint : IAmqpSession
 
         link.OnTransferLocked(transfer, payload);
 
-        if (_state == AmqpSessionState.Mapped && _incomingWindow <= _settings.IncomingWindow / 2)
+        // A frame the session keeps nothing of frees its place at once.
+        RestoreIncomingWindowLocked();
+    }
+
+    /// <summary>
+    /// Restores the incoming window with a <c>flow</c> once half of it is free: neither granted to the peer nor
+    /// held by deliveries the application has not taken.
+    /// </summary>
+    /// <returns><see langword="true"/> when a <c>flow</c> was written.</returns>
+    /// <remarks>
+    /// The window granted never shrinks, so a peer that keeps to it is never refused. Frames of a delivery still
+    /// being reassembled hold no place: the delivery could not complete if they did, and its link's maximum
+    /// message size bounds it instead.
+    /// </remarks>
+    private bool RestoreIncomingWindowLocked()
+    {
+        if (_state != AmqpSessionState.Mapped)
         {
-            // Open the window again before the peer runs out of it.
-            _incomingWindow = _settings.IncomingWindow;
-            WriteFlowLocked(null);
+            return false;
         }
+
+        uint window = _settings.IncomingWindow;
+        uint unheld = _heldIncomingFrames >= window ? 0 : window - (uint)_heldIncomingFrames;
+
+        // The places neither held nor granted are the free ones.
+        if (unheld <= _incomingWindow || unheld - _incomingWindow < window - window / 2)
+        {
+            return false;
+        }
+
+        _incomingWindow = unheld;
+        WriteFlowLocked(null);
+        return true;
     }
 
     private void OnDispositionLocked(AmqpDispositionPerformative disposition)

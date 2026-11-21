@@ -49,7 +49,7 @@ internal sealed class AmqpSenderEndpoint : AmqpLinkEndpoint, IAmqpSender
     /// Creates the endpoint of a link the peer attaches as a receiver, which the application has yet to answer.
     /// </summary>
     public AmqpSenderEndpoint(AmqpSessionEndpoint session, uint handle, AmqpAttachPerformative attach)
-        : base(session, handle, AmqpRole.Sender, attach)
+        : base(session, handle, AmqpRole.Sender, attach, null)
     {
         _sendLock = new SemaphoreSlim(1, 1);
         _credit = new AmqpWaiter();
