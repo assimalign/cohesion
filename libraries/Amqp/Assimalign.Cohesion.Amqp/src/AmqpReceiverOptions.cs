@@ -11,8 +11,15 @@ public sealed class AmqpReceiverOptions : AmqpLinkOptions
     /// <summary>
     /// Initializes new receiving-link options with the defaults.
     /// </summary>
+    /// <remarks>
+    /// A receiver accepts messages of up to 16 MiB (16,777,216 bytes) by default: set
+    /// <see cref="AmqpLinkOptions.MaxMessageSize"/> to change the limit, or to <see langword="null"/> to remove it.
+    /// The receiver reassembles a delivery before handing it to the application, so without a limit one peer
+    /// could make it buffer without end.
+    /// </remarks>
     public AmqpReceiverOptions()
     {
+        MaxMessageSize = 16ul * 1024 * 1024;
     }
 
     /// <summary>

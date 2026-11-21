@@ -49,7 +49,7 @@ internal sealed class AmqpSenderEndpoint : AmqpLinkEndpoint, IAmqpSender
     /// Creates the endpoint of a link the peer attaches as a receiver, which the application has yet to answer.
     /// </summary>
     public AmqpSenderEndpoint(AmqpSessionEndpoint session, uint handle, AmqpAttachPerformative attach)
-        : base(session, handle, AmqpRole.Sender, attach)
+        : base(session, handle, AmqpRole.Sender, attach, null)
     {
         _sendLock = new SemaphoreSlim(1, 1);
         _credit = new AmqpWaiter();
@@ -494,7 +494,12 @@ internal sealed class AmqpSenderEndpoint : AmqpLinkEndpoint, IAmqpSender
 
             lock (Sync)
             {
-                ThrowIfNotAttachedLocked();
+                if (State != AmqpLinkState.Attached)
+                {
+                    StopTrackingUnfinishedLocked(delivery);
+                    throw GetDetachedExceptionLocked();
+                }
+
                 wait = GetTransferWaitLocked(started);
 
                 if (wait is null)
@@ -697,6 +702,7 @@ internal sealed class AmqpSenderEndpoint : AmqpLinkEndpoint, IAmqpSender
                 // A link that stopped took the delivery with it.
                 if (State != AmqpLinkState.Attached)
                 {
+                    StopTrackingUnfinishedLocked(delivery);
                     return;
                 }
 
@@ -707,7 +713,7 @@ internal sealed class AmqpSenderEndpoint : AmqpLinkEndpoint, IAmqpSender
                     // An aborted delivery is settled implicitly (AMQP 1.0 Part 2, section 2.7.5).
                     if (delivery is not null)
                     {
-                        session.RemoveOutgoingLocked(delivery.DeliveryId);
+                        session.RemoveOutgoingLocked(delivery);
                     }
 
                     session.Writer.Schedule();
@@ -718,6 +724,19 @@ internal sealed class AmqpSenderEndpoint : AmqpLinkEndpoint, IAmqpSender
             }
 
             await wait.ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Stops tracking a delivery whose frames were not all sent when the link stopped. It cannot complete on this
+    /// attachment, so its send fails at once even when the link's deliveries stay live: resuming it on a later
+    /// attachment is the application's (AMQP 1.0 Part 2, section 2.6.13).
+    /// </summary>
+    private void StopTrackingUnfinishedLocked(AmqpOutgoingDelivery? delivery)
+    {
+        if (delivery is not null)
+        {
+            SessionEndpoint.RemoveOutgoingLocked(delivery);
         }
     }
 

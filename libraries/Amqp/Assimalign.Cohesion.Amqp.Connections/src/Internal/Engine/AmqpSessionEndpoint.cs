@@ -23,7 +23,13 @@ namespace Assimalign.Cohesion.Amqp.Connections.Internal;
 /// </para>
 /// <para>
 /// Unsettled deliveries are tracked here, by delivery-id, because a <c>disposition</c> names a range of
-/// deliveries on the session rather than a link.
+/// deliveries on the session rather than a link. A suspended link's deliveries stay tracked after it detached
+/// (AMQP 1.0 Part 2, section 2.7.6) until a later attachment of the link takes them over or the session ends.
+/// </para>
+/// <para>
+/// The incoming window bounds what the session holds: a frame keeps its place in the window until the delivery
+/// it belongs to is taken by the application, or at once when the session keeps nothing of it, and the session
+/// restores the window with a <c>flow</c> once half of it is free again (AMQP 1.0 Part 2, section 2.5.6).
 /// </para>
 /// </remarks>
 [DebuggerDisplay("AmqpSession {Channel} ({State})")]
@@ -64,6 +70,7 @@ internal sealed class AmqpSessionEndpoint : IAmqpSession
     private uint _remoteIncomingWindow;
     private uint _nextIncomingId;
     private uint _incomingWindow;
+    private long _heldIncomingFrames;
     private uint _remoteHandleMax;
     private uint _nextDeliveryId;
     private IReadOnlyList<AmqpSymbol>? _remoteOfferedCapabilities;
@@ -479,11 +486,14 @@ internal sealed class AmqpSessionEndpoint : IAmqpSession
     }
 
     /// <summary>
-    /// Stops tracking a delivery a sender aborted.
+    /// Stops tracking a delivery a sender aborted, or could not finish sending before its link stopped.
     /// </summary>
-    internal void RemoveOutgoingLocked(uint deliveryId)
+    internal void RemoveOutgoingLocked(AmqpOutgoingDelivery delivery)
     {
-        _outgoing.Remove(deliveryId);
+        if (_outgoing.TryGetValue(delivery.DeliveryId, out AmqpOutgoingDelivery? tracked) && ReferenceEquals(tracked, delivery))
+        {
+            _outgoing.Remove(delivery.DeliveryId);
+        }
     }
 
     /// <summary>
@@ -511,21 +521,89 @@ internal sealed class AmqpSessionEndpoint : IAmqpSession
     }
 
     /// <summary>
-    /// Fails the deliveries of a link that stopped and wakes the senders waiting for the window, so each
-    /// sees that its link stopped.
+    /// Stops tracking a delivery the peer had not finished sending when its link stopped.
     /// </summary>
-    internal void OnLinkStoppedLocked(AmqpLinkEndpoint link, AmqpException exception)
+    internal void RemoveIncomingLocked(AmqpIncomingDelivery delivery)
+    {
+        if (_incoming.TryGetValue(delivery.DeliveryId, out AmqpIncomingDelivery? tracked) && ReferenceEquals(tracked, delivery))
+        {
+            _incoming.Remove(delivery.DeliveryId);
+        }
+    }
+
+    /// <summary>
+    /// Returns whether a delivery the peer sent is still live: the session is mapped and tracks it unsettled, so
+    /// a <c>disposition</c> may name it although its link detached (AMQP 1.0 Part 2, section 2.7.6).
+    /// </summary>
+    internal bool IsLiveIncomingLocked(AmqpIncomingDelivery delivery)
+    {
+        return _state == AmqpSessionState.Mapped
+            && _incoming.TryGetValue(delivery.DeliveryId, out AmqpIncomingDelivery? tracked)
+            && ReferenceEquals(tracked, delivery);
+    }
+
+    /// <summary>
+    /// Keeps the places of a complete delivery's frames in the incoming window, while a receiver buffers the
+    /// delivery for the application.
+    /// </summary>
+    internal void HoldIncomingFramesLocked(long frames)
+    {
+        _heldIncomingFrames += frames;
+    }
+
+    /// <summary>
+    /// Gives back places in the incoming window, because the application took the deliveries that held them or
+    /// their link stopped, and restores the window once half of it is free.
+    /// </summary>
+    internal void ReleaseIncomingFramesLocked(long frames)
+    {
+        Debug.Assert(frames <= _heldIncomingFrames);
+
+        _heldIncomingFrames -= frames;
+
+        if (RestoreIncomingWindowLocked())
+        {
+            _writer.Schedule();
+        }
+    }
+
+    /// <summary>
+    /// Fails the deliveries of a link that stopped, unless the link was suspended, and wakes the senders waiting
+    /// for the window, so each sees that its link stopped.
+    /// </summary>
+    /// <param name="link">The link.</param>
+    /// <param name="exception">The reason the link stopped.</param>
+    /// <param name="keepDeliveries">
+    /// <see langword="true"/> when the link detached without closing and without an error: its deliveries stay
+    /// live, and a <c>disposition</c> that names one still applies to it (AMQP 1.0 Part 2, section 2.7.6).
+    /// </param>
+    internal void OnLinkStoppedLocked(AmqpLinkEndpoint link, AmqpException exception, bool keepDeliveries)
+    {
+        if (!keepDeliveries)
+        {
+            FailDeliveriesLocked(link, exception);
+        }
+
+        // A link that stopped is no longer attached, so an attach of its name, here or on another of the listener's
+        // connections, resumes it or attaches it anew rather than stealing it.
+        _connection.LinkRegistry?.Remove(CreateLinkKey(link), link);
+        _window.Signal();
+    }
+
+    /// <summary>
+    /// Fails the deliveries a link holds unsettled, because they are no longer live: the link stopped, or a
+    /// suspended link's peer closed it or answered with an error.
+    /// </summary>
+    internal void FailDeliveriesLocked(AmqpLinkEndpoint link, AmqpException exception)
     {
         if (link.Role == AmqpRole.Sender)
         {
-            FailOutgoingLocked(link, exception);
+            FailOutgoingLocked(link, carriedOver: false, exception);
         }
         else
         {
-            FailIncomingLocked(link, exception);
+            FailIncomingLocked(link, carriedOver: false, exception);
         }
-
-        _window.Signal();
     }
 
     /// <summary>
@@ -606,12 +684,61 @@ internal sealed class AmqpSessionEndpoint : IAmqpSession
 
     private void StartAttachLocked(AmqpLinkEndpoint link)
     {
-        // The attach is encoded first: one too large for the peer's frame size leaves nothing to undo.
-        link.AttachLocked();
+        AmqpLinkRegistry? registry = _connection.LinkRegistry;
+        AmqpLinkKey key = CreateLinkKey(link);
+
+        // The application holds a link attached on another of the listener's connections or sessions, so it closes
+        // that one first: its own attach never steals a link, as it never takes over a name on its own session.
+        if (registry is not null && !registry.TryAdd(key, link))
+        {
+            throw new InvalidOperationException(
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.LinkNameInUse, link.Name));
+        }
+
+        bool attached = false;
+
+        try
+        {
+            // The attach is encoded first: one too large for the peer's frame size leaves nothing to undo.
+            link.AttachLocked();
+            attached = true;
+        }
+        finally
+        {
+            if (!attached)
+            {
+                registry?.Remove(key, link);
+            }
+        }
 
         _localLinks.Add(link.Handle, link);
         _linksByName.Add((link.Name, link.Role), link);
+        CarryOverDeliveriesLocked(link);
         _writer.Schedule();
+    }
+
+    /// <summary>
+    /// Ends the deliveries an earlier, suspended attachment of a link kept live, once the link attaches again
+    /// under its name: they carry over to the new attachment, whose unsettled maps settle or resume them (AMQP 1.0
+    /// Part 2, section 2.6.13), so a <c>disposition</c> no longer names them by their old delivery-ids.
+    /// </summary>
+    private void CarryOverDeliveriesLocked(AmqpLinkEndpoint link)
+    {
+        if (link.Role == AmqpRole.Sender ? _outgoing.Count == 0 : _incoming.Count == 0)
+        {
+            return;
+        }
+
+        AmqpException exception = AmqpException.DeliveryCarriedOver();
+
+        if (link.Role == AmqpRole.Sender)
+        {
+            FailOutgoingLocked(link, carriedOver: true, exception);
+        }
+        else
+        {
+            FailIncomingLocked(link, carriedOver: true, exception);
+        }
     }
 
     private bool TryAllocateHandleLocked(out uint handle)
@@ -714,8 +841,33 @@ internal sealed class AmqpSessionEndpoint : IAmqpSession
             }
         }
 
+        // What is left belongs to suspended links, which the session kept live until now (section 2.7.6).
+        FailSuspendedDeliveriesLocked();
         _requests.Writer.TryComplete(_endedException);
         _window.Signal();
+    }
+
+    private void FailSuspendedDeliveriesLocked()
+    {
+        if (_outgoing.Count == 0 && _incoming.Count == 0)
+        {
+            return;
+        }
+
+        AmqpException exception = AmqpException.LinkDetached(null, _endedException);
+
+        foreach (AmqpOutgoingDelivery delivery in _outgoing.Values)
+        {
+            delivery.Fail(exception);
+        }
+
+        foreach (AmqpIncomingDelivery delivery in _incoming.Values)
+        {
+            delivery.FailLocked(exception);
+        }
+
+        _outgoing.Clear();
+        _incoming.Clear();
     }
 
     private void TerminateLocked(AmqpException exception)
@@ -758,24 +910,35 @@ internal sealed class AmqpSessionEndpoint : IAmqpSession
 
         if (_linksByName.TryGetValue((attach.Name, role), out AmqpLinkEndpoint? link))
         {
-            if (link.State == AmqpLinkState.AttachSent)
+            switch (link.State)
             {
-                // The peer answers a link this endpoint attached, or attached the same link at the same time.
-                _remoteLinks.Add(attach.Handle, link);
-                link.OnAttachAnsweredLocked(attach);
-                return;
+                case AmqpLinkState.AttachSent:
+                    // The peer answers a link this endpoint attached, or attached the same link at the same time.
+                    _remoteLinks.Add(attach.Handle, link);
+                    link.OnAttachAnsweredLocked(attach);
+                    return;
+                case AmqpLinkState.ReattachSent or AmqpLinkState.AwaitingReattach:
+                    // The peer answers, or sends, the attach that closes a link whose detach crossed the peer's
+                    // (AMQP 1.0 Part 2, section 2.6.6): it ends the close, not a new link.
+                    _remoteLinks.Add(attach.Handle, link);
+                    link.OnReattachLocked(attach);
+                    return;
             }
 
             // Names identify links between the two containers, so a second link of the same name and
-            // direction is refused (AMQP 1.0 Part 2, section 2.6.1).
-            if (TryCreateRemoteLinkLocked(attach, role, out AmqpLinkEndpoint? duplicate))
+            // direction is refused (AMQP 1.0 Part 2, section 2.6.1), unless the listener lets it steal the first.
+            // A link that is detaching is no longer attached, so it is not stolen.
+            if (_connection.LinkRegistry is null || !link.CanBeStolenLocked)
             {
-                duplicate.RefuseLocked(new AmqpError(
-                    AmqpErrorCondition.NotAllowed,
-                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.LinkNameInUse, attach.Name)));
-            }
+                if (TryCreateRemoteLinkLocked(attach, role, out AmqpLinkEndpoint? duplicate))
+                {
+                    duplicate.RefuseLocked(new AmqpError(
+                        AmqpErrorCondition.NotAllowed,
+                        string.Format(CultureInfo.CurrentCulture, ErrorMessages.LinkNameInUse, attach.Name)));
+                }
 
-            return;
+                return;
+            }
         }
 
         if (TryCreateRemoteLinkLocked(attach, role, out link))
@@ -787,9 +950,42 @@ internal sealed class AmqpSessionEndpoint : IAmqpSession
                 return;
             }
 
-            _linksByName.Add((attach.Name, role), link);
+            _linksByName[(attach.Name, role)] = link;
+            TakeOverLocked(link);
+            CarryOverDeliveriesLocked(link);
             _requests.Writer.TryWrite(new AmqpLinkRequest(this, link, attach));
         }
+    }
+
+    /// <summary>
+    /// Lists a link the peer attached in the listener's registry, when the listener allows link stealing, and
+    /// steals the link listed under its name and direction before: the earlier attachment closes with
+    /// <c>amqp:link:stolen</c> (AMQP 1.0 Part 2, sections 2.6.1 and 2.8.18).
+    /// </summary>
+    private void TakeOverLocked(AmqpLinkEndpoint link)
+    {
+        if (_connection.LinkRegistry is not AmqpLinkRegistry registry
+            || registry.Replace(CreateLinkKey(link), link) is not AmqpLinkEndpoint previous)
+        {
+            return;
+        }
+
+        // A link on this connection is stolen under the lock already held. One on another connection is stolen
+        // under that connection's lock, which is taken only after this one is released: two connections that
+        // steal from each other at once would otherwise each wait for the other's lock.
+        if (previous.Sync == _sync)
+        {
+            previous.StealLocked();
+        }
+        else
+        {
+            ThreadPool.UnsafeQueueUserWorkItem(static stolen => stolen.Steal(), previous, preferLocal: false);
+        }
+    }
+
+    private AmqpLinkKey CreateLinkKey(AmqpLinkEndpoint link)
+    {
+        return new AmqpLinkKey(_connection.RemoteContainerId, _connection.ContainerId, link.Name, link.Role);
     }
 
     private bool TryCreateRemoteLinkLocked(AmqpAttachPerformative attach, AmqpRole role, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out AmqpLinkEndpoint? link)
@@ -872,6 +1068,7 @@ internal sealed class AmqpSessionEndpoint : IAmqpSession
             return;
         }
 
+        // The window the engine granted is all the peer may send (AMQP 1.0 Part 2, sections 2.5.6 and 2.8.17).
         if (_incomingWindow == 0)
         {
             EndWithErrorLocked(AmqpErrorCondition.WindowViolation, ErrorMessages.WindowViolation);
@@ -883,12 +1080,39 @@ internal sealed class AmqpSessionEndpoint : IAmqpSession
 
         link.OnTransferLocked(transfer, payload);
 
-        if (_state == AmqpSessionState.Mapped && _incomingWindow <= _settings.IncomingWindow / 2)
+        // A frame the session keeps nothing of frees its place at once.
+        RestoreIncomingWindowLocked();
+    }
+
+    /// <summary>
+    /// Restores the incoming window with a <c>flow</c> once half of it is free: neither granted to the peer nor
+    /// held by deliveries the application has not taken.
+    /// </summary>
+    /// <returns><see langword="true"/> when a <c>flow</c> was written.</returns>
+    /// <remarks>
+    /// The window granted never shrinks, so a peer that keeps to it is never refused. Frames of a delivery still
+    /// being reassembled hold no place: the delivery could not complete if they did, and its link's maximum
+    /// message size bounds it instead.
+    /// </remarks>
+    private bool RestoreIncomingWindowLocked()
+    {
+        if (_state != AmqpSessionState.Mapped)
         {
-            // Open the window again before the peer runs out of it.
-            _incomingWindow = _settings.IncomingWindow;
-            WriteFlowLocked(null);
+            return false;
         }
+
+        uint window = _settings.IncomingWindow;
+        uint unheld = _heldIncomingFrames >= window ? 0 : window - (uint)_heldIncomingFrames;
+
+        // The places neither held nor granted are the free ones.
+        if (unheld <= _incomingWindow || unheld - _incomingWindow < window - window / 2)
+        {
+            return false;
+        }
+
+        _incomingWindow = unheld;
+        WriteFlowLocked(null);
+        return true;
     }
 
     private void OnDispositionLocked(AmqpDispositionPerformative disposition)
@@ -1113,7 +1337,11 @@ internal sealed class AmqpSessionEndpoint : IAmqpSession
         return matches;
     }
 
-    private void FailOutgoingLocked(AmqpLinkEndpoint link, AmqpException exception)
+    /// <summary>
+    /// Fails the deliveries a sending link holds unsettled or, with <paramref name="carriedOver"/>, those earlier
+    /// attachments of the link held.
+    /// </summary>
+    private void FailOutgoingLocked(AmqpLinkEndpoint link, bool carriedOver, AmqpException exception)
     {
         if (_outgoing.Count == 0)
         {
@@ -1124,7 +1352,7 @@ internal sealed class AmqpSessionEndpoint : IAmqpSession
 
         foreach (KeyValuePair<uint, AmqpOutgoingDelivery> pair in _outgoing)
         {
-            if (ReferenceEquals(pair.Value.Sender, link))
+            if (IsHeldBy(pair.Value.Sender, link, carriedOver))
             {
                 matches.Add(pair.Key);
             }
@@ -1141,7 +1369,11 @@ internal sealed class AmqpSessionEndpoint : IAmqpSession
         matches.Clear();
     }
 
-    private void FailIncomingLocked(AmqpLinkEndpoint link, AmqpException exception)
+    /// <summary>
+    /// Fails the deliveries a receiving link holds unsettled or, with <paramref name="carriedOver"/>, those
+    /// earlier attachments of the link held.
+    /// </summary>
+    private void FailIncomingLocked(AmqpLinkEndpoint link, bool carriedOver, AmqpException exception)
     {
         if (_incoming.Count == 0)
         {
@@ -1152,7 +1384,7 @@ internal sealed class AmqpSessionEndpoint : IAmqpSession
 
         foreach (KeyValuePair<uint, AmqpIncomingDelivery> pair in _incoming)
         {
-            if (ReferenceEquals(pair.Value.Receiver, link))
+            if (IsHeldBy(pair.Value.ReceiverEndpoint, link, carriedOver))
             {
                 matches.Add(pair.Key);
             }
@@ -1167,6 +1399,17 @@ internal sealed class AmqpSessionEndpoint : IAmqpSession
         }
 
         matches.Clear();
+    }
+
+    /// <summary>
+    /// Returns whether a delivery's link is the link itself or, with <paramref name="carriedOver"/>, an earlier
+    /// attachment of it: another endpoint of the same name, which the session's names make the same direction.
+    /// </summary>
+    private static bool IsHeldBy(AmqpLinkEndpoint owner, AmqpLinkEndpoint link, bool carriedOver)
+    {
+        return carriedOver
+            ? !ReferenceEquals(owner, link) && string.Equals(owner.Name, link.Name, StringComparison.Ordinal)
+            : ReferenceEquals(owner, link);
     }
 
     private sealed class DebugView

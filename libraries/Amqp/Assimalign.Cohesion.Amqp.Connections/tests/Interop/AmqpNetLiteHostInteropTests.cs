@@ -359,6 +359,38 @@ public sealed class AmqpNetLiteHostInteropTests : IDisposable
         return payload;
     }
 
+    [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - Interop DetachAsync: Should attach again and close a link the AMQPNetLite host closes in answer to its suspending detach")]
+    public async Task DetachAsync_OnLinkTheNetLiteHostCloses_ShouldAttachItAgainAndCloseIt()
+    {
+        // Arrange
+        using CancellationTokenSource timeout = new(_testTimeout);
+        using AmqpNetLiteHost host = AmqpNetLiteHost.Start();
+        host.Host.RegisterMessageProcessor("suspend", new TestMessageProcessor());
+        await using IAmqpConnection client = await host.ConnectAsync(timeout.Token);
+        IAmqpSession session = await client.BeginSessionAsync(cancellationToken: timeout.Token);
+        IAmqpSender sender = await AttachSenderAsync(session, "suspend", timeout.Token);
+
+        // Act: AMQPNetLite answers a detach that does not close its link with one that does. A second attach of the
+        // name then shows the exchange released it.
+        await sender.DetachAsync(cancellationToken: timeout.Token);
+        IReadOnlyList<string> frames = _trace.LinkFrames;
+        IAmqpSender again = await AttachSenderAsync(session, "suspend", timeout.Token);
+        AmqpDeliveryState? state = await again.SendAsync(new AmqpMessage { Body = new AmqpValueBody("after") }, cancellationToken: timeout.Token);
+
+        // Assert: the host's view: the client's attach and its answer, the client's suspending detach and its
+        // closing answer, then the client's attach again, its answer, and the two closing detaches.
+        frames.ShouldBe(
+        [
+            "RECV attach", "SEND attach",
+            "RECV detach", "SEND detach closed",
+            "RECV attach", "SEND attach",
+            "RECV detach closed", "SEND detach closed"
+        ]);
+        state.ShouldBeOfType<AmqpAccepted>();
+        client.ConnectionClosed.IsCancellationRequested.ShouldBeFalse();
+        session.SessionEnded.IsCancellationRequested.ShouldBeFalse();
+    }
+
     private static ValueTask<IAmqpSender> AttachSenderAsync(IAmqpSession session, string address, CancellationToken cancellationToken)
     {
         return session.AttachSenderAsync(

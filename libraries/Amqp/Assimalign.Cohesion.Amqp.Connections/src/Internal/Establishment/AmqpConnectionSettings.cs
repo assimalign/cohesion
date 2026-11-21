@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 
 using Assimalign.Cohesion.Amqp;
+using Assimalign.Cohesion.Connections;
 
 namespace Assimalign.Cohesion.Amqp.Connections.Internal;
 
@@ -97,6 +98,19 @@ internal sealed class AmqpConnectionSettings
     public IAmqpSaslClientMechanism? ClientMechanism { get; init; }
 
     /// <summary>
+    /// Gets the layer that secures a connection after the TLS protocol header exchange, or
+    /// <see langword="null"/> when this endpoint does not negotiate TLS in band (AMQP 1.0 Part 5, section 5.2).
+    /// A listener secures a peer that asks for TLS; a factory asks for TLS on every connection.
+    /// </summary>
+    public IConnectionLayer? TlsLayer { get; init; }
+
+    /// <summary>
+    /// Gets a value indicating whether a listener refuses a connection that neither its carrier nor the TLS
+    /// protocol header secures.
+    /// </summary>
+    public bool RequireTls { get; init; }
+
+    /// <summary>
     /// Gets the settings of sessions the peer begins, and of local sessions begun without options.
     /// </summary>
     public required AmqpSessionSettings SessionSettings { get; init; }
@@ -115,6 +129,12 @@ internal sealed class AmqpConnectionSettings
     /// Gets the properties a connection's <c>open</c> carries.
     /// </summary>
     public IReadOnlyDictionary<AmqpSymbol, object?>? Properties { get; init; }
+
+    /// <summary>
+    /// Gets the links every connection of a listener that allows link stealing holds, which those connections
+    /// share, or <see langword="null"/> when links are not stolen.
+    /// </summary>
+    public AmqpLinkRegistry? LinkRegistry { get; init; }
 
     /// <summary>
     /// Creates the container identifier of a listener or factory that was given none.

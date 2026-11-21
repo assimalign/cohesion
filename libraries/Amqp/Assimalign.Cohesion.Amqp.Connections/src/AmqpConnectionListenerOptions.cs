@@ -5,6 +5,7 @@ using System.Globalization;
 
 using Assimalign.Cohesion.Amqp;
 using Assimalign.Cohesion.Amqp.Connections.Internal;
+using Assimalign.Cohesion.Connections;
 
 namespace Assimalign.Cohesion.Amqp.Connections;
 
@@ -156,6 +157,45 @@ public sealed class AmqpConnectionListenerOptions
     }
 
     /// <summary>
+    /// Gets or sets the TLS layer that secures a connection whose peer asks for TLS with the AMQP TLS protocol
+    /// header, before SASL and AMQP (AMQP 1.0 Part 5, section 5.2), or <see langword="null"/> to decline TLS.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Defaults to <see langword="null"/>: a peer that sends the TLS protocol header is answered with the header the
+    /// listener accepts, SASL or AMQP, and refused, as AMQP 1.0 Part 2, section 2.2 requires. A carrier listener
+    /// composed with a TLS layer secures every connection before AMQP starts (Part 5, section 5.2.1) and needs no
+    /// layer here.
+    /// </para>
+    /// <para>
+    /// With a layer, the listener answers the TLS header with its own, hands the carrier connection to
+    /// <see cref="IConnectionLayer.UpgradeAsync(IDuplexConnection, System.Threading.CancellationToken)"/>, which runs
+    /// the TLS handshake, and reads the peer's next protocol header over the connection the layer returns; the SASL
+    /// exchange and the AMQP connection run over it too, so the connection's features carry the layer's, such as its
+    /// TLS facts. The layer is typically a <c>TlsConnectionLayer</c> built with server options, from
+    /// <c>Assimalign.Cohesion.Connections.Security</c>. TLS is negotiated once: a second TLS header is refused. The
+    /// handshake counts against <see cref="HandshakeTimeout"/>, and one that fails ends only its connection. A peer
+    /// may still skip TLS and start with SASL or AMQP, unless <see cref="RequireTls"/> is set.
+    /// </para>
+    /// </remarks>
+    public IConnectionLayer? TlsLayer { get; set; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether every accepted connection must be secured with TLS, by its carrier or
+    /// by <see cref="TlsLayer"/> after the AMQP TLS protocol header (AMQP 1.0 Part 5, section 5.2).
+    /// </summary>
+    /// <remarks>
+    /// Defaults to <see langword="false"/>. When <see langword="true"/>, a peer whose carrier connection is not
+    /// secured and that starts with any other header than the TLS protocol header is answered with the TLS header and
+    /// refused. A carrier connection whose capabilities report <see cref="ConnectionSecurity.Tls"/>, such as one a
+    /// TLS-composed carrier listener accepted, meets the requirement without a TLS header. Over a carrier listener
+    /// that does not secure its connections, the listener's <see cref="AmqpConnectionListener.Capabilities"/> are then
+    /// those <see cref="TlsLayer"/> describes, and <c>AmqpConnectionListener.Create</c> refuses options that set no
+    /// <see cref="TlsLayer"/>, since no client could meet the requirement.
+    /// </remarks>
+    public bool RequireTls { get; set; }
+
+    /// <summary>
     /// Gets the SASL mechanisms the listener offers, in order of preference (AMQP 1.0 Part 5, section 5.3).
     /// </summary>
     /// <remarks>
@@ -192,6 +232,31 @@ public sealed class AmqpConnectionListenerOptions
     /// </remarks>
     public IReadOnlyDictionary<AmqpSymbol, object?>? Properties { get; set; }
 
+    /// <summary>
+    /// Gets or sets a value indicating whether a peer's <c>attach</c> of a link that is attached on another of the
+    /// listener's connections, or on another session, takes the link over (AMQP 1.0 Part 2, section 2.6.1).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Defaults to <see langword="false"/>: each session keeps its own link names, refuses a second <c>attach</c>
+    /// of a name and direction it holds with <c>amqp:not-allowed</c>, and does not see links on other sessions or
+    /// connections.
+    /// </para>
+    /// <para>
+    /// When <see langword="true"/>, the listener tracks every link its connections hold by the peer's container
+    /// identifier, its own, the link's name and its direction, which together identify a link. A peer's
+    /// <c>attach</c> of a link held elsewhere is handed to the application as a new link request, and the earlier
+    /// attachment is closed with <c>amqp:link:stolen</c>, its pending sends and receives failing with a
+    /// <see cref="AmqpErrorCode.LinkDetached"/> error that carries the condition. This lets a client whose
+    /// connection died attach its links again from a new connection while the old one still waits for its idle
+    /// timeout. A link that is detaching, or was suspended, is no longer held, so attaching it again resumes it
+    /// rather than stealing it. The application's own attach of a link held elsewhere throws
+    /// <see cref="System.InvalidOperationException"/> before anything is sent, as a duplicate on its own session
+    /// does: the application holds that link, and closes it first.
+    /// </para>
+    /// </remarks>
+    public bool AllowLinkStealing { get; set; }
+
     private sealed class DebugView
     {
         private readonly AmqpConnectionListenerOptions _options;
@@ -207,10 +272,13 @@ public sealed class AmqpConnectionListenerOptions
         public TimeSpan IdleTimeout => _options.IdleTimeout;
         public TimeSpan HandshakeTimeout => _options.HandshakeTimeout;
         public int MaxConcurrentHandshakes => _options.MaxConcurrentHandshakes;
+        public IConnectionLayer? TlsLayer => _options.TlsLayer;
+        public bool RequireTls => _options.RequireTls;
         public IList<IAmqpSaslServerMechanism> SaslMechanisms => _options.SaslMechanisms;
         public AmqpSessionOptions? SessionOptions => _options.SessionOptions;
         public IReadOnlyList<AmqpSymbol>? OfferedCapabilities => _options.OfferedCapabilities;
         public IReadOnlyList<AmqpSymbol>? DesiredCapabilities => _options.DesiredCapabilities;
         public IReadOnlyDictionary<AmqpSymbol, object?>? Properties => _options.Properties;
+        public bool AllowLinkStealing => _options.AllowLinkStealing;
     }
 }

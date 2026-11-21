@@ -274,8 +274,14 @@
   <data name="LinkRefused" xml:space="preserve">
     <value>The peer refused to attach the AMQP link.</value>
   </data>
+  <data name="DeliveryCarriedOver" xml:space="preserve">
+    <value>The AMQP link was attached again under its name, so the delivery carries over to the new attachment, whose unsettled maps settle or resume it.</value>
+  </data>
   <data name="LinkNameInUse" xml:space="preserve">
     <value>A link named '{0}' is already attached in this role.</value>
+  </data>
+  <data name="LinkStolen" xml:space="preserve">
+    <value>The peer attached the link again on another connection or session, which took it over.</value>
   </data>
   <data name="LinkRoleUnexpected" xml:space="preserve">
     <value>The peer sent a frame its role on the link does not allow.</value>
@@ -480,5 +486,17 @@
   </data>
   <data name="DeliveryOutcomeChanged" xml:space="preserve">
     <value>The sender of delivery {0} changed the terminal outcome it stated for the delivery.</value>
+  </data>
+  <data name="TlsRequired" xml:space="preserve">
+    <value>The endpoint requires TLS, but the peer started without it.</value>
+  </data>
+  <data name="TlsNotOffered" xml:space="preserve">
+    <value>The peer does not offer TLS: it answered the TLS protocol header with another header.</value>
+  </data>
+  <data name="TlsRequiredByPeer" xml:space="preserve">
+    <value>The peer requires TLS, but no TLS layer is configured.</value>
+  </data>
+  <data name="TlsLayerMissing" xml:space="preserve">
+    <value>The options require TLS but set no TLS layer, and the carrier listener does not secure its connections.</value>
   </data>
 </root>

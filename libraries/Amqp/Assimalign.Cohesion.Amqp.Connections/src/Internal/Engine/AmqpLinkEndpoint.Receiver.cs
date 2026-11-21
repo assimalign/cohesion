@@ -17,20 +17,28 @@ namespace Assimalign.Cohesion.Amqp.Connections.Internal;
 /// sections 2.6.7, 2.6.11 and 2.6.12).
 /// </summary>
 /// <remarks>
+/// <para>
 /// With a positive prefetch, the receiver keeps that many deliveries granted or buffered, topping credit
 /// up once half of it has been taken, so it sends one <c>flow</c> for many deliveries.
+/// </para>
+/// <para>
+/// A delivery in the buffer holds its frames' places in the session's incoming window until the application
+/// takes it, so the window bounds what the session's receivers hold (AMQP 1.0 Part 2, section 2.5.6). Once the
+/// link stops, what it still buffers gives those places back.
+/// </para>
 /// </remarks>
 internal sealed class AmqpReceiverEndpoint : AmqpLinkEndpoint, IAmqpReceiver
 {
-    private static readonly uint _defaultPrefetch = new AmqpReceiverOptions().Prefetch;
+    private static readonly AmqpReceiverOptions _defaults = new();
 
-    private readonly Channel<IAmqpDelivery> _deliveries;
+    private readonly Channel<AmqpIncomingDelivery> _deliveries;
     private readonly AmqpWaiter _drained;
     private uint _prefetch;
     private uint _deliveryCount;
     private bool _deliveryCountKnown;
     private uint _linkCredit;
     private int _buffered;
+    private long _heldFrames;
     private bool _draining;
     private AmqpIncomingDelivery? _partial;
     private IReadOnlyDictionary<AmqpSymbol, object?>? _flowProperties;
@@ -49,12 +57,16 @@ internal sealed class AmqpReceiverEndpoint : AmqpLinkEndpoint, IAmqpReceiver
     /// <summary>
     /// Creates the endpoint of a link the peer attaches as a sender, which the application has yet to answer.
     /// </summary>
+    /// <remarks>
+    /// Until the application answers with options of its own, the link takes the default prefetch and maximum
+    /// message size, which an answer without options keeps.
+    /// </remarks>
     public AmqpReceiverEndpoint(AmqpSessionEndpoint session, uint handle, AmqpAttachPerformative attach)
-        : base(session, handle, AmqpRole.Receiver, attach)
+        : base(session, handle, AmqpRole.Receiver, attach, _defaults.MaxMessageSize)
     {
         _deliveries = CreateBuffer();
         _drained = new AmqpWaiter();
-        _prefetch = _defaultPrefetch;
+        _prefetch = _defaults.Prefetch;
 
         // A sender's attach carries its initial delivery-count (AMQP 1.0 Part 2, section 2.7.3).
         _deliveryCount = attach.InitialDeliveryCount ?? 0;
@@ -67,10 +79,10 @@ internal sealed class AmqpReceiverEndpoint : AmqpLinkEndpoint, IAmqpReceiver
 
     public ValueTask<IAmqpDelivery> ReceiveAsync(CancellationToken cancellationToken = default)
     {
-        if (_deliveries.Reader.TryRead(out IAmqpDelivery? delivery))
+        if (_deliveries.Reader.TryRead(out AmqpIncomingDelivery? delivery))
         {
-            OnTaken();
-            return ValueTask.FromResult(delivery);
+            OnTaken(delivery);
+            return ValueTask.FromResult<IAmqpDelivery>(delivery);
         }
 
         return ReceiveSlowAsync(cancellationToken);
@@ -78,12 +90,14 @@ internal sealed class AmqpReceiverEndpoint : AmqpLinkEndpoint, IAmqpReceiver
 
     public bool TryReceive([NotNullWhen(true)] out IAmqpDelivery? delivery)
     {
-        if (!_deliveries.Reader.TryRead(out delivery))
+        if (!_deliveries.Reader.TryRead(out AmqpIncomingDelivery? taken))
         {
+            delivery = null;
             return false;
         }
 
-        OnTaken();
+        OnTaken(taken);
+        delivery = taken;
         return true;
     }
 
@@ -205,12 +219,14 @@ internal sealed class AmqpReceiverEndpoint : AmqpLinkEndpoint, IAmqpReceiver
                 return ValueTask.FromException(failure);
             }
 
-            if (State != AmqpLinkState.Attached)
+            AmqpSessionEndpoint session = SessionEndpoint;
+
+            // A suspended link's deliveries stay live, so the application can still settle one it took (AMQP 1.0
+            // Part 2, section 2.7.6).
+            if (State != AmqpLinkState.Attached && !session.IsLiveIncomingLocked(delivery))
             {
                 return ValueTask.FromException(GetDetachedExceptionLocked());
             }
-
-            AmqpSessionEndpoint session = SessionEndpoint;
 
             if (delivery.SettlesFirst)
             {
@@ -462,6 +478,8 @@ internal sealed class AmqpReceiverEndpoint : AmqpLinkEndpoint, IAmqpReceiver
         }
 
         delivery.CompleteLocked();
+        _heldFrames += delivery.HeldFrames;
+        session.HoldIncomingFramesLocked(delivery.HeldFrames);
         _buffered++;
         _deliveries.Writer.TryWrite(delivery);
         CheckDrainedLocked();
@@ -571,20 +589,25 @@ internal sealed class AmqpReceiverEndpoint : AmqpLinkEndpoint, IAmqpReceiver
 
     private protected override void OnStoppedLocked(AmqpException exception)
     {
+        // A delivery the sender had not finished cannot complete on this attachment, so the session stops tracking
+        // it even when the link's deliveries stay live: the application never held it.
         if (_partial is not null)
         {
             _partial.DiscardLocked();
+            SessionEndpoint.RemoveIncomingLocked(_partial);
             _partial = null;
         }
 
-        // Deliveries already buffered can still be taken; then receiving fails with the reason.
+        // Deliveries already buffered can still be taken; then receiving fails with the reason. They no longer
+        // hold the session's window: the link receives nothing more, and other links on the session still may.
         _deliveries.Writer.TryComplete(exception);
+        ReleaseHeldFramesLocked(_heldFrames);
         _drained.Signal();
     }
 
-    private static Channel<IAmqpDelivery> CreateBuffer()
+    private static Channel<AmqpIncomingDelivery> CreateBuffer()
     {
-        return Channel.CreateUnbounded<IAmqpDelivery>(new UnboundedChannelOptions
+        return Channel.CreateUnbounded<AmqpIncomingDelivery>(new UnboundedChannelOptions
         {
             SingleReader = false,
             SingleWriter = true
@@ -601,9 +624,9 @@ internal sealed class AmqpReceiverEndpoint : AmqpLinkEndpoint, IAmqpReceiver
 
         try
         {
-            IAmqpDelivery delivery = await _deliveries.Reader.ReadAsync(cancellationToken).ConfigureAwait(false);
+            AmqpIncomingDelivery delivery = await _deliveries.Reader.ReadAsync(cancellationToken).ConfigureAwait(false);
 
-            OnTaken();
+            OnTaken(delivery);
             return delivery;
         }
         catch (ChannelClosedException exception) when (exception.InnerException is not null)
@@ -613,13 +636,29 @@ internal sealed class AmqpReceiverEndpoint : AmqpLinkEndpoint, IAmqpReceiver
         }
     }
 
-    private void OnTaken()
+    private void OnTaken(AmqpIncomingDelivery delivery)
     {
         lock (Sync)
         {
             _buffered--;
+            ReleaseHeldFramesLocked(delivery.HeldFrames);
             TopUpLocked();
         }
+    }
+
+    /// <summary>
+    /// Gives back the places in the session's incoming window that buffered deliveries held. Once the link
+    /// stopped it holds none, so a delivery the application takes afterwards gives back nothing.
+    /// </summary>
+    private void ReleaseHeldFramesLocked(long frames)
+    {
+        if (frames == 0 || _heldFrames == 0)
+        {
+            return;
+        }
+
+        _heldFrames -= frames;
+        SessionEndpoint.ReleaseIncomingFramesLocked(frames);
     }
 
     private void GrantPrefetchLocked()

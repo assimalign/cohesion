@@ -17,14 +17,16 @@ namespace Assimalign.Cohesion.Amqp.Connections.Tests;
 
 /// <summary>
 /// The header-phase compliance corpus: scripted establishments of AMQP 1.0 connections, from the protocol
-/// header through the SASL exchange and the <c>open</c> frames to the keep-alive traffic after them, each
-/// tied to the rule of Part 2, sections 2.2 to 2.4, or Part 5, section 5.3 it exercises.
+/// header through the TLS and SASL layers and the <c>open</c> frames to the keep-alive traffic after them, each
+/// tied to the rule of Part 2, sections 2.2 to 2.4, or Part 5, sections 5.2 and 5.3 it exercises.
 /// </summary>
 /// <remarks>
 /// <para>
 /// A case runs against a listener, where the scripted peer is the client, or a factory, where it is the
 /// server. Its script is the bytes the peer writes and what it expects back, so a case reads as the wire
-/// exchange it pins; frames are built with the library's codec, which its own corpus covers.
+/// exchange it pins; frames are built with the library's codec, which its own corpus covers. A case that
+/// negotiates TLS plays <see cref="AmqpTestTlsLayer"/>'s stand-in handshake instead of a real one, so the script
+/// pins the header exchange around it; <c>AmqpInBandTlsTests</c> runs the real handshake.
 /// </para>
 /// <para>
 /// A case that fails names the exact message and, where the engine sends <c>close</c>, the exact condition
@@ -50,6 +52,11 @@ internal static class AmqpHeaderPhaseCorpus
     public static byte[] SaslHeader { get; } = Header(AmqpFrame.SaslProtocolId);
 
     /// <summary>
+    /// Gets the TLS protocol header, version 1.0.0.
+    /// </summary>
+    public static byte[] TlsHeader { get; } = Header(AmqpFrame.TlsProtocolId);
+
+    /// <summary>
     /// Gets the rules the corpus exercises.
     /// </summary>
     public static IReadOnlyList<AmqpHeaderPhaseRule> Rules { get; } =
@@ -73,7 +80,8 @@ internal static class AmqpHeaderPhaseCorpus
         new("H17", "A peer that cannot keep the idle timeout its partner declares closes the connection with the reason; this engine keeps 100 ms and up.", "Part 2, sections 2.4.5 and 2.7.1", true),
         new("H18", "Empty frames are taken on any channel the receiver accepts; a channel above its channel-max, a close's included, is a framing error, and only AMQP frames, empty or not, travel once the connection is open. A close that answers the receiver's own ends the connection whatever its channel, since refusing it would only hold the socket.", "Part 2, sections 2.3.1, 2.4.3, 2.4.5 and 2.7.1", true),
         new("H19", "A frame is at least 8 bytes with a data offset of at least 2, and an AMQP frame's extended header is ignored.", "Part 2, sections 2.3.1 and 2.3.2", true),
-        new("H20", "A max-frame-size under 512 bytes, the lower bound of the agreed maximum, is taken as 512: both peers must accept frames that large, so the meaning is clear.", "Part 2, sections 2.7.1 and 2.8.19", false, Leniency: true)
+        new("H20", "A max-frame-size under 512 bytes, the lower bound of the agreed maximum, is taken as 512: both peers must accept frames that large, so the meaning is clear.", "Part 2, sections 2.7.1 and 2.8.19", false, Leniency: true),
+        new("H21", "A peer asks for TLS with the TLS header before SASL and AMQP; a server that offers TLS answers with its own, and the TLS session secures every byte after it, from the next header, SASL or AMQP, on. TLS is negotiated once. A server that requires TLS answers any other first header with the TLS header and refuses it; a client whose TLS header is declined fails rather than continue unsecured, and one that does not ask for TLS fails naming it when the server requires it.", "Part 5, sections 5.1 and 5.2; Part 2, section 2.2", true)
     ];
 
     /// <summary>
@@ -230,6 +238,49 @@ internal static class AmqpHeaderPhaseCorpus
     }
 
     /// <summary>
+    /// Checks the connection runs over the one the TLS layer returned: it reports TLS and carries the layer's feature.
+    /// </summary>
+    private static void ShouldBeSecured(IAmqpConnection connection)
+    {
+        connection.Capabilities.Security.ShouldBe(ConnectionSecurity.Tls);
+        connection.Features.Get(TestSecuredConnection.FeatureName).ShouldNotBeNull();
+    }
+
+    private static void ShouldNotBeSecured(IAmqpConnection connection)
+    {
+        connection.Capabilities.Security.ShouldBe(ConnectionSecurity.None);
+        connection.Features.Get(TestSecuredConnection.FeatureName).ShouldBeNull();
+    }
+
+    /// <summary>
+    /// The client asks a listener for TLS and plays the stand-in TLS handshake.
+    /// </summary>
+    private static AmqpHeaderPhaseStep[] ClientSecures()
+    {
+        return
+        [
+            Write(TlsHeader),
+            ExpectHeader(TlsHeader),
+            ExpectHeader(AmqpTestTlsLayer.Hello),
+            Write(AmqpTestTlsLayer.Hello)
+        ];
+    }
+
+    /// <summary>
+    /// The server answers the factory's TLS header with its own and plays the stand-in TLS handshake.
+    /// </summary>
+    private static AmqpHeaderPhaseStep[] ServerSecures()
+    {
+        return
+        [
+            ExpectHeader(TlsHeader),
+            Write(TlsHeader),
+            ExpectHeader(AmqpTestTlsLayer.Hello),
+            Write(AmqpTestTlsLayer.Hello)
+        ];
+    }
+
+    /// <summary>
     /// The client opens without SASL: its header and open, then the listener's header and open.
     /// </summary>
     private static AmqpHeaderPhaseStep[] ClientOpens(AmqpOpenPerformative? open = null)
@@ -297,14 +348,14 @@ internal static class AmqpHeaderPhaseCorpus
         ];
     }
 
-    private static AmqpHeaderPhaseCase Listener(string name, string rule, AmqpHeaderPhaseSasl mechanism, AmqpHeaderPhaseStep[] script, AmqpHeaderPhaseOutcome outcome)
+    private static AmqpHeaderPhaseCase Listener(string name, string rule, AmqpHeaderPhaseSasl mechanism, AmqpHeaderPhaseStep[] script, AmqpHeaderPhaseOutcome outcome, AmqpHeaderPhaseTls tls = AmqpHeaderPhaseTls.None)
     {
-        return new AmqpHeaderPhaseCase(name, rule, AmqpHeaderPhaseRole.Listener, mechanism, script, outcome);
+        return new AmqpHeaderPhaseCase(name, rule, AmqpHeaderPhaseRole.Listener, mechanism, script, outcome, tls);
     }
 
-    private static AmqpHeaderPhaseCase Factory(string name, string rule, AmqpHeaderPhaseSasl mechanism, AmqpHeaderPhaseStep[] script, AmqpHeaderPhaseOutcome outcome)
+    private static AmqpHeaderPhaseCase Factory(string name, string rule, AmqpHeaderPhaseSasl mechanism, AmqpHeaderPhaseStep[] script, AmqpHeaderPhaseOutcome outcome, AmqpHeaderPhaseTls tls = AmqpHeaderPhaseTls.None)
     {
-        return new AmqpHeaderPhaseCase(name, rule, AmqpHeaderPhaseRole.Factory, mechanism, script, outcome);
+        return new AmqpHeaderPhaseCase(name, rule, AmqpHeaderPhaseRole.Factory, mechanism, script, outcome, tls);
     }
 
     private static AmqpHeaderPhaseOutcome Refused(string message)
@@ -327,6 +378,8 @@ internal static class AmqpHeaderPhaseCorpus
         const AmqpHeaderPhaseSasl none = AmqpHeaderPhaseSasl.None;
         const AmqpHeaderPhaseSasl anonymous = AmqpHeaderPhaseSasl.Anonymous;
         const AmqpHeaderPhaseSasl challenge = AmqpHeaderPhaseSasl.Challenge;
+        const AmqpHeaderPhaseTls tlsLayer = AmqpHeaderPhaseTls.Layer;
+        const AmqpHeaderPhaseTls tlsRequired = AmqpHeaderPhaseTls.Required;
 
         AmqpHeaderPhaseOutcome opened = AmqpHeaderPhaseOutcome.Open();
         string tooShort50 = Format(ErrorMessages.PeerIdleTimeoutTooShort, 50, AmqpConnectionSettings.MinRemoteIdleTimeout);
@@ -420,6 +473,9 @@ internal static class AmqpHeaderPhaseCorpus
             Listener("a client whose header misspells AMQP is answered with the AMQP header and refused", "H4", none,
                 [Write("AMQX"u8.ToArray(), [0, 1, 0, 0]), ExpectHeader(AmqpHeader), ExpectEnd()],
                 Refused(ErrorMessages.ProtocolHeaderInvalid)),
+            Listener("a client that sends an HTTP request where TLS is required is answered with the TLS header and refused", "H4", none,
+                [Write(Encoding.ASCII.GetBytes("GET / HTTP/1.1\r\n")), ExpectHeader(TlsHeader), ExpectEnd()],
+                Refused(ErrorMessages.ProtocolHeaderInvalid), tlsRequired),
 
             // H5: the factory fails on any other answer than its own header.
             Factory("the factory fails when the server answers with AMQP 1.0.1", "H5", none,
@@ -429,8 +485,8 @@ internal static class AmqpHeaderPhaseCorpus
                 [ExpectHeader(AmqpHeader), ExpectFrame("open"), Write(Encoding.ASCII.GetBytes("HTTP/1.1 400\r\n")), ExpectEnd()],
                 Refused(ErrorMessages.ProtocolHeaderInvalid)),
             Factory("the factory fails when the server answers with the TLS header", "H5", none,
-                [ExpectHeader(AmqpHeader), ExpectFrame("open"), Write(Header(2)), ExpectEnd()],
-                Refused(Unsupported(2, 1, 0, 0))),
+                [ExpectHeader(AmqpHeader), ExpectFrame("open"), Write(TlsHeader), ExpectEnd()],
+                Refused(ErrorMessages.TlsRequiredByPeer)),
             Factory("the factory without SASL fails when the server requires it", "H5", none,
                 [ExpectHeader(AmqpHeader), ExpectFrame("open"), Write(SaslHeader), ExpectEnd()],
                 Unauthenticated(ErrorMessages.SaslAuthenticationRequired)),
@@ -438,8 +494,14 @@ internal static class AmqpHeaderPhaseCorpus
                 [ExpectHeader(SaslHeader), Write(AmqpHeader), ExpectEnd()],
                 Unauthenticated(ErrorMessages.SaslNotOffered)),
             Factory("the factory that authenticates fails when the server answers with the TLS header", "H5", anonymous,
-                [ExpectHeader(SaslHeader), Write(Header(2)), ExpectEnd()],
+                [ExpectHeader(SaslHeader), Write(TlsHeader), ExpectEnd()],
+                Refused(ErrorMessages.TlsRequiredByPeer)),
+            Factory("the factory that authenticates fails when the server answers its AMQP header with the TLS header", "H5", anonymous,
+                [.. ServerAuthenticates(), ExpectHeader(AmqpHeader), ExpectFrame("open"), Write(TlsHeader), ExpectEnd()],
                 Refused(Unsupported(2, 1, 0, 0))),
+            Factory("the factory that asks for TLS fails when the server answers with bytes that are not a header", "H5", none,
+                [ExpectHeader(TlsHeader), Write(Encoding.ASCII.GetBytes("HTTP/1.1 400\r\n")), ExpectEnd()],
+                Refused(ErrorMessages.ProtocolHeaderInvalid), tlsLayer),
 
             // H6: the SASL exchange keeps its order.
             Listener("a client that sends open instead of sasl-init is refused", "H6", anonymous,
@@ -742,7 +804,75 @@ internal static class AmqpHeaderPhaseCorpus
                 AmqpHeaderPhaseOutcome.Open(SendsFramesUpTo(512))),
             Factory("a server that declares a max-frame-size of 0 opens with a limit of 512", "H20", none,
                 [.. ServerOpens(OpenWithMaxFrameSize(0)), ExpectAlive()],
-                AmqpHeaderPhaseOutcome.Open(SendsFramesUpTo(512)))
+                AmqpHeaderPhaseOutcome.Open(SendsFramesUpTo(512))),
+
+            // H21: TLS after the TLS header, before SASL and AMQP.
+            Listener("a client asks for TLS, is answered with the TLS header, and opens over TLS", "H21", none,
+                [.. ClientSecures(), .. ClientOpens(), ExpectAlive()],
+                AmqpHeaderPhaseOutcome.Open(ShouldBeSecured), tlsLayer),
+            Listener("a client that starts its TLS handshake right behind its TLS header opens over TLS", "H21", none,
+                [
+                    Write(TlsHeader, AmqpTestTlsLayer.Hello),
+                    ExpectHeader(TlsHeader),
+                    ExpectHeader(AmqpTestTlsLayer.Hello),
+                    .. ClientOpens()
+                ],
+                AmqpHeaderPhaseOutcome.Open(ShouldBeSecured), tlsLayer),
+            Listener("a client asks for TLS, then authenticates with ANONYMOUS and opens over TLS", "H21", anonymous,
+                [.. ClientSecures(), .. ClientAuthenticates(), .. ClientOpens(), ExpectAlive()],
+                AmqpHeaderPhaseOutcome.Open(connection =>
+                {
+                    ShouldBeSecured(connection);
+                    AuthenticatedWith("ANONYMOUS")(connection);
+                }), tlsLayer),
+            Listener("a client asks for TLS where it is required and opens over TLS", "H21", none,
+                [.. ClientSecures(), .. ClientOpens(), ExpectAlive()],
+                AmqpHeaderPhaseOutcome.Open(ShouldBeSecured), tlsRequired),
+            Listener("a client that skips TLS where it is offered opens without it", "H21", none,
+                [.. ClientOpens(), ExpectAlive()],
+                AmqpHeaderPhaseOutcome.Open(ShouldNotBeSecured), tlsLayer),
+            Listener("a client that skips TLS where it is required is answered with the TLS header and refused", "H21", none,
+                [Write(AmqpHeader, Frame(Open())), ExpectHeader(TlsHeader), ExpectEnd()],
+                Refused(ErrorMessages.TlsRequired), tlsRequired),
+            Listener("a client that starts with SASL where TLS is required is answered with the TLS header and refused", "H21", anonymous,
+                [Write(SaslHeader), ExpectHeader(TlsHeader), ExpectEnd()],
+                Refused(ErrorMessages.TlsRequired), tlsRequired),
+            Listener("a client that asks for TLS a second time over TLS is answered with the AMQP header and refused", "H21", none,
+                [.. ClientSecures(), Write(TlsHeader), ExpectHeader(AmqpHeader), ExpectEnd()],
+                Refused(Unsupported(2, 1, 0, 0)), tlsLayer),
+            Listener("a client that skips SASL over TLS where SASL is required is answered with the SASL header and refused", "H21", anonymous,
+                [.. ClientSecures(), Write(AmqpHeader, Frame(Open())), ExpectHeader(SaslHeader), ExpectEnd()],
+                Unauthenticated(ErrorMessages.SaslRequired), tlsRequired),
+            Factory("the factory asks for TLS and opens over TLS", "H21", none,
+                [.. ServerSecures(), .. ServerOpens(), ExpectAlive()],
+                AmqpHeaderPhaseOutcome.Open(ShouldBeSecured), tlsLayer),
+            Factory("the factory takes a TLS handshake the server starts right behind its TLS header", "H21", none,
+                [
+                    ExpectHeader(TlsHeader),
+                    Write(TlsHeader, AmqpTestTlsLayer.Hello),
+                    ExpectHeader(AmqpTestTlsLayer.Hello),
+                    .. ServerOpens()
+                ],
+                AmqpHeaderPhaseOutcome.Open(ShouldBeSecured), tlsLayer),
+            Factory("the factory asks for TLS, then authenticates with ANONYMOUS and opens over TLS", "H21", anonymous,
+                [.. ServerSecures(), .. ServerAuthenticates(), .. ServerOpens(), ExpectAlive()],
+                AmqpHeaderPhaseOutcome.Open(connection =>
+                {
+                    ShouldBeSecured(connection);
+                    AuthenticatedWith("ANONYMOUS")(connection);
+                }), tlsLayer),
+            Factory("the factory that asks for TLS fails when the server answers with the AMQP header", "H21", none,
+                [ExpectHeader(TlsHeader), Write(AmqpHeader), ExpectEnd()],
+                Refused(ErrorMessages.TlsNotOffered), tlsLayer),
+            Factory("the factory that asks for TLS fails when the server answers with the SASL header", "H21", anonymous,
+                [ExpectHeader(TlsHeader), Write(SaslHeader), ExpectEnd()],
+                Refused(ErrorMessages.TlsNotOffered), tlsLayer),
+            Factory("the factory fails when the server answers its AMQP header over TLS with the TLS header", "H21", none,
+                [.. ServerSecures(), ExpectHeader(AmqpHeader), ExpectFrame("open"), Write(TlsHeader), ExpectEnd()],
+                Refused(Unsupported(2, 1, 0, 0)), tlsLayer),
+            Factory("the factory fails when the server answers its SASL header over TLS with the TLS header", "H21", anonymous,
+                [.. ServerSecures(), ExpectHeader(SaslHeader), Write(TlsHeader), ExpectEnd()],
+                Refused(Unsupported(2, 1, 0, 0)), tlsLayer)
         ];
     }
 }

@@ -98,6 +98,10 @@ flowchart TD
   without an error. A peer's close, end or detach cancels `SessionEnded` or
   `LinkDetached` and fails every operation waiting on that object with the matching
   `AmqpErrorCode`; ending a connection ends its sessions, and ending a session detaches its links.
+  The one exception is a suspended link's unsettled deliveries, which stay live (see "Resuming a
+  link"). When one end closes a link while the other suspends it, the link still ends closed (Part 2
+  §2.6.6), and the waiting call completes once that closing exchange ends; the engine's design says
+  which end attaches the link again to close it.
 - **Remote state is read-only.** What the peer announced (capabilities, properties, container id,
   maximum message size, unsettled map) is exposed on each object as `Remote*` properties; what the
   local end announces is set through options before the performative is sent.
@@ -149,6 +153,13 @@ The engine enforces one principle, and the model's contracts state it where it s
 - **A delivery is whole when it is received.** `ReceiveAsync` and `TryReceive` return deliveries
   whose last frame has arrived. An aborted delivery is discarded and never returned, unless it was
   resumed from an earlier attachment (see "Resuming a link").
+- **What a receiver holds is bounded by default.** Because a delivery is reassembled before it is
+  returned, `AmqpReceiverOptions.MaxMessageSize` defaults to 16 MiB, the value RabbitMQ 4 also
+  chose, and a link the peer attaches takes it when the application answers without options. A
+  larger delivery detaches the link with `amqp:message-size-exceeded`; `null` removes the limit.
+  Across a session's links, `AmqpSessionOptions.IncomingWindow` bounds the frames of deliveries the
+  application has not taken (see the engine's design, "Sessions"). A sender's `MaxMessageSize`
+  stays `null`: it only tells the peer what the sender would accept.
 - **Settlement verbs map to outcomes.** `AcceptAsync`, `RejectAsync`, `ReleaseAsync` and
   `ModifyAsync` send the matching outcome; `SettleAsync` sends any state, including a
   transactional one. Under the first settle mode the receiver settles at once; under the second it
@@ -165,6 +176,15 @@ no delivery state across attachments, so recovery is the application's: it lists
 still holds unsettled, each with the state it holds it in, in `AmqpLinkOptions.Unsettled` (and sets
 `IncompleteUnsettled` when that map is only part of them), and reads the peer's map from
 `RemoteUnsettled`.
+
+While a link is suspended its unsettled deliveries stay live (Part 2 §2.7.6): a pending `SendAsync`
+waits for the receiver's outcome, which still arrives in a `disposition`, and the receiver can still
+settle a delivery it took, or see the sender settle it. They end, failing with
+`AmqpErrorCode.LinkDetached`, when the link closes or detaches with an error, when it attaches again
+under its name on the session, or when the session ends. What a delivery reports when the link
+attaches again (the send's outcome, `IAmqpDelivery.IsSettled` and `RemoteState`) is what the
+application lists in its unsettled map, so the map includes what changed while the link was
+suspended.
 
 `IAmqpLink.UnsettledReconciliation` compares the two maps once both `attach` frames are known, at
 both ends alike: the sender's map is the source's and the receiver's the target's, whichever end

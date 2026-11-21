@@ -37,6 +37,8 @@ internal sealed class AmqpIncomingDelivery : IAmqpDelivery
     private AmqpBufferWriter? _builder;
     private ReadOnlyMemory<byte> _payload;
     private long _length;
+    private long _frames;
+    private long _heldFrames;
     private bool _settled;
     private bool _settling;
     private bool _aborted;
@@ -114,6 +116,13 @@ internal sealed class AmqpIncomingDelivery : IAmqpDelivery
     /// </summary>
     internal AmqpException? Failure => _failure;
 
+    /// <summary>
+    /// Gets how many places in the session's incoming window the delivery holds until the application takes it:
+    /// one for each of its <c>transfer</c> frames once it is complete, and none while it is reassembled or when the
+    /// sender aborted it.
+    /// </summary>
+    internal long HeldFrames => _heldFrames;
+
     public AmqpMessage GetMessage()
     {
         return AmqpMessageEncoding.Decode(_payload);
@@ -154,6 +163,7 @@ internal sealed class AmqpIncomingDelivery : IAmqpDelivery
     /// <returns><see langword="false"/> when the delivery grew past the link's maximum message size.</returns>
     internal bool AppendLocked(ReadOnlySpan<byte> payload, bool more, ulong? maxMessageSize)
     {
+        _frames++;
         _length += payload.Length;
 
         if (maxMessageSize is ulong max && (ulong)_length > max)
@@ -224,7 +234,8 @@ internal sealed class AmqpIncomingDelivery : IAmqpDelivery
     }
 
     /// <summary>
-    /// Fixes the payload once the delivery's last frame arrived.
+    /// Fixes the payload once the delivery's last frame arrived. From then on the delivery holds a place in the
+    /// session's incoming window for each of its frames, until the application takes it.
     /// </summary>
     internal void CompleteLocked()
     {
@@ -234,6 +245,8 @@ internal sealed class AmqpIncomingDelivery : IAmqpDelivery
             _builder.Dispose();
             _builder = null;
         }
+
+        _heldFrames = _frames;
     }
 
     /// <summary>
