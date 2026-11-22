@@ -112,4 +112,73 @@ public class AmqpIdleTimerTests
         // Assert
         period.ShouldBe(AmqpConnectionSettings.MinTimerPeriod);
     }
+
+    [Theory(DisplayName = "Cohesion Test [Amqp.Connections] - GetStall: Should count no stall for a tick within twice the timer period")]
+    [InlineData(50, 50)]
+    [InlineData(51, 50)]
+    [InlineData(100, 50)]
+    [InlineData(0, 50)]
+    public void GetStall_OnTimelyTick_ShouldReturnZero(long sinceLastTick, long period)
+    {
+        // Act
+        long stall = AmqpConnectionEndpoint.GetStall(sinceLastTick, period);
+
+        // Assert
+        stall.ShouldBe(0);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Amqp.Connections] - GetStall: Should count the time past one period of a late tick as a stall")]
+    [InlineData(101, 50, 51)]
+    [InlineData(944, 50, 894)]
+    [InlineData(5_000, 250, 4_750)]
+    public void GetStall_OnLateTick_ShouldReturnTimePastOnePeriod(long sinceLastTick, long period, long expected)
+    {
+        // Act
+        long stall = AmqpConnectionEndpoint.GetStall(sinceLastTick, period);
+
+        // Assert
+        stall.ShouldBe(expected);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Amqp.Connections] - GetDiscountedReadTicks: Should move the last read forward by the stall, never past now")]
+    [InlineData(1_000, 2_000, 300, 1_300)]
+    [InlineData(1_000, 2_000, 1_000, 2_000)]
+    [InlineData(1_000, 2_000, 5_000, 2_000)]
+    public void GetDiscountedReadTicks_OnStall_ShouldMoveLastReadForwardUpToNow(long lastReadTicks, long now, long stall, long expected)
+    {
+        // Act
+        long discounted = AmqpConnectionEndpoint.GetDiscountedReadTicks(lastReadTicks, now, stall);
+
+        // Assert
+        discounted.ShouldBe(expected);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Amqp.Connections] - OnIdleTimer: Should still notice a silent peer when every tick runs late")]
+    [InlineData(200, 3)]
+    [InlineData(200, 10)]
+    [InlineData(60_000, 4)]
+    public void GetStall_OnEveryTickLate_ShouldStillExpireTheSilentPeer(long localIdleTimeout, long lateness)
+    {
+        // Arrange: the peer never writes after the first read, and every tick comes lateness periods apart.
+        long period = AmqpConnectionEndpoint.GetTimerPeriod(localIdleTimeout, 0);
+        long lastRead = 0;
+        long now = 0;
+        int ticks = 0;
+        bool expired = false;
+
+        // Act: replay the idle timer's bookkeeping, tick by tick.
+        while (!expired && ticks < 10_000)
+        {
+            long sinceLastTick = period * lateness;
+            now += sinceLastTick;
+            ticks++;
+            lastRead = AmqpConnectionEndpoint.GetDiscountedReadTicks(lastRead, now, AmqpConnectionEndpoint.GetStall(sinceLastTick, period));
+            expired = now - lastRead > localIdleTimeout;
+        }
+
+        // Assert: only one period per tick counts as watched, so the timeout expires after about
+        // timeout / period ticks of watching, however late each one was.
+        expired.ShouldBeTrue();
+        ticks.ShouldBeLessThanOrEqualTo((int)(localIdleTimeout / period) + 1);
+    }
 }
