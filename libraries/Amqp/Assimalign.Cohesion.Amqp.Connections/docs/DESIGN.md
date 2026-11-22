@@ -495,6 +495,15 @@ timeout, the connection closes with `amqp:resource-limit-exceeded`. Whatever its
 connection keeps the peer's by sending an empty frame whenever it has written nothing for half of
 it. Both run on one timer per connection, whose period follows the shorter of the two.
 
+Silence is counted only while the timer could watch. A tick that comes more than two periods after
+the one before means this process stalled (a full thread pool, a long GC pause), and the peer's
+frames from that time may be sitting unread in the carrier. The time past one period is taken off
+the peer's silence before the check, so a stall of the process alone never closes a peer that kept
+sending. Each tick still counts one period as watched, so a silent peer is closed after about the
+timeout's worth of ticks however late each one ran (`AmqpIdleTimerTests`). Without this, a stall
+longer than the timeout closed every connection on the first tick after it: the macOS CI leg did
+exactly that to the in-process keep-alive test when the thread pool was saturated at start-up.
+
 ## Compliance maps
 
 Each part of the specification the engine enforces has a map in the tests: a list of rules, each

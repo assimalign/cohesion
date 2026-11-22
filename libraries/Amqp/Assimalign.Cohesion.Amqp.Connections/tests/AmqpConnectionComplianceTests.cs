@@ -73,12 +73,13 @@ public class AmqpConnectionComplianceTests
         new("C7", "Close is the last frame a peer writes: a carrier that ends before the peer's close leaves the connection aborted, not closed.", "Part 2, section 2.4.3",
             Tests: [nameof(AmqpEngineViolationTests.ProcessFrame_OnCarrierEnded_ShouldAbortConnection)],
             Refusals: []),
-        new("C8", "Each end keeps the idle timeout the other declared: the engine declares half its own, writes an empty frame before it would stay silent for half the peer's, and closes a connection whose peer stays silent past its own with amqp:resource-limit-exceeded.", "Part 2, section 2.4.5",
+        new("C8", "Each end keeps the idle timeout the other declared: the engine declares half its own, writes an empty frame before it would stay silent for half the peer's, and closes a connection whose peer stays silent past its own with amqp:resource-limit-exceeded, counting only time its own timer ran: a stall of this process is not the peer's silence.", "Part 2, section 2.4.5",
             Tests:
             [
                 nameof(AmqpEngineViolationTests.OnIdleTimer_OnPeerIdleTimeout_ShouldSendEmptyFrames),
                 nameof(AmqpConnectionTests.IdleTimeout_OnIdleConnection_ShouldKeepConnectionOpen),
-                nameof(AmqpIdleTimerTests.GetTimerPeriod_OnKeptRemoteIdleTimeout_ShouldBoundTheLongestGap)
+                nameof(AmqpIdleTimerTests.GetTimerPeriod_OnKeptRemoteIdleTimeout_ShouldBoundTheLongestGap),
+                nameof(AmqpIdleTimerTests.GetStall_OnEveryTickLate_ShouldStillExpireTheSilentPeer)
             ],
             Refusals: [nameof(AmqpEngineViolationTests.OnIdleTimer_OnSilentPeer_ShouldCloseWithResourceLimitExceeded)])
     ];

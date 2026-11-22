@@ -67,6 +67,8 @@ internal sealed class AmqpConnectionEndpoint : DuplexConnection, IAmqpConnection
     private ConnectionState _state;
     private AmqpException? _closedException;
     private long _lastReadTicks;
+    private long _idleTimerPeriod;
+    private long _lastIdleTickTicks;
     private int _releasing;
 
     public AmqpConnectionEndpoint(
@@ -214,6 +216,8 @@ internal sealed class AmqpConnectionEndpoint : DuplexConnection, IAmqpConnection
 
             if (period > 0)
             {
+                _idleTimerPeriod = period;
+                _lastIdleTickTicks = Environment.TickCount64;
                 _idleTimer = new Timer(
                     static state => ((AmqpConnectionEndpoint)state!).OnIdleTimer(),
                     this,
@@ -838,6 +842,19 @@ internal sealed class AmqpConnectionEndpoint : DuplexConnection, IAmqpConnection
                 return;
             }
 
+            long sinceLastTick = now - _lastIdleTickTicks;
+            _lastIdleTickTicks = now;
+
+            long stall = GetStall(sinceLastTick, _idleTimerPeriod);
+
+            if (stall > 0)
+            {
+                // The timer ran late, so this process was stalled (a full thread pool, a long GC pause). The
+                // peer's frames from that time may be waiting unread in the carrier, so the stall does not
+                // count as the peer's silence: only time this endpoint was able to watch does.
+                DiscountStall(now, stall);
+            }
+
             if (_localIdleTimeout > 0 && now - Volatile.Read(ref _lastReadTicks) > _localIdleTimeout)
             {
                 // The peer went silent past the declared timeout: close it with the reason (Part 2, 2.4.5).
@@ -852,6 +869,52 @@ internal sealed class AmqpConnectionEndpoint : DuplexConnection, IAmqpConnection
                 _writer.WriteHeartbeatIfIdle(now, GetHeartbeatInterval(_remoteIdleTimeout));
             }
         }
+    }
+
+    /// <summary>
+    /// Moves the time of the last read forward by a stall this endpoint could not watch the peer through,
+    /// never past <paramref name="now"/>, unless the read loop records a newer read meanwhile.
+    /// </summary>
+    /// <param name="now">The tick count the idle timer read.</param>
+    /// <param name="stall">How long, in milliseconds, the idle timer ran late.</param>
+    private void DiscountStall(long now, long stall)
+    {
+        long seen = Volatile.Read(ref _lastReadTicks);
+
+        while (true)
+        {
+            long shifted = GetDiscountedReadTicks(seen, now, stall);
+            long current = Interlocked.CompareExchange(ref _lastReadTicks, shifted, seen);
+
+            if (current == seen)
+            {
+                return;
+            }
+
+            seen = current;
+        }
+    }
+
+    /// <summary>
+    /// Gets how long, in milliseconds, the idle timer was stalled: zero for a tick within twice its period of
+    /// the previous one, otherwise the time past one period.
+    /// </summary>
+    /// <param name="sinceLastTick">The milliseconds since the previous tick.</param>
+    /// <param name="period">The timer's period in milliseconds.</param>
+    internal static long GetStall(long sinceLastTick, long period)
+    {
+        return sinceLastTick > 2 * period ? sinceLastTick - period : 0;
+    }
+
+    /// <summary>
+    /// Gets the time of the last read moved forward by a stall, never past <paramref name="now"/>.
+    /// </summary>
+    /// <param name="lastReadTicks">The tick count of the last read.</param>
+    /// <param name="now">The tick count the idle timer read.</param>
+    /// <param name="stall">How long, in milliseconds, the idle timer was stalled.</param>
+    internal static long GetDiscountedReadTicks(long lastReadTicks, long now, long stall)
+    {
+        return Math.Min(lastReadTicks + stall, now);
     }
 
     /// <summary>
