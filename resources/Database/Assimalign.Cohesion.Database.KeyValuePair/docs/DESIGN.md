@@ -1940,3 +1940,24 @@ For a file with at least 1 GiB of valid allocated pages under an unrelated owner
 IndexBuildBegan and IndexBuildEnded report build lifetimes without EventSource Start/Stop activity semantics. Every begun build emits one end event on success, failure or abandonment; end includes succeeded. PagesReclaimed reports only nonempty committed batches.
 
 Constructor orphan cleanup observes cancellation only after an unknown owner supplies reclamation work. Cancellation after both new file sets exist therefore completes primary bootstrap, leaving a reopenable database. Cleanup disposal preserves an original constructor failure if disposal also fails.
+
+## Service registration verb (2026-11-23)
+
+`builder.Services.AddKeyValue(string name, Action<KeyValueDatabaseEngineBuilder> configure)` is the same registration as
+`builder.AddKeyValue(name, configure)`, projected onto `IServiceProviderBuilder` as a component
+integration (`src/Properties/ComponentIntegrations.cs`, `component-integration.md`), the way Web
+feature packages register on `builder.Services`. The package takes no DI reference: it compiles
+Core's `ComponentIntegration` shared-source module, and the generator emits the verb in every
+compilation that references this package and `Assimalign.Cohesion.DependencyInjection`.
+
+- **Static-factory template.** The engine name is a required argument, so the declaration uses the
+  `Factory` template over the hidden `KeyValueComponents.CreateEngineRegistration(name, configure)`
+  (`src/ComponentModel/`), the shape owner decision 39 of 2026-10-10 keeps for a required value. It
+  returns a `DatabaseEngineRegistration` (area root), which the verb registers as a singleton
+  instance. Creating it does no I/O; the engine is built once, during application Build.
+- **One factory body.** The `extension(IDatabaseApplicationBuilder)` verb creates the same
+  registration and hands its name and `CreateEngine` to the root seam's `AddEngine(name, factory)`,
+  so both spellings build, abort and dispose the engine identically.
+- **Name check.** The builder verb refuses a duplicate name when it is called. The services verb
+  cannot read the container, so `Database.Hosting` refuses its duplicate when Build begins, still
+  before any engine factory runs (owner decision 52 of 2026-10-09).

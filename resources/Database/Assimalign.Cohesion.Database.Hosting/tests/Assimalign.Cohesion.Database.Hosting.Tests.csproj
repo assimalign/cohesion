@@ -38,4 +38,8 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web" />
 	</ItemGroup>
+	<ItemGroup>
+		<!-- Projects the model packages' builder.Services.Add* engine verbs (component integrations). -->
+		<CohesionAnalyzerReference Include="Assimalign.Cohesion.SourceGeneration" />
+	</ItemGroup>
 </Project>

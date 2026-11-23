@@ -15,15 +15,22 @@ The module provisions nothing and knows no schema. A model's engine builder decl
 the databases its engine owns (`sql.AddDatabase("orders", ...)` inside `AddSql`), and
 the engine's own build opens or creates and provisions them before it returns, inside
 the application's `Build()`; servers start only when the application starts, so
-provisioning still precedes accept. Every engine is registered by name (`AddSql(name, ...)`,
-`AddEngine(name, factory)`), and a duplicate name is refused at registration, before
-any engine is built.
+provisioning still precedes accept.
+
+Every composition input is a registration in `Services`, as in `WebApplicationBuilder`.
+An engine is a `DatabaseEngineRegistration` singleton instance carrying its name:
+`builder.AddSql(name, ...)`, `AddEngine(name, factory)`, `AddEngine(engine)` and the
+model packages' component integrations (`builder.Services.AddSql(name, ...)`,
+`AddDocuments`, `AddGraph`, `AddKeyValue`, `AddBlob`) all register one. A builder verb
+refuses a duplicate name at registration; Build refuses one registered through
+`Services` before any engine is built.
 The concrete `DatabaseApplicationBuilder.AddService` verb accepts either an
-`IHostService` instance or a factory over the final database application context.
+`IHostService` instance or a factory over the final database application context, and
+registers it in `Services` as an `IHostService`.
 The root builder contract exposes no hosting types or background-work registration (O34).
-AddService registrations start first, then Services container IHostService registrations, each in
-registration order, then the reopen service and servers. Stop reverses that complete order,
-draining servers first. Every StartingAsync finishes before any StartAsync.
+Build resolves the engines first, then the lifecycle services in registration order,
+then appends the health listener, the reopen service and servers. Stop reverses that
+complete order, draining servers first; the provider disposes services before engines. Every StartingAsync finishes before any StartAsync.
 Concurrent service start/stop options are rejected at construction and lifecycle
 settings are snapshotted, so retained mutable options cannot bypass this ordering.
 

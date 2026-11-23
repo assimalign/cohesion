@@ -301,17 +301,21 @@ this way. Web is the reference implementation (`resources/Web/Assimalign.Cohesio
   factory-created services are owned and disposed in reverse creation order; instance
   registrations are borrowed and left to their callers. A failed `Build` disposes the provider
   before rethrowing. The concrete context exposes the provider as `ServiceProvider` for
-  hosting-layer factories. Known limit: the provider's disposal is fail-fast — the first
-  `Dispose` that throws ends the pass and later services stay undisposed.
-- **Not yet migrated: `Database.Hosting`.** Its engine and service registries keep explicit
-  ownership that is stronger than the provider's (engine factories observe preceding engines;
-  build rollback and disposal continue past a failure and aggregate it, which its tests pin).
-  Moving them into the container needs the provider to continue-and-aggregate first. Its
-  `Services` registry (reflection-free options, closed registrations) and its ownership of the
-  built provider already follow this section; its explicit `IDatabaseApplicationBuilder.AddEngine(DatabaseEngine)`
-  and `AddEngine(string name, Func<IDatabaseApplicationContext, DatabaseEngine>)` shims still
-  forward to the private engine registry rather than to `Services`, which reserves each engine
-  name at registration (owner decision 52 of 2026-10-09).
+  hosting-layer factories. The provider's disposal continues past a `Dispose` that throws and
+  rethrows one failure as itself or several as an `AggregateException`
+  (`ServiceProviderEngineScope`); until that landed it was fail-fast.
+- **Database follows it since 2026-11-23.** An engine is a `DatabaseEngineRegistration` singleton
+  instance (area root; name plus a borrowed engine or a factory over `IDatabaseApplicationContext`),
+  so a model package registers one without a container: its `extension(IDatabaseApplicationBuilder)`
+  verb through the root shim, and its `builder.Services.Add<Model>(name, configure)` component
+  integration directly (`Factory` template, because the name is required). The name check reads
+  `Services.Container` at the builder's verbs and again at `Build`, before any engine factory runs
+  (owner decision 52 of 2026-10-09). `Build` turns each registration into a `DatabaseEngine`
+  registration, resolves the engines in registration order (each factory sees the engines before
+  it), then the `IHostService` aggregate; the provider's continue-and-aggregate, reverse-creation
+  disposal disposes services before engines. `AddService` registrations start in registration
+  order with the container's, as Web's do. Until then the module kept explicit engine and service
+  registries, waiting on that provider disposal behavior.
 
 ## `Add` configures, `Use` places (owner decision, 2026-10-28)
 

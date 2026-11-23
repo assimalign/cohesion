@@ -45,20 +45,8 @@ public static partial class GraphDatabaseApplicationExtensions
             ArgumentNullException.ThrowIfNull(builder);
             ArgumentException.ThrowIfNullOrWhiteSpace(name);
             ArgumentNullException.ThrowIfNull(configure);
-            return builder.AddEngine(name, _ =>
-            {
-                var engineBuilder = GraphDatabaseEngine.CreateBuilder(name);
-                try
-                {
-                    configure(engineBuilder);
-                    return engineBuilder.Build();
-                }
-                catch (Exception failure) when (failure is not OutOfMemoryException)
-                {
-                    engineBuilder.Abort(failure);
-                    throw;
-                }
-            });
+            DatabaseEngineRegistration registration = GraphComponents.CreateEngineRegistration(name, configure);
+            return builder.AddEngine(registration.Name, registration.CreateEngine);
         }
     }
 }

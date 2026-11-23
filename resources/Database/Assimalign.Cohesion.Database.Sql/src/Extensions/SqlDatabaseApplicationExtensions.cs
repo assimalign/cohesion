@@ -47,20 +47,8 @@ public static partial class SqlDatabaseApplicationExtensions
             ArgumentNullException.ThrowIfNull(builder);
             ArgumentException.ThrowIfNullOrWhiteSpace(name);
             ArgumentNullException.ThrowIfNull(configure);
-            return builder.AddEngine(name, context =>
-            {
-                SqlDatabaseEngineBuilder engineBuilder = SqlDatabaseEngine.CreateBuilder(name);
-                try
-                {
-                    configure(engineBuilder);
-                    return engineBuilder.Build(context.BuildCancellationToken);
-                }
-                catch (Exception failure) when (failure is not OutOfMemoryException)
-                {
-                    engineBuilder.Abort(failure);
-                    throw;
-                }
-            });
+            DatabaseEngineRegistration registration = SqlComponents.CreateEngineRegistration(name, configure);
+            return builder.AddEngine(registration.Name, registration.CreateEngine);
         }
     }
 }

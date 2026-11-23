@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -16,28 +17,36 @@ using Assimalign.Cohesion.Logging;
 
 namespace Assimalign.Cohesion.Database.Hosting;
 
-/// <summary>Collects engine intent and hosting registrations for one application Build attempt.</summary>
+/// <summary>
+/// Composes a database application. Every dependency the application runs with is a registration in
+/// <see cref="Services"/>: engines (<see cref="DatabaseEngineRegistration"/>, one per engine name) and
+/// lifecycle services (<see cref="IHostService"/>).
+/// </summary>
 /// <remarks>
 /// <para>
-/// Factories transfer ownership; instances are borrowed. The host-level pieces are the ones
-/// <c>WebApplicationBuilder</c> exposes, created the same way when the builder is created:
-/// <see cref="Environment"/>, the <see cref="Configuration"/> manager (which loads each provider as
-/// it is added), the <see cref="Logging"/> builder and the <see cref="Services"/> registrations.
-/// <see cref="Build"/> builds the logger factory and the service provider once, registers the
-/// environment, the configuration and the logger factory in the provider, and hands all four to
-/// the engine factories (<see cref="DatabaseApplicationBuildContext"/>).
+/// The host-level pieces are the ones <c>WebApplicationBuilder</c> exposes, created the same way when
+/// the builder is created: <see cref="Environment"/>, the <see cref="Configuration"/> manager (which
+/// loads each provider as it is added), the <see cref="Logging"/> builder and the
+/// <see cref="Services"/> registrations. <see cref="Build"/> closes registration, builds the logger
+/// factory and the service provider once, and resolves every engine and then every lifecycle service
+/// from it, in registration order. The provider owns what its factories create and disposes it in
+/// reverse creation order, so services dispose before the engines they use.
 /// </para>
 /// <para>
-/// The root <see cref="IDatabaseApplicationBuilder"/> carries none of them: model packages compose
-/// against it without the container, configuration or logging (COHRES004).
+/// The root <see cref="IDatabaseApplicationBuilder"/> verbs are implemented explicitly as shims over
+/// those registrations, so model packages compose against the dependency-free root contract while
+/// this module owns the container. A model package also projects its verb onto
+/// <see cref="Services"/> as a component integration (<c>builder.Services.AddSql(name, ...)</c>),
+/// which registers the same <see cref="DatabaseEngineRegistration"/>.
 /// </para>
 /// <para>
 /// <b>The application level</b> of the three composition levels (B1 of the engine extensibility
 /// design, owner decisions 52 and 54 of 2026-10-09): host infrastructure, host services, health,
 /// the reopen policy, and which engines exist. It holds no database, schema,
 /// function or model type: a model's engine builder declares and provisions its databases while
-/// it is built. Every engine is registered by name, so the name is reserved when the engine is
-/// registered, before any factory runs; there is one registration path per kind of thing.
+/// it is built. Every engine is registered by name, and a duplicate name is refused before any
+/// engine factory runs: when the engine is registered through this builder, and again when Build
+/// begins, for registrations added to <see cref="Services"/> directly.
 /// </para>
 /// </remarks>
 [global::System.Diagnostics.DebuggerDisplay("DatabaseApplicationBuilder")]
@@ -45,10 +54,9 @@ namespace Assimalign.Cohesion.Database.Hosting;
 public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
 {
     private readonly DatabaseApplicationOptions _options;
-    private readonly List<(DatabaseEngine? Instance, string Name, Func<DatabaseApplicationContext, DatabaseEngine>? Factory)> _engines = [];
-    private readonly List<(IHostService? Instance, Func<DatabaseApplicationContext, IHostService>? Factory)> _serviceRegistrations = [];
     private readonly PhysicalFileSystem? _contentRoot;
     private Uri? _healthEndpoint;
+    private DatabaseApplicationContext? _context;
     private int _buildAttempted;
 
     /// <summary>Initializes a builder with host settings.</summary>
@@ -139,36 +147,47 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
     /// </remarks>
     public LoggerFactoryBuilder Logging { get; }
 
+
     /// <summary>
-    /// Gets the application's service registrations.
+    /// Gets the application's service registrations: every engine and lifecycle service the
+    /// application runs with.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Registration closes when Build begins; a later registration throws
     /// <see cref="InvalidOperationException"/>. The provider is created without dynamic code, so the
     /// application accepts closed factory and instance registrations only, and reserves
-    /// <see cref="IHostEnvironment"/>, <see cref="IConfiguration"/> and <see cref="ILoggerFactory"/>
-    /// for its own pieces. Ordinary factory-created services are owned by the provider; instances
-    /// stay owned by their callers. <see cref="Build"/> creates the
-    /// application's lifecycle list from <see cref="AddService(IHostService)"/> registrations first,
-    /// then this provider's <see cref="IHostService"/> registrations, each in registration order,
-    /// with the health listener appended last when configured, then the reopen service and
-    /// servers. Stop reverses that order, draining servers first.
-    /// Unkeyed IHostService registrations must be singletons. Build invokes their factories once
-    /// directly and the application disposes their products before engines, in reverse order;
-    /// instance registrations are borrowed. Keyed registrations are not lifecycle services.
-    /// A forwarding factory (sp => sp.GetRequiredService&lt;X&gt;()) transfers an object the provider
-    /// also owns, so both dispose it, as the container does for a forwarded singleton. Dispose must
-    /// be idempotent, following .NET's disposal guidelines; use AddService(instance) or an instance
-    /// registration to retain ownership instead. Build creates the
-    /// application's one provider; building these registrations directly yields a separate provider
-    /// the application never uses, which creates its singletons a second time and is the caller's to
-    /// dispose. <c>WebApplicationBuilder</c>'s <c>Services</c> is the same.
+    /// <see cref="IHostEnvironment"/>, <see cref="IConfiguration"/>, <see cref="ILoggerFactory"/>, the
+    /// application context and <see cref="DatabaseEngine"/> for its own pieces.
+    /// </para>
+    /// <para>
+    /// An engine is a <see cref="DatabaseEngineRegistration"/> singleton instance, as
+    /// <see cref="AddEngine(DatabaseEngine)"/>, the root verbs (<c>builder.AddSql(...)</c>) and the
+    /// model packages' component integrations (<c>builder.Services.AddSql(...)</c>) register it. A
+    /// registration added through a factory is refused, because its name must be known before any
+    /// engine factory runs. Build creates the engines first, in registration order; each engine
+    /// factory sees the engines registered before it.
+    /// </para>
+    /// <para>
+    /// Unkeyed <see cref="IHostService"/> registrations must be singletons. They start in registration
+    /// order, <see cref="AddService(IHostService)"/> and <see cref="AddService(Func{DatabaseApplicationContext, IHostService})"/>
+    /// included, followed by the health listener when configured, the reopen service and the servers;
+    /// stop reverses that order, draining servers first. Build resolves them once, after every engine
+    /// exists. Factory-created services and engines are owned by the provider, which disposes them in
+    /// reverse creation order; instances stay owned by their callers. A forwarding factory
+    /// (sp => sp.GetRequiredService&lt;X&gt;()) hands the provider an object it already owns, which it
+    /// disposes once. Build creates the application's one provider; building these registrations
+    /// directly yields a separate provider the application never uses, which creates its singletons a
+    /// second time and is the caller's to dispose. <c>WebApplicationBuilder</c>'s <c>Services</c> is
+    /// the same.
+    /// </para>
     /// </remarks>
     public ServiceProviderBuilder Services { get; }
 
     /// <summary>Registers a caller-owned engine.</summary>
     /// <param name="engine">The borrowed engine.</param>
     /// <returns>This builder.</returns>
+    /// <remarks>Registered in <see cref="Services"/> as a <see cref="DatabaseEngineRegistration"/> instance.</remarks>
     /// <exception cref="ArgumentNullException"><paramref name="engine"/> is null.</exception>
     /// <exception cref="ArgumentException">The engine name is empty, white space or invalid UTF-16.</exception>
     /// <exception cref="InvalidOperationException">
@@ -178,9 +197,7 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
     {
         EnsureMutable();
         ArgumentNullException.ThrowIfNull(engine);
-        ReserveName(engine.Name);
-        _engines.Add((engine, engine.Name, null));
-        return this;
+        return AddEngine(DatabaseEngineRegistration.Create(engine));
     }
 
     /// <summary>
@@ -190,6 +207,7 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
     /// <param name="name">The ordinal engine name, which must match the factory product.</param>
     /// <param name="factory">The ownership-transferring factory.</param>
     /// <returns>This builder.</returns>
+    /// <remarks>Registered in <see cref="Services"/> as a <see cref="DatabaseEngineRegistration"/> instance.</remarks>
     /// <exception cref="ArgumentNullException"><paramref name="name"/> or <paramref name="factory"/> is null.</exception>
     /// <exception cref="ArgumentException"><paramref name="name"/> is empty, white space or invalid UTF-16.</exception>
     /// <exception cref="InvalidOperationException">
@@ -199,33 +217,36 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
     {
         EnsureMutable();
         ArgumentNullException.ThrowIfNull(factory);
-        ReserveName(name);
-        _engines.Add((null, name, context => factory(context.BuildContext)));
-        return this;
+        ValidateName(name);
+        return AddEngine(DatabaseEngineRegistration.Create(name, context => factory(((DatabaseApplicationContext)context).BuildContext)));
     }
 
-    /// <summary>Registers a borrowed lifecycle service, started before container services, the reopen service and servers.</summary>
+    /// <summary>Registers a borrowed lifecycle service.</summary>
     /// <param name="service">The caller-owned service.</param>
     /// <returns>This builder.</returns>
-    /// <remarks>AddService registrations start in registration order; stop reverses the complete order, draining servers first.</remarks>
+    /// <remarks>
+    /// Registered in <see cref="Services"/> as an <see cref="IHostService"/> instance. Lifecycle
+    /// services start in registration order before the reopen service and the servers; stop reverses
+    /// the complete order, draining servers first.
+    /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="service"/> is null.</exception>
     /// <exception cref="InvalidOperationException">Build has begun.</exception>
     public DatabaseApplicationBuilder AddService(IHostService service)
     {
         EnsureMutable();
         ArgumentNullException.ThrowIfNull(service);
-        _serviceRegistrations.Add((service, null));
+        Services.AddSingleton<IHostService>(service);
         return this;
     }
 
-    /// <summary>Defers owned lifecycle service construction until the engine/server registry is complete.</summary>
+    /// <summary>Adds a lifecycle service created from the final application context.</summary>
     /// <param name="service">The ownership-transferring factory.</param>
     /// <returns>This builder.</returns>
     /// <remarks>
-    /// AddService factories run before container lifecycle factories are invoked. These services
-    /// start in registration order, followed by the container's IHostService registrations, the
-    /// reopen service and servers. Stop reverses that order. The application disposes this
-    /// factory's product and container lifecycle factory products; instances remain caller-owned.
+    /// Registered in <see cref="Services"/> as an <see cref="IHostService"/> factory, which Build
+    /// invokes once, after every engine and server exists. Lifecycle services start in registration
+    /// order before the reopen service and the servers; stop reverses that order. The application
+    /// disposes the product before the engines.
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="service"/> is null.</exception>
     /// <exception cref="InvalidOperationException">Build has begun.</exception>
@@ -233,7 +254,7 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
     {
         EnsureMutable();
         ArgumentNullException.ThrowIfNull(service);
-        _serviceRegistrations.Add((null, service));
+        Services.AddSingleton<IHostService>(_ => service(_context!));
         return this;
     }
 
@@ -265,7 +286,8 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
     /// <exception cref="AggregateException">Construction and compensation both failed.</exception>
     /// <exception cref="OperationCanceledException">Construction was canceled; owned products were disposed.</exception>
     /// <remarks>
-    /// Build runs each owned engine factory synchronously, in registration order. A SQL engine's
+    /// Build runs each owned engine factory synchronously, in registration order, through the
+    /// service provider. A SQL engine's
     /// factory provisions its declared databases here: open, recovery and schema migration run
     /// inside Build with no timeout (<see cref="DatabaseApplicationOptions.StartupTimeout"/> bounds
     /// service start only). Decision 49a passes the caller's cancellation token and defers
@@ -305,7 +327,8 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
         }
 
         // The application owns the host-level pieces from here, the content root's file system and
-        // the configuration first, so a failed Build disposes them with everything else.
+        // the configuration first, so a failed Build disposes them with everything else. The provider
+        // joins them once it exists; it owns every engine and service its factories create.
         var ownership = new DatabaseApplicationOwnership();
         if (_contentRoot is not null)
         {
@@ -316,103 +339,30 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
-            // Disposed after the provider, so the services it disposes can still log. The provider
-            // is built first, so service registration closes whatever fails later.
+            // Disposed after the provider, so the services it disposes can still log.
             var loggerFactory = (LoggerFactory)Logging.Build();
             ownership.Infrastructure.Add(loggerFactory);
-            DatabaseApplicationContext? context = null;
-            Uri? healthEndpoint = _healthEndpoint;
-            if (!string.IsNullOrWhiteSpace(AppEnvironment.GetValue(AppEnvironment.Variables.Gateway))
-                && AppEnvironment.TryGetEndpoint("http", out Uri? platformEndpoint))
-            {
-                if (DatabaseAdminEndpointService.CanBindPlatformEndpoint(platformEndpoint))
-                {
-                    if (healthEndpoint is not null && healthEndpoint != platformEndpoint)
-                    {
-                        DatabaseHostingEventSource.Log.HealthEndpointOverridden(healthEndpoint, platformEndpoint);
-                    }
-                    healthEndpoint = platformEndpoint;
-                }
-                else
-                {
-                    DatabaseHostingEventSource.Log.HealthEndpointAssignmentSkipped(platformEndpoint);
-                }
-            }
-
-            if (healthEndpoint is not null)
-            {
-                _ = DatabaseAdminEndpointService.GetBindEndPoint(healthEndpoint);
-                // Register through the same container lifecycle aggregate as application services.
-                // Its factory runs after context and the frozen engine/server registry exist.
-                Services.AddSingleton<IHostService>(_ => new DatabaseAdminEndpointService(healthEndpoint, context!));
-            }
-
-            ServiceProvider services = BuildServiceProvider(loggerFactory, () => context!);
-            ownership.Infrastructure.Add(services);
             DatabaseApplicationOptions options = SnapshotOptions(_options);
 
             // The environment was read when the builder was created; a later change to the options
             // must not leave the snapshot disagreeing with the context.
             options.Environment = Environment.Name;
             options.ContentRootPath = Environment.ContentRootPath;
-            context = new DatabaseApplicationContext(Environment, Configuration, services, loggerFactory, cancellationToken);
 
-            var products = new HashSet<object>(ReferenceEqualityComparer.Instance);
-            var engines = new List<DatabaseEngine>(_engines.Count);
-            var servers = new List<DatabaseServer>();
-            var hostServices = new List<IHostService>(_serviceRegistrations.Count + 2);
-            foreach (var registration in _engines)
-            {
-                if (registration.Instance is { } borrowed)
-                {
-                    AddProducts(products, borrowed);
-                }
-            }
+            Uri? healthEndpoint = ResolveHealthEndpoint();
+            var composer = new EngineComposer(this, cancellationToken);
+            ServiceProvider services = BuildServiceProvider(loggerFactory, composer, healthEndpoint, options);
+            ownership.Infrastructure.Add(services);
 
-            foreach (var registration in _serviceRegistrations)
-            {
-                if (registration.Instance is not null)
-                {
-                    products.Add(registration.Instance);
-                }
-            }
+            _context = new DatabaseApplicationContext(Environment, Configuration, services, loggerFactory, cancellationToken);
+            DatabaseApplicationContext context = _context;
 
-            // Every name was reserved, and every duplicate refused, when the engine was registered.
-            foreach (var registration in _engines)
-            {
-                DatabaseEngine engine;
-                cancellationToken.ThrowIfCancellationRequested();
-                if (registration.Instance is { } borrowed)
-                {
-                    engine = borrowed;
-                }
-                else
-                {
-                    engine = registration.Factory!(context) ?? throw new InvalidOperationException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.BuilderBuildCompositionFailure2, registration.Name));
-                    if (!products.Add(engine))
-                    {
-                        throw new InvalidOperationException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.BuilderBuildCompositionFailure3, registration.Name));
-                    }
-
-                    ownership.Engines.Add(engine);
-                    AddProducts(products, engine);
-                    if (!string.Equals(registration.Name, engine.Name, StringComparison.Ordinal))
-                    {
-                        throw new InvalidOperationException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.BuilderBuildCompositionFailure4, registration.Name, engine.Name));
-                    }
-                }
-
-                if (engine.Model is not (EngineModel.Custom or EngineModel.Sql or EngineModel.Document or EngineModel.KeyValueStore or EngineModel.Blob or EngineModel.Graph))
-                {
-                    throw new InvalidOperationException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.BuilderBuildCompositionFailure5, engine.Name));
-                }
-
-                engines.Add(engine);
-                context.FreezeRegistries(engines, []);
-            }
-
+            // Engines first, in registration order: the provider invokes each owned factory once and
+            // owns its product, so every service resolved below is created, and disposed, after them.
+            IReadOnlyList<DatabaseEngine> engines = composer.Compose(services, context);
             cancellationToken.ThrowIfCancellationRequested();
 
+            var servers = new List<DatabaseServer>();
             foreach (DatabaseEngine engine in engines)
             {
                 // The engine base attaches only a server that fronts it, and each server once, so
@@ -422,76 +372,13 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
             }
 
             context.FreezeRegistries(engines, servers);
-            var lifecycleProducts = new HashSet<object>(servers, ReferenceEqualityComparer.Instance);
-            foreach (var registration in _serviceRegistrations)
-            {
-                IHostService service = registration.Instance ?? registration.Factory!(context)
-                    ?? throw new InvalidOperationException(ErrorMessages.BuilderBuildCompositionFailure6);
-                if (registration.Instance is null)
-                {
-                    if (!products.Add(service))
-                    {
-                        throw new InvalidOperationException(ErrorMessages.BuilderBuildCompositionFailure7);
-                    }
-
-                    ownership.Services.Add(service);
-                }
-                if (!lifecycleProducts.Add(service))
-                {
-                    throw new InvalidOperationException(ErrorMessages.BuilderBuildCompositionFailure8);
-                }
-
-                hostServices.Add(service);
-            }
-
-            // Invoke lifecycle factories ourselves, once, after the complete engine/server
-            // registry and AddService products exist. The provider must not capture their
-            // products: services dispose before the engines they use. Instances stay borrowed.
-            foreach (ServiceDescriptor descriptor in Services.Container)
-            {
-                if (descriptor.ServiceType != typeof(IHostService))
-                {
-                    continue;
-                }
-
-                IHostService service = (IHostService?)(descriptor.ImplementationInstance
-                    ?? descriptor.ImplementationFactory!(services))
-                    ?? throw new InvalidOperationException(ErrorMessages.BuilderBuildCompositionFailure6);
-                if (!lifecycleProducts.Add(service))
-                {
-                    throw new InvalidOperationException(ErrorMessages.BuilderBuildCompositionFailure8);
-                }
-
-                if (descriptor.ImplementationInstance is null)
-                {
-                    if (!products.Add(service))
-                    {
-                        throw new InvalidOperationException(ErrorMessages.BuilderBuildCompositionFailure7);
-                    }
-
-                    ownership.Services.Add(service);
-                }
-
-                hostServices.Add(service);
-            }
-
-            // The module's own reopen service (owner decision 22): started with the other services,
-            // before the servers, and stopped after the servers drained. It supervises every engine
-            // of the frozen registry, the server-fronted ones included.
-            if (options.ReopenOfflineDatabases)
-            {
-                var reopen = new DatabaseReopenService(context.Engines, options.ReopenInitialDelay, options.ReopenMaximumDelay);
-                ownership.Services.Add(reopen);
-                hostServices.Add(reopen);
-                context.ReopenService = reopen;
-            }
-
-            return new DatabaseApplicationComposition(options, context, ownership, hostServices.AsReadOnly());
+            IReadOnlyList<IHostService> hostServices = ResolveLifecycleServices(services, composer.Products, servers);
+            return new DatabaseApplicationComposition(options, context, ownership, hostServices);
         }
         catch (Exception exception)
         {
-            // Endpoint validation may fail before the provider closes registration. Build is
-            // still consumed, so the container must refuse late mutation on this path too.
+            // Validation may fail before the provider closes registration. Build is still consumed,
+            // so the container must refuse late mutation on this path too.
             ((ServiceContainer)Services.Container).MakeReadOnly();
             var failures = new List<Exception>();
             Task.Run(() => ownership.DisposeAsync(failures)).GetAwaiter().GetResult();
@@ -502,6 +389,74 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
 
             throw;
         }
+    }
+
+    // The configured endpoint, unless the runtime environment names a gateway and assigns a bindable
+    // plain HTTP endpoint, which wins.
+    private Uri? ResolveHealthEndpoint()
+    {
+        Uri? healthEndpoint = _healthEndpoint;
+        if (!string.IsNullOrWhiteSpace(AppEnvironment.GetValue(AppEnvironment.Variables.Gateway))
+            && AppEnvironment.TryGetEndpoint("http", out Uri? platformEndpoint))
+        {
+            if (DatabaseAdminEndpointService.CanBindPlatformEndpoint(platformEndpoint))
+            {
+                if (healthEndpoint is not null && healthEndpoint != platformEndpoint)
+                {
+                    DatabaseHostingEventSource.Log.HealthEndpointOverridden(healthEndpoint, platformEndpoint);
+                }
+                healthEndpoint = platformEndpoint;
+            }
+            else
+            {
+                DatabaseHostingEventSource.Log.HealthEndpointAssignmentSkipped(platformEndpoint);
+            }
+        }
+
+        if (healthEndpoint is not null)
+        {
+            _ = DatabaseAdminEndpointService.GetBindEndPoint(healthEndpoint);
+        }
+
+        return healthEndpoint;
+    }
+
+    // Resolves the IHostService aggregate once, in registration order, and checks what the container
+    // cannot: a null product, one object registered twice or also fronting an engine as a server, and a
+    // factory product that is already another registered product. The descriptors are read in the same
+    // order the provider resolves them, so each product is paired with the registration that made it.
+    private IReadOnlyList<IHostService> ResolveLifecycleServices(ServiceProvider services, HashSet<object> products, List<DatabaseServer> servers)
+    {
+        var descriptors = new List<ServiceDescriptor>();
+        foreach (ServiceDescriptor descriptor in Services.Container)
+        {
+            if (descriptor.ServiceType == typeof(IHostService))
+            {
+                descriptors.Add(descriptor);
+            }
+        }
+
+        IHostService?[] resolved = [.. services.GetServices<IHostService>()];
+        var lifecycleProducts = new HashSet<object>(servers, ReferenceEqualityComparer.Instance);
+        var hostServices = new List<IHostService>(resolved.Length);
+        for (int index = 0; index < resolved.Length; index++)
+        {
+            IHostService service = resolved[index] ?? throw new InvalidOperationException(ErrorMessages.BuilderBuildCompositionFailure6);
+            if (!lifecycleProducts.Add(service))
+            {
+                throw new InvalidOperationException(ErrorMessages.BuilderBuildCompositionFailure8);
+            }
+
+            if (descriptors[index].ImplementationInstance is null && !products.Add(service))
+            {
+                throw new InvalidOperationException(ErrorMessages.BuilderBuildCompositionFailure7);
+            }
+
+            products.Add(service);
+            hostServices.Add(service);
+        }
+
+        return hostServices.AsReadOnly();
     }
 
     internal static DatabaseApplicationOptions SnapshotOptions(DatabaseApplicationOptions options)
@@ -528,22 +483,6 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
         };
     }
 
-    // A borrowed engine's own products, and a factory engine's, so a factory that returns one of them
-    // as a new product is refused.
-    private static void AddProducts(HashSet<object> products, DatabaseEngine engine)
-    {
-        products.Add(engine);
-        foreach (DatabaseServer server in engine.Servers)
-        {
-            products.Add(server);
-        }
-
-        foreach (DatabaseEngineWorker worker in engine.Workers)
-        {
-            products.Add(worker);
-        }
-    }
-
     private void EnsureMutable()
     {
         if (Volatile.Read(ref _buildAttempted) != 0)
@@ -554,27 +493,26 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
 
     /// <summary>
     /// Closes service registration and builds the application's provider once: checks every
-    /// registration, registers the environment, the configuration and the logger factory as
-    /// borrowed instances and the application context through concrete and interface factories,
-    /// makes the container read-only, and builds.
+    /// registration and every engine name, registers the environment, the configuration, the logger
+    /// factory and the application context, one <see cref="DatabaseEngine"/> per engine registration,
+    /// the health listener and the reopen service, makes the container read-only, and builds.
     /// </summary>
-    /// <param name="loggerFactory">The application's logger factory.</param>
-    /// <param name="getContext">Returns the application's context once it has been constructed.</param>
     /// <returns>The provider, which the application owns.</returns>
     /// <exception cref="InvalidOperationException">
-    /// A registration needs constructor activation or is open generic, or registers a reserved
-    /// service type.
+    /// A registration needs constructor activation or is open generic, registers a reserved service
+    /// type, registers an engine through a factory, or repeats an engine name.
     /// </exception>
-    private ServiceProvider BuildServiceProvider(LoggerFactory loggerFactory, Func<DatabaseApplicationContext> getContext)
+    private ServiceProvider BuildServiceProvider(LoggerFactory loggerFactory, EngineComposer composer, Uri? healthEndpoint, DatabaseApplicationOptions options)
     {
         var container = (ServiceContainer)Services.Container;
         try
         {
+            var names = new HashSet<string>(StringComparer.Ordinal);
             foreach (ServiceDescriptor descriptor in container)
             {
                 if (descriptor.ServiceType == typeof(IHostService) && descriptor.Lifetime != ServiceLifetime.Singleton)
                 {
-                    throw new InvalidOperationException(string.Format(System.Globalization.CultureInfo.CurrentCulture,
+                    throw new InvalidOperationException(string.Format(CultureInfo.CurrentCulture,
                         ErrorMessages.LifecycleServiceLifetimeInvalid, descriptor));
                 }
 
@@ -582,15 +520,35 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
                     || descriptor.ServiceType == typeof(IHostEnvironment)
                     || descriptor.ServiceType == typeof(DatabaseApplicationContext)
                     || descriptor.ServiceType == typeof(IDatabaseApplicationContext)
-                    || descriptor.ServiceType == typeof(ILoggerFactory))
+                    || descriptor.ServiceType == typeof(ILoggerFactory)
+                    || descriptor.ServiceType == typeof(DatabaseEngine))
                 {
                     throw new InvalidOperationException(
-                        string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.BuilderBuildServiceProviderFailure, descriptor.ServiceType.Name, Describe(descriptor.ServiceType)));
+                        string.Format(CultureInfo.CurrentCulture, ErrorMessages.BuilderBuildServiceProviderFailure, descriptor.ServiceType.Name, Describe(descriptor.ServiceType)));
                 }
 
                 if (descriptor.ImplementationType is not null || descriptor.ServiceType.ContainsGenericParameters)
                 {
                     throw new InvalidOperationException(ErrorMessages.BuilderBuildServiceProviderFailure2);
+                }
+
+                // Every engine name is checked here, before any engine factory runs (owner decision 52):
+                // a registration added to Services directly, as the model packages' component
+                // integrations add theirs, was not checked when it was registered.
+                if (descriptor.ServiceType == typeof(DatabaseEngineRegistration))
+                {
+                    if (descriptor.ImplementationInstance is not DatabaseEngineRegistration registration)
+                    {
+                        throw new InvalidOperationException(ErrorMessages.EngineRegistrationNotInstance);
+                    }
+
+                    ValidateName(registration.Name);
+                    if (!names.Add(registration.Name))
+                    {
+                        throw new InvalidOperationException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.ApplicationBuilderReserveNameFailure, registration.Name));
+                    }
+
+                    composer.Registrations.Add(registration);
                 }
             }
 
@@ -599,9 +557,45 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
             Services.AddSingleton<ILoggerFactory>(loggerFactory);
             // Created before engine factories run; lifecycle factories resolve it after registries freeze.
             // The application owns the context, which is not disposable; the provider must never own it.
-            Func<IServiceProvider, DatabaseApplicationContext> contextFactory = _ => getContext();
+            Func<IServiceProvider, DatabaseApplicationContext> contextFactory = _ => _context!;
             Services.AddSingleton<DatabaseApplicationContext>(contextFactory);
             Services.AddSingleton<IDatabaseApplicationContext>(contextFactory);
+
+            // One DatabaseEngine per registration, in registration order: a borrowed engine as an
+            // instance, which the provider never disposes, and an owned one as a factory, whose product
+            // the provider owns and disposes after every service created later.
+            for (int index = 0; index < composer.Registrations.Count; index++)
+            {
+                DatabaseEngineRegistration registration = composer.Registrations[index];
+                if (registration.IsOwned)
+                {
+                    int position = index;
+                    Services.AddSingleton<DatabaseEngine>(_ => composer.CreateOwned(position));
+                }
+                else
+                {
+                    Services.AddSingleton<DatabaseEngine>(registration.Engine!);
+                }
+            }
+
+            // The module's own lifecycle services follow the application's, so they start after them
+            // and before the servers, and stop after the servers drained: the health listener, then
+            // the reopen service (owner decision 22), which supervises every engine of the frozen
+            // registry, the server-fronted ones included. Their factories run after the registry froze.
+            if (healthEndpoint is not null)
+            {
+                Services.AddSingleton<IHostService>(_ => new DatabaseAdminEndpointService(healthEndpoint, _context!));
+            }
+
+            if (options.ReopenOfflineDatabases)
+            {
+                Services.AddSingleton<IHostService>(_ =>
+                {
+                    var reopen = new DatabaseReopenService(_context!.Engines, options.ReopenInitialDelay, options.ReopenMaximumDelay);
+                    _context.ReopenService = reopen;
+                    return reopen;
+                });
+            }
         }
         finally
         {
@@ -616,6 +610,7 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
             => reserved == typeof(IConfiguration) ? "configuration"
                 : reserved == typeof(IHostEnvironment) ? "host environment"
                 : reserved == typeof(DatabaseApplicationContext) || reserved == typeof(IDatabaseApplicationContext) ? "application context"
+                : reserved == typeof(DatabaseEngine) ? "engine registrations (register a DatabaseEngineRegistration)"
                 : "logger factory";
     }
 
@@ -652,9 +647,15 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
         return contentRoot;
     }
 
-    // Every engine is registered by name, so a duplicate is refused here, before any factory runs
-    // (owner decision 52): a factory can open and provision databases.
-    private void ReserveName(string name)
+    private DatabaseApplicationBuilder AddEngine(DatabaseEngineRegistration registration)
+    {
+        ValidateName(registration.Name);
+        ReserveName(registration.Name);
+        Services.AddSingleton<DatabaseEngineRegistration>(registration);
+        return this;
+    }
+
+    private static void ValidateName(string name)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         for (int index = 0; index < name.Length; index++)
@@ -666,9 +667,20 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
             }
             index++;
         }
-        if (_engines.Any(registration => string.Equals(registration.Name, name, StringComparison.Ordinal)))
+    }
+
+    // Every engine registered through this builder is refused here when its name is taken, before any
+    // factory runs (owner decision 52): a factory can open and provision databases. The duplicate check
+    // reads the registrations in Services, never a second collection.
+    private void ReserveName(string name)
+    {
+        foreach (ServiceDescriptor descriptor in Services.Container)
         {
-            throw new InvalidOperationException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ApplicationBuilderReserveNameFailure, name));
+            if (descriptor.ImplementationInstance is DatabaseEngineRegistration registration
+                && string.Equals(registration.Name, name, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.ApplicationBuilderReserveNameFailure, name));
+            }
         }
     }
 
@@ -680,12 +692,122 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
     {
         EnsureMutable();
         ArgumentNullException.ThrowIfNull(factory);
-        ReserveName(name);
-        _engines.Add((null, name, context => factory(context)));
-        return this;
+        ValidateName(name);
+        return AddEngine(DatabaseEngineRegistration.Create(name, factory));
     }
 
     IDatabaseApplication IDatabaseApplicationBuilder.Build() => Build();
+
+    // Creates the owned engines as the provider resolves them, in registration order, and checks what the
+    // container cannot: a null product, a product that is another registered object, a name that is not
+    // the registered one, and an unknown model. A factory sees the engines registered before it.
+    private sealed class EngineComposer
+    {
+        private readonly DatabaseApplicationBuilder _builder;
+        private readonly CancellationToken _cancellationToken;
+        private DatabaseEngine?[] _engines = [];
+
+        internal EngineComposer(DatabaseApplicationBuilder builder, CancellationToken cancellationToken)
+        {
+            _builder = builder;
+            _cancellationToken = cancellationToken;
+        }
+
+        internal List<DatabaseEngineRegistration> Registrations { get; } = [];
+
+        // Every engine, server and worker, and every lifecycle service, so a factory that returns one of
+        // them as a new product is refused.
+        internal HashSet<object> Products { get; } = new(ReferenceEqualityComparer.Instance);
+
+        internal IReadOnlyList<DatabaseEngine> Compose(ServiceProvider services, DatabaseApplicationContext context)
+        {
+            _engines = new DatabaseEngine?[Registrations.Count];
+            for (int index = 0; index < Registrations.Count; index++)
+            {
+                if (Registrations[index].Engine is { } borrowed)
+                {
+                    _engines[index] = borrowed;
+                    AddProducts(Products, borrowed);
+                }
+            }
+
+            // The provider invokes the factories in registration order; each one fills its slot.
+            _ = services.GetServices<DatabaseEngine>().ToArray();
+            var engines = new List<DatabaseEngine>(_engines.Length);
+            foreach (DatabaseEngine? engine in _engines)
+            {
+                engines.Add(engine!);
+            }
+
+            foreach (DatabaseEngine engine in engines)
+            {
+                if (engine.Model is not (EngineModel.Custom or EngineModel.Sql or EngineModel.Document or EngineModel.KeyValueStore or EngineModel.Blob or EngineModel.Graph))
+                {
+                    throw new InvalidOperationException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.BuilderBuildCompositionFailure5, engine.Name));
+                }
+            }
+
+            context.FreezeRegistries(engines, []);
+            return engines.AsReadOnly();
+        }
+
+        internal DatabaseEngine CreateOwned(int position)
+        {
+            DatabaseApplicationContext context = _builder._context!;
+            DatabaseEngineRegistration registration = Registrations[position];
+            _cancellationToken.ThrowIfCancellationRequested();
+            context.FreezeRegistries(_engines.Take(position).Select(engine => engine!), []);
+            DatabaseEngine engine = registration.CreateEngine(context)
+                ?? throw new InvalidOperationException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.BuilderBuildCompositionFailure2, registration.Name));
+            if (!Products.Add(engine))
+            {
+                // Another registration's object: not this factory's to dispose.
+                throw new InvalidOperationException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.BuilderBuildCompositionFailure3, registration.Name));
+            }
+
+            try
+            {
+                AddProducts(Products, engine);
+                if (!string.Equals(registration.Name, engine.Name, StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.BuilderBuildCompositionFailure4, registration.Name, engine.Name));
+                }
+            }
+            catch (Exception exception)
+            {
+                // The provider captures only what a factory returns, so a refused product is disposed here.
+                try
+                {
+                    Task.Run(() => engine.DisposeAsync().AsTask()).GetAwaiter().GetResult();
+                }
+                catch (Exception disposal)
+                {
+                    throw new AggregateException(exception, disposal);
+                }
+
+                throw;
+            }
+
+            _engines[position] = engine;
+            return engine;
+        }
+
+        // A borrowed engine's own products, and a factory engine's, so a factory that returns one of them
+        // as a new product is refused.
+        private static void AddProducts(HashSet<object> products, DatabaseEngine engine)
+        {
+            products.Add(engine);
+            foreach (DatabaseServer server in engine.Servers)
+            {
+                products.Add(server);
+            }
+
+            foreach (DatabaseEngineWorker worker in engine.Workers)
+            {
+                products.Add(worker);
+            }
+        }
+    }
 
     private sealed class DebugView
     {

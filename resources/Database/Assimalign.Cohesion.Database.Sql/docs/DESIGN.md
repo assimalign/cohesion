@@ -12264,3 +12264,24 @@ Index publication refuses CS05060 before catalog persistence when the resolved p
 A catalog-only DROP can leave a stale manager handle until reopen. Pruning reads an immutable retiring-owner set published by the catalog at commit and abandonment, without taking the catalog monitor under the data apply gate. Open-time writer purge visits registered live owners; its former retirement/empty-owner skips were unreachable. Detached undo/read handles remain protected by their existing context and statement fences.
 
 Ordinary index builds retain the initial data-allocation admission refusal (CK04014). Later roots in the same constraint statement and all chunk retries wait outside the apply gate; an unrelated constrained CREATE TABLE therefore still refuses while a CTAS checkpoint is parked, without trapping its caller behind that pause.
+
+## Service registration verb (2026-11-23)
+
+`builder.Services.AddSql(string name, Action<SqlDatabaseEngineBuilder> configure)` is the same registration as
+`builder.AddSql(name, configure)`, projected onto `IServiceProviderBuilder` as a component
+integration (`src/Properties/ComponentIntegrations.cs`, `component-integration.md`), the way Web
+feature packages register on `builder.Services`. The package takes no DI reference: it compiles
+Core's `ComponentIntegration` shared-source module, and the generator emits the verb in every
+compilation that references this package and `Assimalign.Cohesion.DependencyInjection`.
+
+- **Static-factory template.** The engine name is a required argument, so the declaration uses the
+  `Factory` template over the hidden `SqlComponents.CreateEngineRegistration(name, configure)`
+  (`src/ComponentModel/`), the shape owner decision 39 of 2026-10-10 keeps for a required value. It
+  returns a `DatabaseEngineRegistration` (area root), which the verb registers as a singleton
+  instance. Creating it does no I/O; the engine is built once, during application Build.
+- **One factory body.** The `extension(IDatabaseApplicationBuilder)` verb creates the same
+  registration and hands its name and `CreateEngine` to the root seam's `AddEngine(name, factory)`,
+  so both spellings build, abort and dispose the engine identically.
+- **Name check.** The builder verb refuses a duplicate name when it is called. The services verb
+  cannot read the container, so `Database.Hosting` refuses its duplicate when Build begins, still
+  before any engine factory runs (owner decision 52 of 2026-10-09).

@@ -154,22 +154,29 @@ public sealed class DatabaseContainerServiceTests
             "engine:dispose", "provider:dispose"]);
     }
 
-    [Fact(DisplayName = displayPrefix + "Build invokes factories once after AddService and starts in the documented order")]
-    public async Task Build_WithContainerServices_ShouldInvokeFactoriesOnceAndPreserveLifecycleOrder()
+    [Fact(DisplayName = displayPrefix + "Build invokes factories once after the engines and starts services in registration order")]
+    public async Task Build_WithContainerServices_ShouldInvokeFactoriesOnceAndStartInRegistrationOrder()
     {
-        // Arrange: register container services first to prove the grouping is independent of call order.
+        // Arrange: container registrations and AddService calls interleave, as Web's do; one order rules both.
         var events = new List<string>();
         using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         var builder = DatabaseApplication.CreateBuilder();
         DatabaseApplicationContext? context = null;
         int factoryCalls = 0;
-        builder.Services.AddSingleton<IHostService>(_ =>
+        builder.Services.AddSingleton<IHostService>(services =>
         {
             factoryCalls++;
-            context.ShouldNotBeNull().Engines.ShouldHaveSingleItem().Name.ShouldBe("sql");
-            context.Servers.Count.ShouldBe(2);
+            var resolved = services.GetRequiredService<DatabaseApplicationContext>();
+            resolved.Engines.ShouldHaveSingleItem().Name.ShouldBe("sql");
+            resolved.Servers.Count.ShouldBe(2);
             events.Add("container:create");
             return new RecordingService(events, "container-first");
+        });
+        builder.AddService(applicationContext =>
+        {
+            context = applicationContext;
+            events.Add("add:create");
+            return new RecordingService(events, "add-first");
         });
         builder.Services.AddSingleton<IHostService>(new RecordingService(events, "container-second"));
         builder.AddEngine("sql", _ =>
@@ -177,13 +184,8 @@ public sealed class DatabaseContainerServiceTests
             var engine = new RecordingEngine("sql");
             engine.AddServer(owner => new RecordingServer(events, "server-first", owner));
             engine.AddServer(owner => new RecordingServer(events, "server-second", owner));
+            events.Add("engine:create");
             return engine;
-        });
-        builder.AddService(applicationContext =>
-        {
-            context = applicationContext;
-            events.Add("add:create");
-            return new RecordingService(events, "add-first");
         });
         builder.AddService(new RecordingService(events, "add-second"));
 
@@ -195,11 +197,12 @@ public sealed class DatabaseContainerServiceTests
 
         // Assert
         factoryCalls.ShouldBe(1);
+        context.ShouldBeSameAs(application.Context);
         events.ShouldBe([
-            "add:create", "container:create",
-            "add-first:start", "add-second:start", "container-first:start", "container-second:start",
+            "engine:create", "container:create", "add:create",
+            "container-first:start", "add-first:start", "container-second:start", "add-second:start",
             "server-first:start", "server-second:start", "server-second:stop", "server-first:stop",
-            "container-second:stop", "container-first:stop", "add-second:stop", "add-first:stop"]);
+            "add-second:stop", "container-second:stop", "add-first:stop", "container-first:stop"]);
     }
 
     [Theory(DisplayName = displayPrefix + "Factory products are disposed once and instances remain borrowed")]

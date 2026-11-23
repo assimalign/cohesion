@@ -4606,3 +4606,24 @@ The journal bound is also checked with a 256 KiB trigger above the largest chunk
 Exact property keys count UTF-16BE bytes and zero escapes before encoding, and builds reserve their temporary prefix and composite buffers before allocation through a high-water mark. Ordinary CREATE, SET and DELETE do not reserve exact-key workspace, with any text index, including one on the same label and property. Text extraction already walks the original string and reserves each fixed nine-byte trigram before yielding it. Planner enum validation uses allocation-free comparisons; GC eviction of reflection enum caches must not alter ordinary-write allocation floors or ceilings.
 
 Indexed-write allocation children warm and measure in a verified GC-free window, so Gen2 trimming cannot hide their unique smallest encoded-preimage sample and raise the observed DELETE floor by 248 B. Preallocated probes record allocations, pre-image bytes, page counts and threads, emitting diagnostics after measurement; Debug and Release hosts run the optimized child with unchanged ceilings, 128 B headroom and injected 129-byte controls.
+
+## Service registration verb (2026-11-23)
+
+`builder.Services.AddGraph(string name, Action<GraphDatabaseEngineBuilder> configure)` is the same registration as
+`builder.AddGraph(name, configure)`, projected onto `IServiceProviderBuilder` as a component
+integration (`src/Properties/ComponentIntegrations.cs`, `component-integration.md`), the way Web
+feature packages register on `builder.Services`. The package takes no DI reference: it compiles
+Core's `ComponentIntegration` shared-source module, and the generator emits the verb in every
+compilation that references this package and `Assimalign.Cohesion.DependencyInjection`.
+
+- **Static-factory template.** The engine name is a required argument, so the declaration uses the
+  `Factory` template over the hidden `GraphComponents.CreateEngineRegistration(name, configure)`
+  (`src/ComponentModel/`), the shape owner decision 39 of 2026-10-10 keeps for a required value. It
+  returns a `DatabaseEngineRegistration` (area root), which the verb registers as a singleton
+  instance. Creating it does no I/O; the engine is built once, during application Build.
+- **One factory body.** The `extension(IDatabaseApplicationBuilder)` verb creates the same
+  registration and hands its name and `CreateEngine` to the root seam's `AddEngine(name, factory)`,
+  so both spellings build, abort and dispose the engine identically.
+- **Name check.** The builder verb refuses a duplicate name when it is called. The services verb
+  cannot read the container, so `Database.Hosting` refuses its duplicate when Build begins, still
+  before any engine factory runs (owner decision 52 of 2026-10-09).
