@@ -72,5 +72,30 @@
 						   ObjectHasImplicitOperators="true"
 						   ObjectHasIsValidMethod="true"
 						   ObjectComparison="Ordinal" />
+		<!-- The directory vocabulary. A user or group identifier is a GUID, derived from the name when code does not give one. A name compares case-insensitively, so two spellings of one name are one name and derive one identifier. -->
+		<CohesionValueType Include="ValueObjects\IdentityUserId.cs"
+						   ObjectRuntimeType="Guid"
+						   ObjectNamespace="Assimalign.Cohesion.IdentityHub"
+						   ObjectAccessModifier="public"
+						   ObjectHasImplicitOperators="true" />
+		<CohesionValueType Include="ValueObjects\IdentityUserName.cs"
+						   ObjectRuntimeType="String"
+						   ObjectNamespace="Assimalign.Cohesion.IdentityHub"
+						   ObjectAccessModifier="public"
+						   ObjectHasImplicitOperators="true"
+						   ObjectHasIsValidMethod="true"
+						   ObjectComparison="OrdinalIgnoreCase" />
+		<CohesionValueType Include="ValueObjects\IdentityGroupId.cs"
+						   ObjectRuntimeType="Guid"
+						   ObjectNamespace="Assimalign.Cohesion.IdentityHub"
+						   ObjectAccessModifier="public"
+						   ObjectHasImplicitOperators="true" />
+		<CohesionValueType Include="ValueObjects\IdentityGroupName.cs"
+						   ObjectRuntimeType="String"
+						   ObjectNamespace="Assimalign.Cohesion.IdentityHub"
+						   ObjectAccessModifier="public"
+						   ObjectHasImplicitOperators="true"
+						   ObjectHasIsValidMethod="true"
+						   ObjectComparison="OrdinalIgnoreCase" />
 	</ItemGroup>
 </Project>
