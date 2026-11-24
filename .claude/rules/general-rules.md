@@ -98,7 +98,7 @@ These are also centrally managed. Don't duplicate per project unless the project
   internal `Resources` accessor too.
 - Adoption covers Http, Web and Connections and the seven existing resource projects. Other areas
   adopt it when next touched; [#1470](https://github.com/assimalign/cohesion/issues/1470) covers
-  Database. No file under `resources/Database/` changes while the owner's Database PR is active.
+  Database.
 
 ### Validate single-valued input with generated value objects
 
@@ -471,8 +471,7 @@ Component-integration factories whose required value arguments cannot be express
 remain governed by [component-integration.md](component-integration.md).
 
 Database adoption is tracked by [#1470](https://github.com/assimalign/cohesion/issues/1470).
-No `resources/Database/` file changes during the owner's active Database PR. The Web.Health
-`HealthChecks.CreateBuilder()` conversion is deferred because Database.Hosting calls it;
+The Web.Health `HealthChecks.CreateBuilder()` conversion is deferred because Database.Hosting calls it;
 `JsonWebTokenWriter.CreateEs256` keeps its existing spelling.
 
 ### `InternalsVisibleTo` is for tests
