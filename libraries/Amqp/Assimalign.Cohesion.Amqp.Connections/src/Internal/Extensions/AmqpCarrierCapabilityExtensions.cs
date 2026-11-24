@@ -15,15 +15,13 @@ internal static class AmqpCarrierCapabilityExtensions
         /// Throws when the capabilities do not describe a carrier usable for AMQP framing:
         /// a reliable, ordered byte stream.
         /// </summary>
-        /// <param name="paramName">The name of the constructor parameter that supplied the carrier.</param>
+        /// <param name="paramName">The name of the creation parameter that supplied the carrier.</param>
         /// <exception cref="ArgumentException">Thrown when the carrier is not a reliable, ordered byte stream.</exception>
         public void ThrowIfNotAmqpCarrier(string paramName)
         {
             if (capabilities is not { Delivery: ConnectionDelivery.Stream, IsReliable: true, IsOrdered: true })
             {
-                throw new ArgumentException(
-                    "The AMQP transport requires a carrier that delivers a reliable, ordered byte stream.",
-                    paramName);
+                throw new ArgumentException(ErrorMessages.CarrierNotReliableStream, paramName);
             }
         }
     }

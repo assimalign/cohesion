@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.Amqp.Connections.AotSample</RootNamespace>
+		<!--
+		    The NativeAOT guard for the AMQP engine. It runs a broker and a client in one process over TCP
+		    loopback, the broker authenticating with SASL PLAIN, and checks what each feature delivers: the
+		    establishment, every Part 1 type on the wire, every Part 3 section, the four outcomes and
+		    pre-settled transfers, a message split across frames, transactional posting through a
+		    coordinator, AmqpMessageCodec, a refused link, a refused login and the close. It prints one
+		    line per check and exits 1 when any check fails. Two layers, as the IdentityModel and
+		    Database.Sql guards have them: the trim and AOT analyzer diagnostics are errors in this
+		    project's own compilation, and the published binary is run:
+
+		        dotnet publish libraries/Amqp/Assimalign.Cohesion.Amqp.Connections/samples/Assimalign.Cohesion.Amqp.Connections.AotSample/Assimalign.Cohesion.Amqp.Connections.AotSample.csproj -c Release -r linux-x64
+
+		    Use the publishing host's RID. CI publishes and runs it for linux-x64
+		    (.github/workflows/library-amqp.yml). A harness, not a library: never packed.
+
+		    The gate is no IL2xxx or IL3xxx warning at all, so beyond the analyzer codes promoted
+		    below, ILC treats every warning of its whole-program analysis as an error, and reports
+		    each one at its source instead of one roll-up per referenced assembly.
+		-->
+		<OutputType>Exe</OutputType>
+		<IsPackable>false</IsPackable>
+		<ImplicitUsings>disable</ImplicitUsings>
+		<PublishAot>true</PublishAot>
+		<WarningsAsErrors>$(WarningsAsErrors);IL2026;IL2070;IL2072;IL2075;IL2087;IL3050;IL3051</WarningsAsErrors>
+		<IlcTreatWarningsAsErrors>true</IlcTreatWarningsAsErrors>
+		<TrimmerSingleWarn>false</TrimmerSingleWarn>
+	</PropertyGroup>
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Amqp" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Amqp.Connections" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.Tcp" />
+	</ItemGroup>
+</Project>

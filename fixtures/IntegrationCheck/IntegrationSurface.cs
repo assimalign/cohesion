@@ -5,6 +5,11 @@ using System;
 using System.Text.Json.Serialization.Metadata;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.Database.Blob;
+using Assimalign.Cohesion.Database.Documents;
+using Assimalign.Cohesion.Database.Graph;
+using Assimalign.Cohesion.Database.KeyValuePair;
+using Assimalign.Cohesion.Database.Sql;
 using Assimalign.Cohesion.DependencyInjection;
 using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Logging;
@@ -22,6 +27,7 @@ using Assimalign.Cohesion.Web.ForwardedHeaders;
 using Assimalign.Cohesion.Web.HostFiltering;
 using Assimalign.Cohesion.Web.HttpsPolicy;
 using Assimalign.Cohesion.Web.OpenApi;
+using Assimalign.Cohesion.Web.Proxy;
 using Assimalign.Cohesion.Web.Query;
 using Assimalign.Cohesion.Web.RateLimiting;
 using Assimalign.Cohesion.Web.RequestTimeouts;
@@ -74,6 +80,18 @@ internal static class IntegrationSurface
             .AddCors()
             .AddCors(cors => cors.Options.AddDefaultPolicy(policy => policy.WithOrigins("https://canary.example")))
             .AddCors((services, cors) => cors.Options.AddPolicy("canary", policy => policy.AllowAnyOrigin()))
+            // The proxies register settings too: the reverse-proxy routes and the forward-proxy rules.
+            .AddReverseProxy()
+            .AddReverseProxy(proxy => proxy.Options.AddRoute(new ReverseProxyRoute
+            {
+                Name = "canary",
+                PathPrefix = "/canary",
+                Destinations = [new Uri("http://canary.internal/")],
+            }))
+            .AddReverseProxy((services, proxy) => proxy.Options.Forwarder.PreserveHost = true)
+            .AddForwardProxy()
+            .AddForwardProxy(proxy => proxy.Options.AddRule(new ForwardProxyRule { Hosts = ["canary.example"] }))
+            .AddForwardProxy((services, proxy) => proxy.Options.AddRule(new ForwardProxyRule { Hosts = ["*.canary.example"], Ports = [443] }))
             .AddErrorHandling()
             .AddErrorHandling(errors => errors.OnError(
                 (context, exception, cancellationToken) => ValueTask.FromResult(false)))
@@ -152,5 +170,17 @@ internal static class IntegrationSurface
             .AddValidation()
             .AddValidation(validation => validation.Options.Enabled = false)
             .AddValidation((services, validation) => validation.Options.Enabled = false);
+    }
+
+    // Each Database model package registers its engine as a DatabaseEngineRegistration singleton
+    // through a static factory, because the engine name is a required argument (decision 39, #1395).
+    internal static void ConfigureDatabase(IServiceProviderBuilder builder)
+    {
+        builder
+            .AddSql("sql", sql => sql.AddDatabase("orders"))
+            .AddDocuments("documents", documents => documents.AddDatabase("catalog"))
+            .AddGraph("graph", graph => { })
+            .AddKeyValue("key-value", keyValue => { })
+            .AddBlob("blob", blob => blob.AddDatabase("assets"));
     }
 }

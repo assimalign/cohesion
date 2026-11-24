@@ -1,65 +1,107 @@
-# Assimalign.Cohesion.Amqp.Transports
+# Assimalign.Cohesion.Amqp.Connections
 
 ## Summary
 
-The AMQP 1.0 transport layer for Cohesion: protocol-header negotiation, frame and message
-codecs for the AMQP and SASL protocol phases, and server/client transports that establish AMQP
-connections over carrier connections produced by the `Assimalign.Cohesion.Connections`
-contracts. Carriers are selected by capability (a reliable, ordered byte stream), never by
-protocol identity; both single-stream and multiplexed carriers are supported. Session, link,
-and messaging semantics are out of scope — they belong to the sibling
-`Assimalign.Cohesion.Amqp` library.
+The AMQP 1.0 engine for Cohesion. `AmqpConnectionListener` and `AmqpConnectionFactory` establish
+AMQP connections over carrier connections produced by the `Assimalign.Cohesion.Connections`
+contracts, and return each one open: protocol headers exchanged, TLS and SASL done when configured,
+and both `open` frames exchanged. The connections they return implement the root package's
+`IAmqpConnection`, and the engine behind them runs the connection, session and link state machines,
+checks every frame against the specification, and encodes the Part 1 type system and the Part 3
+message format.
+
+Carriers are chosen by capability, a reliable and ordered byte stream, never by protocol identity:
+TCP, Unix domain sockets, named pipes, QUIC, TLS over any of them, or the in-memory driver.
+Single-stream and multiplexed carriers are both supported.
 
 ## Dependencies
 
+- `Assimalign.Cohesion.Amqp`: the model the engine implements
+- `Assimalign.Cohesion.Connections`: the carrier contracts, listener and factory bases, and the
+  layered listener that runs establishment
 - `Assimalign.Cohesion.Core`
-- `Assimalign.Cohesion.Connections`
 
 ## Key Types
 
-- `AmqpServerTransport` — accepts AMQP connections over an `IDuplexConnectionListener` or
-  `IMultiplexedConnectionListener`; owns and disposes the listener.
-- `AmqpClientTransport` — establishes AMQP connections to an `EndPoint` over an
-  `IDuplexConnectionFactory` or `IMultiplexedConnectionFactory`.
-- `IAmqpConnection` / `AmqpConnection` — an AMQP connection over a carrier; `Open()` /
-  `OpenAsync()` yield the (cached) connection context.
-- `IAmqpConnectionContext` / `AmqpConnectionContext` — the opened context; **is** an
-  `IDuplexPipe`, with `AsStream()`, `NegotiateAsync` / `SwitchProtocolAsync`, and
-  `SendAsync` / `ReceiveAsync` for frames.
-- `AmqpTransportOptions` — initial protocol header, auto-negotiation toggle, max frame size.
-- `AmqpProtocolHeader`, `AmqpProtocolId`, `AmqpFrame`, `AmqpFrameType` — the wire-level value
-  types.
-- `AmqpPerformative` family — `AmqpOpenPerformative`, `AmqpBeginPerformative`,
-  `AmqpAttachPerformative`, `AmqpFlowPerformative`, `AmqpTransferPerformative`,
-  `AmqpDispositionPerformative`, `AmqpDetachPerformative`, `AmqpEndPerformative`,
-  `AmqpClosePerformative`, and the SASL performatives.
-- `AmqpMessage`, `AmqpSource`, `AmqpTarget`, `AmqpError`, `AmqpSymbol`,
-  `AmqpDescribedValue` — the AMQP 1.0 data model.
-- `AmqpProtocolCodec`, `AmqpFrameCodec`, `AmqpMessageCodec` — static encode/decode facades.
-- `AmqpProtocolException` — the area exception root.
+| Type | Role |
+|---|---|
+| `AmqpConnectionListener` (`IAmqpConnectionListener`) | Accepts AMQP connections over an `IDuplexConnectionListener` or `IMultiplexedConnectionListener` and returns each one open. It owns the carrier listener; a connection whose establishment fails or times out is dropped without stopping the listener. |
+| `AmqpConnectionFactory` (`IAmqpConnectionFactory`) | Opens AMQP connections over an `IDuplexConnectionFactory` or `IMultiplexedConnectionFactory`, one new carrier per `ConnectAsync(EndPoint)` call. |
+| `AmqpConnectionListenerOptions`, `AmqpConnectionFactoryOptions` | Container id, maximum frame size, channel maximum, idle and handshake timeouts, session defaults, the `open`'s capabilities and properties; the listener's SASL mechanisms and handshake bound, the factory's host name and SASL mechanism. |
+| `AmqpMessageCodec` | Encodes and decodes `AmqpMessage` without a connection, and lets an intermediary read the bare message and replace the annotated sections around it unchanged. |
 
-## Validated values
+Everything an application does with a connection (sessions, links, deliveries, settlement,
+transactions) is the root package's API; see its
+[OVERVIEW.md](../../Assimalign.Cohesion.Amqp/docs/OVERVIEW.md).
 
-Construct an `AmqpSymbol` from non-null seven-bit ASCII text; an empty symbol is allowed and
-letter case is significant. Use `AmqpSymbol.TryCreate(text, out var symbol)` when invalid input
-is expected. A default symbol has no value and can be compared or used as a dictionary key,
-but cannot be encoded as a symbol. Its `ToString()` returns an empty string.
+## Usage
 
-Set transport and Open maximum frame sizes to at least 512 bytes. The standalone frame encoder
-enforces the same minimum before encoding. `AmqpOpenPerformative.MaxFrameSize = null` omits
-the advertised limit. Invalid assignments and encoder limits throw `ArgumentOutOfRangeException`;
-invalid peer symbols and advertised limits throw `AmqpProtocolException` during decoding.
+A server accepts open connections and the sessions and links peers begin on them:
 
-The symbol's generated JSON converter writes a JSON string (or null for default), including
-when used with source-generated JSON serialization. See [DESIGN.md](DESIGN.md#symbol-and-frame-size-validation-1484)
-for the behavior changes from 10.0.0-preview.1.
+```csharp
+using System.Net;
+
+using Assimalign.Cohesion.Amqp;
+using Assimalign.Cohesion.Amqp.Connections;
+using Assimalign.Cohesion.Connections.Tcp;
+
+AmqpConnectionListenerOptions options = new() { ContainerId = "orders-broker" };
+options.SaslMechanisms.Add(AmqpSaslPlainServerMechanism.Create(ValidateAsync));
+
+// The AMQP listener takes ownership of the TCP listener.
+await using AmqpConnectionListener listener = AmqpConnectionListener.Create(
+    TcpConnectionListener.Create(tcp => tcp.EndPoint = new IPEndPoint(IPAddress.Any, 5672)),
+    options);
+await listener.BindAsync(cancellationToken);
+
+await using IAmqpConnection connection = await listener.AcceptAsync(cancellationToken);
+IAmqpSession session = await connection.AcceptSessionAsync(cancellationToken);
+IAmqpLinkRequest request = await session.AcceptLinkAsync(cancellationToken);
+```
+
+A client connects and begins its own:
+
+```csharp
+AmqpConnectionFactory factory = AmqpConnectionFactory.Create(new TcpConnectionFactory(), new AmqpConnectionFactoryOptions
+{
+    SaslMechanism = AmqpSaslPlainClientMechanism.Create("user", password)
+});
+
+await using IAmqpConnection connection = await factory.ConnectAsync(new DnsEndPoint("broker", 5672), cancellationToken);
+IAmqpSession session = await connection.BeginSessionAsync(cancellationToken: cancellationToken);
+```
+
+For TLS, compose the TLS layer on the carrier, below AMQP:
+`AmqpConnectionListener.Create(tcpListener.UseTls(tlsServerOptions))` and
+`AmqpConnectionFactory.Create(tcpFactory.UseTls(tlsClientOptions))`, with `UseTls` from
+`Assimalign.Cohesion.Connections.Security`. The TLS facts are then on the AMQP connection's
+features, and SASL EXTERNAL authenticates the client certificate.
+
+A peer that negotiates TLS inside AMQP, with the TLS protocol header, needs the layer in band
+instead: set `TlsLayer` to a `TlsConnectionLayer` in the listener's or the factory's options, and
+`RequireTls` on the listener to refuse clients that do not ask for it. A factory with a layer
+never continues without TLS. See "In-band TLS" in [DESIGN.md](DESIGN.md).
+
+Disposing the listener disposes the carrier listener and any connection still being established,
+but not the connections it already returned: their owners dispose them. Disposing a connection
+closes it with the `close` exchange; `Abort` ends it at once.
 
 ## Source Layout
 
-- `src/` — transports, connection/context guided bases, performative and message DTOs, value
-  types, and the public codec facades.
-- `src/Abstractions` — `IAmqpConnection`, `IAmqpConnectionContext`.
-- `src/Exceptions` — `AmqpProtocolException`.
-- `src/Extensions` — carrier capability gating (`ThrowIfNotAmqpCarrier`).
-- `src/Internal` — the concrete carrier connections (single-stream, multiplexed), the
-  connection context, and the `AmqpEncoding` wire toolbox.
+```
+src/
+├── Abstractions/      IAmqpConnectionListener, IAmqpConnectionFactory
+├── Internal/
+│   ├── Carriers/      the multiplexed carrier adapters
+│   ├── Encoding/      the Part 1 encoder and reader, the message format, terminus rules
+│   ├── Engine/        the connection, session and link state machines, deliveries, the frame writer
+│   ├── Establishment/ the handshake (headers, TLS, SASL, open), the listener's layer, settings
+│   ├── Extensions/    carrier capability gating, exception helpers
+│   ├── Frames/        frame layout and size checks
+│   └── Performatives/ the Part 2 and Part 5 performatives
+├── Properties/        AssemblyInfo.cs and ErrorMessages.resx
+└── *.cs               AmqpConnectionListener, AmqpConnectionFactory, their options, AmqpMessageCodec
+```
+
+The design record, including the compliance maps, the interoperability tests against AMQPNetLite
+(`tests/Interop/`) and the breaking changes from 10.0.0-preview.1, is [DESIGN.md](DESIGN.md).

@@ -4,9 +4,15 @@
 		<Platform Name="x64" />
 		<Platform Name="x86" />
 	</Configurations>
-	<Folder Name="/Amqp/" />
+	<Folder Name="/Amqp/">
+		<File Path="README.md" />
+	</Folder>
 	<Folder Name="/Amqp/Assimalign.Cohesion.Amqp/">
 		<File Path="Assimalign.Cohesion.Amqp/README.md" />
+	</Folder>
+	<Folder Name="/Amqp/Assimalign.Cohesion.Amqp/docs/">
+		<File Path="Assimalign.Cohesion.Amqp/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.Amqp/docs/OVERVIEW.md" />
 	</Folder>
 	<Folder Name="/Amqp/Assimalign.Cohesion.Amqp/src/">
 		<Project Path="Assimalign.Cohesion.Amqp/src/Assimalign.Cohesion.Amqp.csproj" />
@@ -21,6 +27,10 @@
 		<File Path="Assimalign.Cohesion.Amqp.Connections/docs/DESIGN.md" />
 		<File Path="Assimalign.Cohesion.Amqp.Connections/docs/OVERVIEW.md" />
 	</Folder>
+	<Folder Name="/Amqp/Assimalign.Cohesion.Amqp.Connections/samples/" />
+	<Folder Name="/Amqp/Assimalign.Cohesion.Amqp.Connections/samples/Assimalign.Cohesion.Amqp.Connections.AotSample/">
+		<Project Path="Assimalign.Cohesion.Amqp.Connections/samples/Assimalign.Cohesion.Amqp.Connections.AotSample/Assimalign.Cohesion.Amqp.Connections.AotSample.csproj" />
+	</Folder>
 	<Folder Name="/Amqp/Assimalign.Cohesion.Amqp.Connections/src/">
 		<Project Path="Assimalign.Cohesion.Amqp.Connections/src/Assimalign.Cohesion.Amqp.Connections.csproj" />
 	</Folder>
@@ -31,5 +41,6 @@
 		<Project Path="../Core/Assimalign.Cohesion.Core/src/Assimalign.Cohesion.Core.csproj" />
 		<Project Path="../Connections/Assimalign.Cohesion.Connections/src/Assimalign.Cohesion.Connections.csproj" />
 		<Project Path="../Connections/Assimalign.Cohesion.Connections.InMemory/src/Assimalign.Cohesion.Connections.InMemory.csproj" />
+		<Project Path="../Connections/Assimalign.Cohesion.Connections.Tcp/src/Assimalign.Cohesion.Connections.Tcp.csproj" />
 	</Folder>
 </Solution>

@@ -51,6 +51,18 @@ internal sealed class ManualTimeProvider : TimeProvider
     /// <param name="delta">How far to move the clock.</param>
     public void Advance(TimeSpan delta)
     {
+        AdvanceDeferringCallbacks(delta).Invoke();
+    }
+
+    /// <summary>
+    /// Moves the clock forward like <see cref="Advance"/>, but holds back the callbacks of the timers that
+    /// fall due, as a busy thread pool holds back a timer callback the system has already dispatched: no
+    /// <see cref="ITimer.Change"/> made meanwhile recalls them.
+    /// </summary>
+    /// <param name="delta">How far to move the clock.</param>
+    /// <returns>An action that runs the held-back callbacks.</returns>
+    public Action AdvanceDeferringCallbacks(TimeSpan delta)
+    {
         List<ManualTimer> due = new();
 
         lock (_gate)
@@ -67,10 +79,30 @@ internal sealed class ManualTimeProvider : TimeProvider
             }
         }
 
-        foreach (ManualTimer timer in due)
+        return () => FireAll(due);
+    }
+
+    /// <summary>
+    /// Fires every armed timer now, before it falls due, as a timer whose clock is coarser than the time
+    /// provider's can. A one-shot timer is spent, as when it falls due.
+    /// </summary>
+    public void FireArmedTimersEarly()
+    {
+        List<ManualTimer> armed = new();
+
+        lock (_gate)
         {
-            timer.Fire();
+            foreach (ManualTimer timer in _timers)
+            {
+                if (timer.DueAt is not null)
+                {
+                    timer.DueAt = timer.Period is { } period ? _now + period : null;
+                    armed.Add(timer);
+                }
+            }
         }
+
+        FireAll(armed);
     }
 
     /// <summary>
@@ -102,6 +134,14 @@ internal sealed class ManualTimeProvider : TimeProvider
             }
 
             await Task.Delay(1);
+        }
+    }
+
+    private static void FireAll(List<ManualTimer> timers)
+    {
+        foreach (ManualTimer timer in timers)
+        {
+            timer.Fire();
         }
     }
 

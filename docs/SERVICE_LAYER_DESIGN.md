@@ -194,18 +194,20 @@ Current state:
 - `IdentityHub` is blocked by the current incompleteness of `libraries/IdentityModel`. The identity service should not invent its own foundational object model if the shared identity contracts are still partial.
 
 Root abstractions:
-- Reuse `IIdentityHub`, `IIdentityClient`, `IIdentityProvider`, `IIdentityContext`, `IIdentityResult`, and related client abstractions.
-- Add `ITokenService`, `IKeyStore`, `IDirectoryStore`, `ISessionStore`, `IFederationProvider`, `IAuditStore`, and `IProvisioningService`.
+- Reuse `IIdentityHub`, `IIdentityProvider`, `IIdentityContext`, `IIdentityResult`, and related client abstractions.
+- Add `ITokenService`, `IFederationProvider`, and `IProvisioningService`.
+- The app registration is defined as the concrete `IdentityClient`, which replaced the `IIdentityClient` placeholder (2026-11-20): one application as a client, an API, or both, identified by a GUID that `IdentityClientId.FromName` derives from a name, and served by `IIdentityClientRegistry` in the root. IdentityHub is code-first, and an identity object defined in code is locked: it is read like any other and changes only in the code, while the same kind of object created at run time lives in the store. Every later identity object (auth flows, conditional access) follows that rule. The model and the reasoning are in the root's `docs/DESIGN.md`, "App registrations".
+- Persistence is one seam, `IIdentityHubStore`: a versioned record store whose payload layouts belong to feature-owned codecs. It replaces the earlier plan of one typed store per entity (`IKeyStore`, `IDirectoryStore`, `ISessionStore`, `IAuditStore`). The contract and the reasoning are in `resources/IdentityHub/Assimalign.Cohesion.IdentityHub/docs/DESIGN.md`.
 
 Project plan:
 - Keep `Assimalign.Cohesion.IdentityHub` as the root service library.
 - Keep `Assimalign.Cohesion.IdentityHub.Models` for shared data contracts.
 - Add `Assimalign.Cohesion.IdentityHub.Tokens` for JWT, JWS, JWE, JWK, and JWA flows.
-- Add `Assimalign.Cohesion.IdentityHub.Directory` for tenants, users, groups, apps, and service principals.
+- Add `Assimalign.Cohesion.IdentityHub.Directory` for tenants, users, groups, and service principals. App registrations are already in the root, because every part of the hub reads them.
 - Add `Assimalign.Cohesion.IdentityHub.Federation` for OAuth, OIDC, SAML, and external identity provider integration.
 - Add `Assimalign.Cohesion.IdentityHub.Sessions` for refresh tokens, device sessions, and revocation.
 - Add `Assimalign.Cohesion.IdentityHub.Provisioning` for SCIM if provisioning remains in scope.
-- Add `Assimalign.Cohesion.IdentityHub.Storage` if persistence moves beyond a simple directory module.
+- Add one store package per medium that implements `IIdentityHubStore`. The contract and an in-memory store ship in the root, so no `IdentityHub.Storage` package of typed stores is planned.
 
 Specifications:
 - JWS: <https://datatracker.ietf.org/doc/html/rfc7515>

@@ -49,6 +49,15 @@
         </_CohesionPackage>
     </ItemGroup>
 
+    <!--
+        Interoperability Test Peers: independent implementations of a protocol Cohesion implements, which
+        test projects run against Cohesion's own. Test projects only; no shipped project references one.
+    -->
+    <ItemGroup>
+        <!-- AMQP 1.0 client and listener (Apache-2.0, no dependencies on netstandard2.0), #432. -->
+        <_CohesionPackage Include="AMQPNetLite.Core" Version="2.5.5" />
+    </ItemGroup>
+
     <!-- PowerShell Binary Module Dependencies  -->
     <ItemGroup>
         <_CohesionPackage Include="System.Management.Automation" Version="7.6.0-preview.5" />

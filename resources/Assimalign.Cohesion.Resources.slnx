@@ -518,9 +518,13 @@
 	<Folder Name="/resources/IdentityHub/Assimalign.Cohesion.IdentityHub/" />
 	<Folder Name="/resources/IdentityHub/Assimalign.Cohesion.IdentityHub/docs/">
 		<File Path="IdentityHub/Assimalign.Cohesion.IdentityHub/docs/DESIGN.md" />
+		<File Path="IdentityHub/Assimalign.Cohesion.IdentityHub/docs/OVERVIEW.md" />
 	</Folder>
 	<Folder Name="/resources/IdentityHub/Assimalign.Cohesion.IdentityHub/src/">
 		<Project Path="IdentityHub/Assimalign.Cohesion.IdentityHub/src/Assimalign.Cohesion.IdentityHub.csproj" />
+	</Folder>
+	<Folder Name="/resources/IdentityHub/Assimalign.Cohesion.IdentityHub/tests/">
+		<Project Path="IdentityHub/Assimalign.Cohesion.IdentityHub/tests/Assimalign.Cohesion.IdentityHub.Tests.csproj" />
 	</Folder>
 	<Folder Name="/resources/IdentityHub/Assimalign.Cohesion.IdentityHub.Hosting/" />
 	<Folder Name="/resources/IdentityHub/Assimalign.Cohesion.IdentityHub.Hosting/docs/">
@@ -1060,6 +1064,17 @@
 	</Folder>
 	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.ProblemDetails/tests/">
 		<Project Path="Web/Assimalign.Cohesion.Web.ProblemDetails/tests/Assimalign.Cohesion.Web.ProblemDetails.Tests.csproj" />
+	</Folder>
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Proxy/" />
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Proxy/docs/">
+		<File Path="Web/Assimalign.Cohesion.Web.Proxy/docs/DESIGN.md" />
+		<File Path="Web/Assimalign.Cohesion.Web.Proxy/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Proxy/src/">
+		<Project Path="Web/Assimalign.Cohesion.Web.Proxy/src/Assimalign.Cohesion.Web.Proxy.csproj" />
+	</Folder>
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Proxy/tests/">
+		<Project Path="Web/Assimalign.Cohesion.Web.Proxy/tests/Assimalign.Cohesion.Web.Proxy.Tests.csproj" />
 	</Folder>
 	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Query/" />
 	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Query/docs/">

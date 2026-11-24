@@ -6,6 +6,7 @@
         <CohesionSharedSource Include="Assimalign.Cohesion.Database.Graph.Protocol" Module="Encoding" />
 		<CohesionSharedSource Include="Assimalign.Cohesion.Database.Execution" Module="Parameters" />
 		<CohesionSharedSource Include="Assimalign.Cohesion.Database" Module="Engine" />
+		<CohesionSharedSource Include="Assimalign.Cohesion.Core" Module="ComponentIntegration" />
 		<CohesionSharedSource Include="Assimalign.Cohesion.Database.Storage" Module="JournalFormat" />
 		<CohesionSharedSource Include="Assimalign.Cohesion.Database.Indexing" Module="Build" />
 	</ItemGroup>

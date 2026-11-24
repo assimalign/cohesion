@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <resheader name="resmimetype"><value>text/microsoft-resx</value></resheader>
+  <resheader name="version"><value>2.0</value></resheader>
+  <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms</value></resheader>
+  <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms</value></resheader>
+  <data name="DialectNotSupported" xml:space="preserve"><value>Schemas are generated for the draft-07, 2019-09 and 2020-12 dialects only, not '{0}'.</value></data>
+  <data name="SchemaIdInvalid" xml:space="preserve"><value>The schema identifier must be an absolute URI without a fragment.</value></data>
+  <data name="TransformResultNull" xml:space="preserve"><value>The schema node transform returned null.</value></data>
+  <data name="TransformResultHasParent" xml:space="preserve"><value>The schema node transform returned a node that belongs to another node. Return the node it was given, or a new or cloned node.</value></data>
+  <data name="DefinitionNameConflict" xml:space="preserve"><value>The schema node transform added the definition '{0}' to the root, and the generator defines a schema of that name.</value></data>
+</root>

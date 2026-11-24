@@ -3961,3 +3961,24 @@ Before direct open records a receipt for an unknown index owner, it loads every 
 Index builds read immutable stored content with chain checksum verification and skip its write-time JSON validation pass. Extraction reserves its own DOM; measured wide-object cases include 100,000 and 700,000 distinct property names. UNIQUE validation additionally reserves its bounded cursor batch using the 64 largest built key lengths, with bounded charged bookkeeping and separate continuation/previous-key space. Non-scalar or oversized keys anywhere refuse before duplicate detection in the completed tree; the existing CD02021, CD02026 and CD03020 identities remain.
 
 During a build, extraction bounds scalar and composite encodings from borrowed JSON bytes before decoding strings or allocating key buffers. An oversized scalar encoding is recorded without allocating its key bytes; CD02026 is raised only when a key is formed, so an empty or filtered array can produce no postings. Scalar validation still reaches a later non-scalar UNIQUE component first (CD02021). Permitted component and composite workspace is reserved before allocation. Bounded scalar string decoding uses stack UTF-8 and UTF-16 buffers, so escaped keys do not rent an uncharged unescaping buffer. WHEN string equality and inequality compare borrowed JSON bytes with ValueEquals, including escapes; ordered comparisons reserve an upper bound for the decoded UTF-16 string and any pooled unescaping buffer before GetString. Transient WHEN scratch is charged through a per-document high-water mark: constant transcoding, pooled unescaping and the ordered comparison's decoded string contribute only the largest single comparison, rather than accumulating per array element. Predicate paths are charged once per document. Every accessed key or WHEN string that the stored extractor decodes is validated without heap decoding, including oversized components and components after an oversized one; invalid UTF-8 or unpaired surrogate escapes retain the stored extractor's InvalidOperationException refusal. Ordinary writes use the existing stored-content extractor and early-stopping TryGetProperty walk to retain their allocation floors. Raw OpenWrite content receives CK06003 for malformed JSON, a duplicate of an accessed property, or an accessed number that fails the exact decimal round-trip rule of ValidateContent. Number validation uses borrowed UTF-8 and fixed stack space. Duplicates and numbers off the accessed path are no longer refused at build time. Duplicate detection walks only the accessed object and uses no property-name set. The cumulative DOM growth charge intentionally refuses a document with about 1.4 million small tokens under the default 64 MiB grant; the former peak-only estimate admitted that case.
+
+## Service registration verb (2026-11-23)
+
+`builder.Services.AddDocuments(string name, Action<DocumentDatabaseEngineBuilder> configure)` is the same registration as
+`builder.AddDocuments(name, configure)`, projected onto `IServiceProviderBuilder` as a component
+integration (`src/Properties/ComponentIntegrations.cs`, `component-integration.md`), the way Web
+feature packages register on `builder.Services`. The package takes no DI reference: it compiles
+Core's `ComponentIntegration` shared-source module, and the generator emits the verb in every
+compilation that references this package and `Assimalign.Cohesion.DependencyInjection`.
+
+- **Static-factory template.** The engine name is a required argument, so the declaration uses the
+  `Factory` template over the hidden `DocumentComponents.CreateEngineRegistration(name, configure)`
+  (`src/ComponentModel/`), the shape owner decision 39 of 2026-10-10 keeps for a required value. It
+  returns a `DatabaseEngineRegistration` (area root), which the verb registers as a singleton
+  instance. Creating it does no I/O; the engine is built once, during application Build.
+- **One factory body.** The `extension(IDatabaseApplicationBuilder)` verb creates the same
+  registration and hands its name and `CreateEngine` to the root seam's `AddEngine(name, factory)`,
+  so both spellings build, abort and dispose the engine identically.
+- **Name check.** The builder verb refuses a duplicate name when it is called. The services verb
+  cannot read the container, so `Database.Hosting` refuses its duplicate when Build begins, still
+  before any engine factory runs (owner decision 52 of 2026-10-09).

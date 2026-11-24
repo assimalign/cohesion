@@ -27,6 +27,7 @@ on:
       - "resources/Web/Assimalign.Cohesion.Web.HostFiltering/src/**"
       - "resources/Web/Assimalign.Cohesion.Web.HttpsPolicy/src/**"
       - "resources/Web/Assimalign.Cohesion.Web.OpenApi/src/**"
+      - "resources/Web/Assimalign.Cohesion.Web.Proxy/src/**"
       - "resources/Web/Assimalign.Cohesion.Web.Query/src/**"
       - "resources/Web/Assimalign.Cohesion.Web.RateLimiting/src/**"
       - "resources/Web/Assimalign.Cohesion.Web.RequestTimeouts/src/**"
@@ -38,6 +39,14 @@ on:
       - "resources/Web/Assimalign.Cohesion.Web.StaticFiles/src/**"
       - "resources/Web/Assimalign.Cohesion.Web.Validation/src/**"
       - "resources/Web/Assimalign.Cohesion.Web.WebSockets/src/**"
+      # The Database model packages declare the builder.Services.Add<Model> engine verbs, and the
+      # area root owns the DatabaseEngineRegistration they register.
+      - "resources/Database/Assimalign.Cohesion.Database/src/**"
+      - "resources/Database/Assimalign.Cohesion.Database.Blob/src/**"
+      - "resources/Database/Assimalign.Cohesion.Database.Documents/src/**"
+      - "resources/Database/Assimalign.Cohesion.Database.Graph/src/**"
+      - "resources/Database/Assimalign.Cohesion.Database.KeyValuePair/src/**"
+      - "resources/Database/Assimalign.Cohesion.Database.Sql/src/**"
       - ".github/workflows/analyzers.yml" # When Pipeline File Changes
       # Shared build infrastructure that every project in this workflow compiles with.
       - ".github/actions/build/**"
@@ -106,7 +115,7 @@ jobs:
         name: "Checkout: IntegrationCheck"
 
       - name: Install .NET
-        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
           global-json-file: global.json
 

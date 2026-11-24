@@ -6,6 +6,14 @@ on:
       - '!libraries/Amqp/**/*.slnx'
       - '!libraries/Amqp/**/*.md'
       - '.github/workflows/library-amqp.yml'                 # When Pipeline File Changes
+      # The carriers the tests and the NativeAOT guard run AMQP over: a change there can break AMQP
+      # without touching it (the guard found #1086, a TCP close race).
+      - 'libraries/Connections/Assimalign.Cohesion.Connections/src/**'
+      - 'libraries/Connections/Assimalign.Cohesion.Connections.InMemory/src/**'
+      - 'libraries/Connections/Assimalign.Cohesion.Connections.Tcp/src/**'
+      # The TLS layer the in-band TLS tests negotiate with (#1935), and the TLS facts they check.
+      - 'libraries/Connections/Assimalign.Cohesion.Connections.Security/src/**'
+      - 'libraries/Connections/Assimalign.Cohesion.Connections.Tls/src/**'
       # Shared build infrastructure that every project in this workflow compiles with.
       - '.github/actions/build/**'
       - 'global.json'
@@ -63,3 +71,57 @@ jobs:
           area: 'libraries'
           category: 'Amqp'
           projects: ${{ toJSON(matrix.projects) }}
+
+  # The NativeAOT guard (#433): it publishes the engine's AOT sample for linux-x64 and runs it. The sample
+  # opens a broker and a client over TCP loopback and checks the establishment, the Part 1 types, the
+  # Part 3 sections, the outcomes, a split transfer, transactional posting, the codec, refusals and the
+  # close. The publish step fails on any IL2xxx/IL3xxx warning in its output, whatever the project
+  # promotes to an error (the sample also makes ILC's warnings errors), and the run fails unless every
+  # check passed.
+  aot-guard:
+    name: "${{ github.workflow }} NativeAOT guard (linux-x64)"
+    runs-on: ${{ fromJSON(vars.CI_RUNNERS || '{}')['ubuntu-latest'] || 'ubuntu-latest' }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        name: Checkout
+
+      - name: Install .NET
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          global-json-file: global.json
+
+      - name: Restore build tasks
+        shell: pwsh
+        run: dotnet restore "./build/Tasks/Assimalign.Cohesion.Build.Tasks.csproj"
+
+      - name: Build build tasks
+        shell: pwsh
+        run: dotnet build "./build/Tasks/Assimalign.Cohesion.Build.Tasks.csproj" --configuration Release --no-restore
+
+      - name: Publish and run the AMQP NativeAOT guard
+        shell: pwsh
+        run: |
+          $output = Join-Path $env:RUNNER_TEMP "amqp-aot-sample"
+          $log = dotnet publish "./libraries/Amqp/Assimalign.Cohesion.Amqp.Connections/samples/Assimalign.Cohesion.Amqp.Connections.AotSample/Assimalign.Cohesion.Amqp.Connections.AotSample.csproj" `
+              --configuration Release `
+              --runtime linux-x64 `
+              --output $output `
+              --nologo 2>&1
+          $log | Write-Host
+          if ($LASTEXITCODE -ne 0) {
+            throw "NativeAOT publish of Amqp.Connections.AotSample failed with exit code $LASTEXITCODE."
+          }
+          if ($log -match "warning IL[23][0-9]{3}") {
+            throw "NativeAOT publish of Amqp.Connections.AotSample reported IL2xxx/IL3xxx warnings."
+          }
+
+          $checks = & (Join-Path $output "Assimalign.Cohesion.Amqp.Connections.AotSample")
+          $exitCode = $LASTEXITCODE
+          $checks | Write-Host
+          if ($exitCode -ne 0) {
+            throw "Amqp.Connections.AotSample reported a failed check (exit code $exitCode)."
+          }
+          if (-not ($checks -match '^Amqp\.Connections NativeAOT: (\d+)/\1 checks passed\.$')) {
+            throw "Amqp.Connections.AotSample did not report that every check passed."
+          }

@@ -18,6 +18,7 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.HostFiltering" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.HttpsPolicy" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.OpenApi" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Proxy" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Query" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.RateLimiting" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.RequestTimeouts" />
@@ -29,6 +30,12 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.StaticFiles" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Validation" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.WebSockets" />
+		<!-- The Database model packages' builder.Services.Add<Model>(name, configure) engine verbs. -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Blob" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Documents" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Graph" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.KeyValuePair" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.DependencyInjection" />
 	</ItemGroup>
 	<ItemGroup>

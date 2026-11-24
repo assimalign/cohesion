@@ -219,9 +219,15 @@
 		<File Path="libraries/Directory.Build.targets" />
 		<File Path="libraries/README.md" />
 	</Folder>
-	<Folder Name="/cohesion/libraries/Amqp/" />
+	<Folder Name="/cohesion/libraries/Amqp/">
+		<File Path="libraries/Amqp/README.md" />
+	</Folder>
 	<Folder Name="/cohesion/libraries/Amqp/Assimalign.Cohesion.Amqp/">
 		<File Path="libraries/Amqp/Assimalign.Cohesion.Amqp/README.md" />
+	</Folder>
+	<Folder Name="/cohesion/libraries/Amqp/Assimalign.Cohesion.Amqp/docs/">
+		<File Path="libraries/Amqp/Assimalign.Cohesion.Amqp/docs/DESIGN.md" />
+		<File Path="libraries/Amqp/Assimalign.Cohesion.Amqp/docs/OVERVIEW.md" />
 	</Folder>
 	<Folder Name="/cohesion/libraries/Amqp/Assimalign.Cohesion.Amqp/src/">
 		<Project Path="libraries/Amqp/Assimalign.Cohesion.Amqp/src/Assimalign.Cohesion.Amqp.csproj" />
@@ -231,6 +237,13 @@
 	</Folder>
 	<Folder Name="/cohesion/libraries/Amqp/Assimalign.Cohesion.Amqp.Connections/">
 		<File Path="libraries/Amqp/Assimalign.Cohesion.Amqp.Connections/README.md" />
+	</Folder>
+	<Folder Name="/cohesion/libraries/Amqp/Assimalign.Cohesion.Amqp.Connections/docs/">
+		<File Path="libraries/Amqp/Assimalign.Cohesion.Amqp.Connections/docs/DESIGN.md" />
+		<File Path="libraries/Amqp/Assimalign.Cohesion.Amqp.Connections/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/cohesion/libraries/Amqp/Assimalign.Cohesion.Amqp.Connections/samples/">
+		<Project Path="libraries/Amqp/Assimalign.Cohesion.Amqp.Connections/samples/Assimalign.Cohesion.Amqp.Connections.AotSample/Assimalign.Cohesion.Amqp.Connections.AotSample.csproj" />
 	</Folder>
 	<Folder Name="/cohesion/libraries/Amqp/Assimalign.Cohesion.Amqp.Connections/src/">
 		<Project Path="libraries/Amqp/Assimalign.Cohesion.Amqp.Connections/src/Assimalign.Cohesion.Amqp.Connections.csproj" />
@@ -925,6 +938,17 @@
 	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http.ProtocolUpgrade/tests/">
 		<Project Path="libraries/Http/Assimalign.Cohesion.Http.ProtocolUpgrade/tests/Assimalign.Cohesion.Http.ProtocolUpgrade.Tests.csproj" />
 	</Folder>
+	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http.Proxy/" />
+	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http.Proxy/docs/">
+		<File Path="libraries/Http/Assimalign.Cohesion.Http.Proxy/docs/DESIGN.md" />
+		<File Path="libraries/Http/Assimalign.Cohesion.Http.Proxy/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http.Proxy/src/">
+		<Project Path="libraries/Http/Assimalign.Cohesion.Http.Proxy/src/Assimalign.Cohesion.Http.Proxy.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http.Proxy/tests/">
+		<Project Path="libraries/Http/Assimalign.Cohesion.Http.Proxy/tests/Assimalign.Cohesion.Http.Proxy.Tests.csproj" />
+	</Folder>
 	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http.Tls/" />
 	<Folder Name="/cohesion/libraries/Http/Assimalign.Cohesion.Http.Tls/docs/">
 		<File Path="libraries/Http/Assimalign.Cohesion.Http.Tls/docs/DESIGN.md" />
@@ -1020,6 +1044,35 @@
 	</Folder>
 	<Folder Name="/cohesion/libraries/IdentityModel/Assimalign.Cohesion.IdentityModel.Token.Saml/tests/">
 		<Project Path="libraries/IdentityModel/Assimalign.Cohesion.IdentityModel.Token.Saml/tests/Assimalign.Cohesion.IdentityModel.Token.Saml.Tests.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/libraries/JsonSchema/">
+		<File Path="libraries/JsonSchema/Directory.Build.props" />
+		<File Path="libraries/JsonSchema/Directory.Build.targets" />
+		<File Path="libraries/JsonSchema/README.md" />
+	</Folder>
+	<Folder Name="/cohesion/libraries/JsonSchema/Assimalign.Cohesion.JsonSchema/docs/">
+		<File Path="libraries/JsonSchema/Assimalign.Cohesion.JsonSchema/docs/DESIGN.md" />
+		<File Path="libraries/JsonSchema/Assimalign.Cohesion.JsonSchema/docs/OVERVIEW.md" />
+		<File Path="libraries/JsonSchema/Assimalign.Cohesion.JsonSchema/docs/PROVENANCE.md" />
+	</Folder>
+	<Folder Name="/cohesion/libraries/JsonSchema/Assimalign.Cohesion.JsonSchema/samples/Assimalign.Cohesion.JsonSchema.AotSample/">
+		<Project Path="libraries/JsonSchema/Assimalign.Cohesion.JsonSchema/samples/Assimalign.Cohesion.JsonSchema.AotSample/Assimalign.Cohesion.JsonSchema.AotSample.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/libraries/JsonSchema/Assimalign.Cohesion.JsonSchema/src/">
+		<Project Path="libraries/JsonSchema/Assimalign.Cohesion.JsonSchema/src/Assimalign.Cohesion.JsonSchema.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/libraries/JsonSchema/Assimalign.Cohesion.JsonSchema/tests/">
+		<Project Path="libraries/JsonSchema/Assimalign.Cohesion.JsonSchema/tests/Assimalign.Cohesion.JsonSchema.Tests.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/libraries/JsonSchema/Assimalign.Cohesion.JsonSchema.Generation/docs/">
+		<File Path="libraries/JsonSchema/Assimalign.Cohesion.JsonSchema.Generation/docs/DESIGN.md" />
+		<File Path="libraries/JsonSchema/Assimalign.Cohesion.JsonSchema.Generation/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/cohesion/libraries/JsonSchema/Assimalign.Cohesion.JsonSchema.Generation/src/">
+		<Project Path="libraries/JsonSchema/Assimalign.Cohesion.JsonSchema.Generation/src/Assimalign.Cohesion.JsonSchema.Generation.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/libraries/JsonSchema/Assimalign.Cohesion.JsonSchema.Generation/tests/">
+		<Project Path="libraries/JsonSchema/Assimalign.Cohesion.JsonSchema.Generation/tests/Assimalign.Cohesion.JsonSchema.Generation.Tests.csproj" />
 	</Folder>
 	<Folder Name="/cohesion/libraries/Logging/">
 		<File Path="libraries/Logging/README.md" />
@@ -1839,9 +1892,13 @@
 	<Folder Name="/cohesion/resources/IdentityHub/Assimalign.Cohesion.IdentityHub/" />
 	<Folder Name="/cohesion/resources/IdentityHub/Assimalign.Cohesion.IdentityHub/docs/">
 		<File Path="resources/IdentityHub/Assimalign.Cohesion.IdentityHub/docs/DESIGN.md" />
+		<File Path="resources/IdentityHub/Assimalign.Cohesion.IdentityHub/docs/OVERVIEW.md" />
 	</Folder>
 	<Folder Name="/cohesion/resources/IdentityHub/Assimalign.Cohesion.IdentityHub/src/">
 		<Project Path="resources/IdentityHub/Assimalign.Cohesion.IdentityHub/src/Assimalign.Cohesion.IdentityHub.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/resources/IdentityHub/Assimalign.Cohesion.IdentityHub/tests/">
+		<Project Path="resources/IdentityHub/Assimalign.Cohesion.IdentityHub/tests/Assimalign.Cohesion.IdentityHub.Tests.csproj" />
 	</Folder>
 	<Folder Name="/cohesion/resources/IdentityHub/Assimalign.Cohesion.IdentityHub.Models/" />
 	<Folder Name="/cohesion/resources/IdentityHub/Assimalign.Cohesion.IdentityHub.Models/docs/">
@@ -2378,6 +2435,17 @@
 	</Folder>
 	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.ProblemDetails/tests/">
 		<Project Path="resources/Web/Assimalign.Cohesion.Web.ProblemDetails/tests/Assimalign.Cohesion.Web.ProblemDetails.Tests.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Proxy/" />
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Proxy/docs/">
+		<File Path="resources/Web/Assimalign.Cohesion.Web.Proxy/docs/DESIGN.md" />
+		<File Path="resources/Web/Assimalign.Cohesion.Web.Proxy/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Proxy/src/">
+		<Project Path="resources/Web/Assimalign.Cohesion.Web.Proxy/src/Assimalign.Cohesion.Web.Proxy.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Proxy/tests/">
+		<Project Path="resources/Web/Assimalign.Cohesion.Web.Proxy/tests/Assimalign.Cohesion.Web.Proxy.Tests.csproj" />
 	</Folder>
 	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Query/" />
 	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Query/docs/">
