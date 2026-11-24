@@ -27,7 +27,7 @@ that continuing Degraded condition while health data carries CS03402.
 
 Phase 29 implements the owner-approved [Database hosting design](../../../../docs/programs/DATABASE_HOSTING_DESIGN.md), including its nested-engine corrections. The public path is `DatabaseApplication.CreateBuilder(args)` → Add intent → one-shot `Build()` → engine access / `RunAsync()`. There is no composition `Use` method or application-builder `AddServer`.
 
-The root builder accepts borrowed engines and named, dependency-free engine factories receiving the application context (`AddEngine(name, factory)`). Model packages supply `AddSql`, `AddDocuments`, `AddGraph`, `AddKeyValue`, and `AddBlob` using `extension(IDatabaseApplicationBuilder)`; each takes the engine name as its first argument and an `Action<XEngineBuilder>` (owner decision 52 of 2026-10-09). Their callbacks run at Build against a model engine builder created for that name; worker and server factories run after that engine exists, and every model engine opens or creates the databases its builder declares before its build returns, a SQL engine provisioning their schemas too (§Provisioning, below). Since B3 of the engine extensibility design the five builders share one shape: `Options` (values only, copied at the engine's build; no options type carries an engine name), `AddDatabase`, `AddServer(options => …)` beside `AddServer(engine => …)` for the models with a server (Sql, KeyValue, Graph, Blob), `AddWorker`, and `Build`/`BuildAsync`. Hosting never references a model package, resolves model services, or binds model configuration. The concrete hosting overload of the same shape, `AddEngine(name, factory)`, receives the built host-level pieces explicitly (`DatabaseApplicationBuildContext`, below).
+The root builder accepts borrowed engines and named, dependency-free engine factories receiving the application context (`AddEngine(name, factory)`). Model packages supply `AddSql`, `AddDocuments`, `AddGraph`, `AddKeyValue`, and `AddBlob` twice, with one shape: as `extension(IDatabaseApplicationBuilder)` members (`builder.AddSql(...)`), and as component integrations on `builder.Services` (`builder.Services.AddSql(...)`, §Composition through the container); each takes the engine name as its first argument and an `Action<XEngineBuilder>` (owner decision 52 of 2026-10-09). Their callbacks run at Build against a model engine builder created for that name; worker and server factories run after that engine exists, and every model engine opens or creates the databases its builder declares before its build returns, a SQL engine provisioning their schemas too (§Provisioning, below). Since B3 of the engine extensibility design the five builders share one shape: `Options` (values only, copied at the engine's build; no options type carries an engine name), `AddDatabase`, `AddServer(options => …)` beside `AddServer(engine => …)` for the models with a server (Sql, KeyValue, Graph, Blob), `AddWorker`, and `Build`/`BuildAsync`. Hosting never references a model package, resolves model services, or binds model configuration. The concrete hosting overload of the same shape, `AddEngine(name, factory)`, receives the built host-level pieces explicitly (`DatabaseApplicationBuildContext`, below).
 
 ```mermaid
 flowchart LR
@@ -76,7 +76,7 @@ an HTTP probe. Thus an assignment named http can legitimately carry https or tcp
 
 Build registers the internal DatabaseAdminEndpointService as a singleton IHostService factory in
 Services, before closing the container. The factory runs after the engine/server registry exists,
-last among container services, before the reopen service and model servers. It starts a private
+after every application lifecycle service, before the reopen service and model servers. It starts a private
 Web host and awaits its bind, so a bind failure fails the outer start and rolls back prior services.
 Socket bind failures carry structured CK07102 on DatabaseException and retain the original Web
 HostStartupException with its SocketException cause; cancellation still propagates unchanged.
@@ -192,7 +192,7 @@ The content root `CreateBuilder(args)` reads those files under is `AppContext.Ba
 
 One Cohesion service provider is built with `EnableDynamicCode = false`, `ValidateScopes = true`, and `ValidateOnBuild = true`. This selects the interpreted resolver on JIT and NativeAOT. Hosting permits closed factories and instances only, rejects implementation-type/open-generic activation, and reserves `IHostEnvironment`, `IConfiguration` and `ILoggerFactory` for the application's own pieces, which Build registers as borrowed instances. Model construction uses explicit assignments rather than reflection-based binding. Engine factories must not return provider-owned services; lifecycle factory forwarding has the idempotent-disposal caveat below.
 
-Root engine factories observe preceding engine registrations. They cannot depend on later registrations. Every engine is registered by name (owner decision 52 of 2026-10-09): a borrowed engine by its own `Name`, a factory by the name its registration gives, which the factory's product must match exactly (ordinal). The name is reserved at Add, so a duplicate is refused there, before any factory runs; the nameless factory overload, whose product's name could only be checked once the factory had returned, is deleted, because a model's factory now opens and provisions databases, which a duplicate engine must never reach (the duplicate would have run against the same data path). Names are nonempty, valid UTF-16, case-sensitive, and unique across models. `Context.GetEngine(name)` returns a borrowed reference, typed as the root base; the root's static extension `Context.GetEngine<TEngine>(name)` returns it as the model's engine (`SqlDatabaseEngine`, …).
+Root engine factories observe preceding engine registrations. They cannot depend on later registrations. Every engine is registered by name (owner decision 52 of 2026-10-09): a borrowed engine by its own `Name`, a factory by the name its registration gives, which the factory's product must match exactly (ordinal). A builder verb refuses a name already held by a `DatabaseEngineRegistration` in `Services`, so a duplicate is refused at Add; Build checks every registration's name again before any factory runs, which is where a duplicate registered through `builder.Services.Add<Model>(...)` is refused, because a component integration cannot read the container; the nameless factory overload, whose product's name could only be checked once the factory had returned, is deleted, because a model's factory now opens and provisions databases, which a duplicate engine must never reach (the duplicate would have run against the same data path). Names are nonempty, valid UTF-16, case-sensitive, and unique across models. `Context.GetEngine(name)` returns a borrowed reference, typed as the root base; the root's static extension `Context.GetEngine<TEngine>(name)` returns it as the model's engine (`SqlDatabaseEngine`, …).
 
 ## Concrete types (concrete-types plan, phase 6, #1262)
 
@@ -212,54 +212,105 @@ Application Build flattens each engine's `Servers` snapshot in engine/attachment
 | Input | Disposal owner |
 | --- | --- |
 | `AddEngine(instance)` | Caller |
-| Root or hosting `AddEngine(name, factory)` / model Add verb | Application after Build; builder on failed Build |
+| Root or hosting `AddEngine(name, factory)` / model Add verb (either spelling) | Provider, after every lifecycle service |
 | Model builder worker/server factory | Engine |
 | `AddService(instance)` | Caller |
-| `AddService(factory)` | Application if disposable |
-| Container `IHostService` factory | Application if disposable, before engines |
+| `AddService(factory)` | Provider if disposable, before engines |
+| Container `IHostService` factory | Provider if disposable, before engines |
 | Other provider-created service | Provider |
 | Provider instance registration | Caller |
 | Configuration and default configuration file system | Application |
 | Logger factory and service provider | Application |
 
-A factory transfers a fresh product, and cleans up partial allocations if it throws before returning. Detectable borrowed/owned aliases are rejected before re-enrollment. Fresh invalid products are enrolled before validation so rollback disposes them. Build compensation attempts owned services, engines (including their servers), provider, logger factory, configuration, and file system in reverse dependency order. Synchronous Build bridges asynchronous cleanup on a worker without capturing the caller's synchronization context. Original construction exceptions are preserved; cleanup failures produce an aggregate with the original first. Files created by a factory are never silently deleted.
+A factory transfers a fresh product, and cleans up partial allocations if it throws before returning. Detectable borrowed/owned aliases are rejected. An engine the provider created but Build refuses (a product whose name is not the registered one) is disposed by Build at once, because the provider captures only what a factory returns. Build compensation disposes the provider, which disposes every engine and service its factories created in reverse creation order, then the logger factory, configuration, and file system. Synchronous Build bridges asynchronous cleanup on a worker without capturing the caller's synchronization context. Original construction exceptions are preserved; cleanup failures produce an aggregate with the original first. Files created by a factory are never silently deleted.
 
 ## Runtime lifetime
 
-After freezing the engine/server registry and creating every `AddService` product, Build reads
-the unkeyed `IHostService` descriptors from `Services.Container` in registration order. It borrows
-instance products and invokes each factory once with the built provider, refusing null products
-with the same error as AddService. It never resolves `IEnumerable<IHostService>` from the provider.
-Scoped and transient lifecycle registrations fail Build with an error naming the registration;
-implementation-type registrations remain refused. Keyed registrations are not lifecycle services
-and are ignored. The lifecycle list is
-`AddService` registrations in registration order, container `IHostService` registrations in
-registration order, the optional reopen service, then servers in engine/attachment order.
-Shutdown reverses that complete order: servers drain before container services stop, keeping a
-managed instance's control plane open during drain. All lifecycle `StartingAsync` callbacks finish
-before any service starts, so a managed instance publishes and restores before services or servers
-start. Engine open, recovery and inline schema migration have already completed inside Build;
-deferred migrations can continue on engine workers.
+Every lifecycle service is an unkeyed singleton `IHostService` registration in `Services`:
+`AddService(instance)` is an instance registration, `AddService(factory)` a factory registration
+closed over the application context, as `WebApplicationBuilder`'s are. Scoped and transient
+lifecycle registrations fail Build with an error naming the registration; implementation-type
+registrations remain refused. Keyed registrations are not lifecycle services. After the engines
+exist and the engine/server registry is frozen, Build resolves the `IHostService` aggregate once,
+in registration order, and pairs each product with its descriptor to refuse a null product, one
+object registered twice or also attached to an engine as a server, and a factory product that is
+already another registered product. The lifecycle list is the application's registrations in
+registration order, the health listener when configured, the optional reopen service, then servers
+in engine/attachment order. Shutdown reverses that complete order: servers drain before services
+stop. All lifecycle `StartingAsync` callbacks finish before any service starts. Engine open,
+recovery and inline schema migration have already completed inside Build; deferred migrations can
+continue on engine workers.
 
-The application owns container lifecycle factory products, enrolling them with AddService factory
-products, so the provider never creates or captures them during lifecycle composition. After stop,
-disposal runs the reopen service, container services in reverse registration order, AddService
-services in reverse order, engines, then infrastructure (provider, logger factory, configuration,
-content root). This reverses creation: lifecycle services follow engines, while provider singletons
-that engine factories resolve precede them. Instance registrations remain borrowed and are never
-disposed by the application. Returning the same object through `AddService` and the
-container, through multiple container registrations, or as both a server and a container service
-fails Build with the existing duplicate-lifecycle refusal. A throwing container factory also fails
-Build and follows the same rollback: attempt all owned roots and the provider, aggregating cleanup
-failures with the original construction failure first. Provider disposal also continues past
-disposer failures in reverse creation order: it propagates one failure unchanged and aggregates
-several in an AggregateException (`ServiceProviderEngineScope.DisposeAsync`, including its awaited
-continuation). Outer cleanup continues with the remaining infrastructure in either case.
+*Until 2026-11-23* `AddService` kept its own registry: its registrations started before every
+container registration, whatever the call order, and Build invoked container lifecycle factories
+itself so the provider never captured their products. Both registries are now the container, so
+one order, registration order, rules both, as in Web.
 
-A forwarding lifecycle factory (`sp => sp.GetRequiredService<X>()`) hands the application an object
-the provider also owns. Both dispose it, just as the container already disposes a forwarded
-singleton twice. Such a service needs idempotent Dispose, following .NET's disposal guidelines;
-use `AddService(instance)` or an instance registration when ownership must stay with the caller.
+The provider owns what its factories create. Engines are created first, then lifecycle services,
+so the provider's reverse-creation disposal runs the reopen service, the lifecycle services in
+reverse order and then the engines; provider singletons an engine factory resolves are created
+before that engine and disposed after it. The application then disposes the logger factory, the
+configuration and the content root. Instance registrations remain borrowed and are never disposed
+by the application. A throwing factory fails Build, which disposes the provider and the
+infrastructure, aggregating cleanup failures with the original construction failure first.
+Provider disposal continues past disposer failures in reverse creation order: it propagates one
+failure unchanged and aggregates several in an AggregateException
+(`ServiceProviderEngineScope.DisposeAsync`), which the application keeps whole, and outer cleanup
+continues with the remaining infrastructure in either case.
+
+A forwarding lifecycle factory (`sp => sp.GetRequiredService<X>()`) hands the provider an object it
+already owns; the provider disposes a captured object once. Use `AddService(instance)` or an
+instance registration when ownership must stay with the caller.
+
+## Composition through the container (2026-11-23)
+
+The builder follows `WebApplicationBuilder`: every composition input is a registration in
+`Services`, and there is no parallel private registry (`resource-areas.md`, "Hosting composition").
+
+- **An engine is a `DatabaseEngineRegistration` singleton instance.** The type lives in the area
+  root, so model packages can create one without a container reference. It carries the engine's
+  name and either a borrowed engine or an ownership-transferring factory over
+  `IDatabaseApplicationContext`. `AddEngine(engine)`, `AddEngine(name, factory)`, the root
+  `IDatabaseApplicationBuilder.AddEngine` shims (which every `builder.Add<Model>` verb calls) and
+  the model packages' component integrations all register one. A factory registration of a
+  `DatabaseEngineRegistration` is refused, because its name would be unknown until it ran, and
+  `DatabaseEngine` itself is reserved: an engine is registered by name.
+- **Model verbs are component integrations too.** Each model package declares
+  `builder.Services.Add<Model>(name, configure)` in `src/Properties/ComponentIntegrations.cs` with
+  the `Factory` template over a hidden `<Model>Components.CreateEngineRegistration(name, configure)`
+  (`ComponentModel/`), because the engine name is a required argument (owner decision 39 of
+  2026-10-10). The generator projects the verb into every compilation that references the model and
+  `DependencyInjection`, as every `Sdk.Database` application does through the App framework's
+  analyzer. No change to `ComponentIntegrationAttribute` was needed. The
+  `extension(IDatabaseApplicationBuilder)` verbs stay: they reserve the name at the call and are the
+  spelling templates, documentation and the v2 design use.
+- **Build turns each registration into a `DatabaseEngine` registration, in order**: a borrowed
+  engine as an instance, an owned one as a factory. It resolves the `DatabaseEngine` aggregate once,
+  so the provider invokes the factories in registration order; each factory sees the engines
+  registered before it (the context's registry is refrozen before each one), checks the token, and
+  its product is checked for null, aliasing, its name and its model. Lifecycle factories can resolve
+  `IEnumerable<DatabaseEngine>` from the container.
+
+Build's order:
+
+```mermaid
+flowchart TD
+    Check["Check registrations and engine names"] --> Register["Register host pieces, one DatabaseEngine per registration, health and reopen"]
+    Register --> Provider["Make the container read-only and build the provider"]
+    Provider --> Engines["Resolve the engines in registration order"]
+    Engines --> Freeze["Freeze the engine and server registry"]
+    Freeze --> Services["Resolve the IHostService aggregate in registration order"]
+```
+
+Build checks every registration and every engine name before any engine factory runs, registers
+the host pieces, one `DatabaseEngine` per registration, the health listener and the reopen
+service, closes the container and builds the provider, resolves the engines, freezes the registry,
+and resolves the lifecycle services.
+
+*Why it waited.* `resource-areas.md` recorded Database.Hosting as not yet migrated because its
+explicit registries continued past a failing disposal and aggregated it, and engine factories
+observe preceding engines. The provider has since gained continue-and-aggregate disposal, and the
+module controls resolution order, so neither holds.
 
 ## Provisioning (B1 of the engine extensibility design)
 

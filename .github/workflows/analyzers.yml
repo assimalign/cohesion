@@ -39,6 +39,14 @@ on:
       - "resources/Web/Assimalign.Cohesion.Web.StaticFiles/src/**"
       - "resources/Web/Assimalign.Cohesion.Web.Validation/src/**"
       - "resources/Web/Assimalign.Cohesion.Web.WebSockets/src/**"
+      # The Database model packages declare the builder.Services.Add<Model> engine verbs, and the
+      # area root owns the DatabaseEngineRegistration they register.
+      - "resources/Database/Assimalign.Cohesion.Database/src/**"
+      - "resources/Database/Assimalign.Cohesion.Database.Blob/src/**"
+      - "resources/Database/Assimalign.Cohesion.Database.Documents/src/**"
+      - "resources/Database/Assimalign.Cohesion.Database.Graph/src/**"
+      - "resources/Database/Assimalign.Cohesion.Database.KeyValuePair/src/**"
+      - "resources/Database/Assimalign.Cohesion.Database.Sql/src/**"
       - ".github/workflows/analyzers.yml" # When Pipeline File Changes
       # Shared build infrastructure that every project in this workflow compiles with.
       - ".github/actions/build/**"

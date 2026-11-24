@@ -20,6 +20,7 @@
 	</ItemGroup>
 	<ItemGroup>
         <CohesionSharedSource Include="Assimalign.Cohesion.Database" Module="Engine" />
+		<CohesionSharedSource Include="Assimalign.Cohesion.Core" Module="ComponentIntegration" />
 		<CohesionSharedSource Include="Assimalign.Cohesion.Database.Storage" Module="JournalFormat" />
 		<CohesionSharedSource Include="Assimalign.Cohesion.Database.Indexing" Module="Build" />
 	</ItemGroup>

@@ -8,14 +8,16 @@ namespace Assimalign.Cohesion.Database.Hosting.Internal;
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Hosting.Internal.DatabaseApplicationOwnership.DebugView))]
 internal sealed class DatabaseApplicationOwnership
 {
+    // The content root, the configuration, the logger factory and the service provider, in creation
+    // order. The provider owns every engine and lifecycle service its factories created and disposes
+    // them in reverse creation order, services before the engines they use.
+    // The provider continues past a failing product and rethrows one failure as itself, or several as
+    // one AggregateException, which is kept whole: a single product's own aggregate is indistinguishable
+    // from it.
     internal readonly List<object> Infrastructure = [];
-    internal readonly List<DatabaseEngine> Engines = [];
-    internal readonly List<object> Services = [];
 
     internal async Task DisposeAsync(List<Exception> failures)
     {
-        await DisposeReverseAsync(Services, failures).ConfigureAwait(false);
-        await DisposeReverseAsync(Engines, failures).ConfigureAwait(false);
         await DisposeReverseAsync(Infrastructure, failures).ConfigureAwait(false);
     }
 

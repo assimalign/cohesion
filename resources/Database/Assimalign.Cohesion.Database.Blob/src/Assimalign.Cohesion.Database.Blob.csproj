@@ -12,6 +12,7 @@
 	</ItemGroup>
 	<ItemGroup>
 		<CohesionSharedSource Include="Assimalign.Cohesion.Database" Module="Engine" />
+		<CohesionSharedSource Include="Assimalign.Cohesion.Core" Module="ComponentIntegration" />
 		<CohesionSharedSource Include="Assimalign.Cohesion.Database.Storage" Module="JournalFormat" />
 	</ItemGroup>
 </Project>

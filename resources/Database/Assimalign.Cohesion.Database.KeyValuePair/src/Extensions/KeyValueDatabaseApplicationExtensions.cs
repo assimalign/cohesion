@@ -45,20 +45,8 @@ public static partial class KeyValueDatabaseApplicationExtensions
             ArgumentNullException.ThrowIfNull(builder);
             ArgumentException.ThrowIfNullOrWhiteSpace(name);
             ArgumentNullException.ThrowIfNull(configure);
-            return builder.AddEngine(name, _ =>
-            {
-                var engineBuilder = KeyValueDatabaseEngine.CreateBuilder(name);
-                try
-                {
-                    configure(engineBuilder);
-                    return engineBuilder.Build();
-                }
-                catch (Exception failure) when (failure is not OutOfMemoryException)
-                {
-                    engineBuilder.Abort(failure);
-                    throw;
-                }
-            });
+            DatabaseEngineRegistration registration = KeyValueComponents.CreateEngineRegistration(name, configure);
+            return builder.AddEngine(registration.Name, registration.CreateEngine);
         }
     }
 }

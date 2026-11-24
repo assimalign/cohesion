@@ -5,6 +5,11 @@ using System;
 using System.Text.Json.Serialization.Metadata;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.Database.Blob;
+using Assimalign.Cohesion.Database.Documents;
+using Assimalign.Cohesion.Database.Graph;
+using Assimalign.Cohesion.Database.KeyValuePair;
+using Assimalign.Cohesion.Database.Sql;
 using Assimalign.Cohesion.DependencyInjection;
 using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Logging;
@@ -165,5 +170,17 @@ internal static class IntegrationSurface
             .AddValidation()
             .AddValidation(validation => validation.Options.Enabled = false)
             .AddValidation((services, validation) => validation.Options.Enabled = false);
+    }
+
+    // Each Database model package registers its engine as a DatabaseEngineRegistration singleton
+    // through a static factory, because the engine name is a required argument (decision 39, #1395).
+    internal static void ConfigureDatabase(IServiceProviderBuilder builder)
+    {
+        builder
+            .AddSql("sql", sql => sql.AddDatabase("orders"))
+            .AddDocuments("documents", documents => documents.AddDatabase("catalog"))
+            .AddGraph("graph", graph => { })
+            .AddKeyValue("key-value", keyValue => { })
+            .AddBlob("blob", blob => blob.AddDatabase("assets"));
     }
 }

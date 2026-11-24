@@ -20,6 +20,7 @@
   <data name="BuilderBuildServiceProviderFailure" xml:space="preserve"><value>{0} is reserved for the application's own {1}.</value></data>
   <data name="BuilderBuildServiceProviderFailure2" xml:space="preserve"><value>Database hosting requires closed factory or instance service registrations.</value></data>
   <data name="ApplicationBuilderReserveNameFailure" xml:space="preserve"><value>Duplicate database engine name '{0}'.</value></data>
+  <data name="EngineRegistrationNotInstance" xml:space="preserve"><value>A DatabaseEngineRegistration must be registered as a singleton instance, so its engine name is known before any engine factory runs.</value></data>
   <data name="EngineNameInvalidUtf16" xml:space="preserve"><value>The database engine name must be valid UTF-16.</value></data>
   <data name="ContextGetEngineKeyNotFound" xml:space="preserve"><value>No database engine named '{0}' is registered.</value></data>
   <data name="DatabaseAdminEndpointServiceFailure" xml:space="preserve"><value>The Database health endpoint must use http, not '{0}'.</value></data>

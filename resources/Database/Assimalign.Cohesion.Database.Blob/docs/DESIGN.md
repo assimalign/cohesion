@@ -2068,3 +2068,24 @@ protocol error categories. Authentication/version negotiation and refusal contro
 Blob debugger views expose stored catalog identities, session references and reviewed stream flags/lengths without reading blob content. Delegated stream operations, current-transaction synchronization and engine/session snapshots are omitted. Internal helpers with no safe public or protected data have empty views.
 
 Eligible types follow the [Database conventions](../../Assimalign.Cohesion.Database/docs/CONVENTIONS.md) debugger display/proxy rules. Views are private and read-only; inspection does not change the public API, execution paths, error contracts, storage formats or protocol bytes.
+
+## Service registration verb (2026-11-23)
+
+`builder.Services.AddBlob(string name, Action<BlobDatabaseEngineBuilder> configure)` is the same registration as
+`builder.AddBlob(name, configure)`, projected onto `IServiceProviderBuilder` as a component
+integration (`src/Properties/ComponentIntegrations.cs`, `component-integration.md`), the way Web
+feature packages register on `builder.Services`. The package takes no DI reference: it compiles
+Core's `ComponentIntegration` shared-source module, and the generator emits the verb in every
+compilation that references this package and `Assimalign.Cohesion.DependencyInjection`.
+
+- **Static-factory template.** The engine name is a required argument, so the declaration uses the
+  `Factory` template over the hidden `BlobComponents.CreateEngineRegistration(name, configure)`
+  (`src/ComponentModel/`), the shape owner decision 39 of 2026-10-10 keeps for a required value. It
+  returns a `DatabaseEngineRegistration` (area root), which the verb registers as a singleton
+  instance. Creating it does no I/O; the engine is built once, during application Build.
+- **One factory body.** The `extension(IDatabaseApplicationBuilder)` verb creates the same
+  registration and hands its name and `CreateEngine` to the root seam's `AddEngine(name, factory)`,
+  so both spellings build, abort and dispose the engine identically.
+- **Name check.** The builder verb refuses a duplicate name when it is called. The services verb
+  cannot read the container, so `Database.Hosting` refuses its duplicate when Build begins, still
+  before any engine factory runs (owner decision 52 of 2026-10-09).
