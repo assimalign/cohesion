@@ -63,15 +63,6 @@ $script:CohesionReleaseLibrary = @(
     'libraries/Amqp/Assimalign.Cohesion.Amqp'
     'libraries/Amqp/Assimalign.Cohesion.Amqp.Connections'
 
-    # libraries/ApplicationModel
-    'libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel'
-    'libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Definition'
-    'libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway'
-    'libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway.InProcess'
-    'libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Hosting'
-    'libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Hosting.InProcess'
-    'libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Protocol'
-
     # libraries/Cache
     'libraries/Cache/Assimalign.Cohesion.Caching'
     'libraries/Cache/Assimalign.Cohesion.Caching.InMemory'

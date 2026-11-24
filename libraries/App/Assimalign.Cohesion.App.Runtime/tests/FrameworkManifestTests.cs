@@ -42,9 +42,6 @@ public sealed class FrameworkManifestTests
         string[] expectedClosure =
         [
             "Assimalign.Cohesion.App",
-            "Assimalign.Cohesion.ApplicationModel",
-            "Assimalign.Cohesion.ApplicationModel.Hosting",
-            "Assimalign.Cohesion.ApplicationModel.Protocol",
             "Assimalign.Cohesion.Configuration",
             "Assimalign.Cohesion.Configuration.CommandLine",
             "Assimalign.Cohesion.Configuration.EnvironmentVariables",
@@ -73,7 +70,7 @@ public sealed class FrameworkManifestTests
             .ToArray();
 
         // Assert
-        roots.Length.ShouldBe(15);
+        roots.Length.ShouldBe(14);
         declaredAssemblies.ShouldBe([AppFramework]);
         actualClosure.ShouldBe(expectedClosure);
     }

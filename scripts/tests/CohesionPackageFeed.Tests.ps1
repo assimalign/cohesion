@@ -227,9 +227,9 @@ Describe 'Cohesion CI package prune against the feed' {
             )
         }
 
-        # Same names, other owners: cohesion-platforms' gateway packages, an unlinked package, and
+        # Packages outside this repository: a cohesion-platforms package, an unlinked package, and
         # a linked package outside the Assimalign.Cohesion namespace. None may be touched.
-        Add-FakePackage -Feed $script:feed -Name 'Assimalign.Cohesion.ApplicationModel.Gateway.Docker' -Repository 'assimalign/cohesion-platforms' -Version @(
+        Add-FakePackage -Feed $script:feed -Name 'Assimalign.Cohesion.Platforms.Sample' -Repository 'assimalign/cohesion-platforms' -Version @(
             '10.0.0-preview.0.ci.1'
             '10.0.0-preview.0.pr.15.2'
         )
@@ -274,7 +274,7 @@ Describe 'Cohesion CI package prune against the feed' {
         @($summary.ClosedPullRequests) | Should -Be @(15)
         Get-Content -LiteralPath $summaryPath -Raw | Should -Match '(?m)^## CI package prune'
         Should -Invoke -ModuleName CohesionPackageFeed Invoke-WebRequest -ParameterFilter {
-            $Uri -match 'Gateway\.Docker|Unlinked|Other\.Package'
+            $Uri -match 'Platforms\.Sample|Unlinked|Other\.Package'
         } -Times 0
     }
 
@@ -296,7 +296,7 @@ Describe 'Cohesion CI package prune against the feed' {
         $summary.LinkedOnlyPackages | Should -Be 1
         $summary.ScannedPackages | Should -Be 3
         Should -Invoke -ModuleName CohesionPackageFeed Invoke-WebRequest -ParameterFilter {
-            $Uri -match 'Gateway\.Docker|Unlinked|Other\.Package'
+            $Uri -match 'Platforms\.Sample|Unlinked|Other\.Package'
         } -Times 0
     }
 

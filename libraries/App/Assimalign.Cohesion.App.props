@@ -135,7 +135,6 @@
         <!-- This is the sole policy list for the hosting kernel. App.targets derives
              every transitive Assimalign.Cohesion dependency from these roots. -->
         <CohesionAppKernelRoot Include="Assimalign.Cohesion.Hosting" />
-        <CohesionAppKernelRoot Include="Assimalign.Cohesion.ApplicationModel.Hosting" />
         <!-- Every area hosting module depends on Connections, so App carries it once. -->
         <CohesionAppKernelRoot Include="Assimalign.Cohesion.Connections" />
         <CohesionAppKernelRoot Include="Assimalign.Cohesion.Connections.StreamAbort" />

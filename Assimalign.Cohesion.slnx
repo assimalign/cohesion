@@ -107,9 +107,6 @@
 		<File Path="docs/build/MSBUILD_COMMON_PROPS.md" />
 		<File Path="docs/build/MSBUILD_COMMON_TARGETS.md" />
 	</Folder>
-	<Folder Name="/cohesion/docs/libraries/ApplicationModel/">
-		<File Path="docs/libraries/ApplicationModel/DESIGN.md" />
-	</Folder>
 	<Folder Name="/cohesion/docs/libraries/Content/">
 		<File Path="docs/libraries/Content/DESIGN.md" />
 	</Folder>
@@ -270,77 +267,6 @@
 	</Folder>
 	<Folder Name="/cohesion/libraries/App/Assimalign.Cohesion.App.Runtime/tests/">
 		<Project Path="libraries/App/Assimalign.Cohesion.App.Runtime/tests/Assimalign.Cohesion.App.Runtime.Tests.csproj" />
-	</Folder>
-	<Folder Name="/cohesion/libraries/ApplicationModel/">
-		<File Path="libraries/ApplicationModel/Directory.Build.props" />
-		<File Path="libraries/ApplicationModel/Directory.Build.targets" />
-	</Folder>
-	<Folder Name="/cohesion/libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel/">
-		<File Path="libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel/README.md" />
-	</Folder>
-	<Folder Name="/cohesion/libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel/src/">
-		<Project Path="libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel/src/Assimalign.Cohesion.ApplicationModel.csproj" />
-	</Folder>
-	<Folder Name="/cohesion/libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel/tests/">
-		<Project Path="libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel/tests/Assimalign.Cohesion.ApplicationModel.Tests.csproj" />
-	</Folder>
-	<Folder Name="/cohesion/libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Protocol/">
-		<File Path="libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Protocol/README.md" />
-	</Folder>
-	<Folder Name="/cohesion/libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Protocol/docs/">
-		<File Path="libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Protocol/docs/DESIGN.md" />
-		<File Path="libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Protocol/docs/OVERVIEW.md" />
-	</Folder>
-	<Folder Name="/cohesion/libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Protocol/src/">
-		<Project Path="libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Protocol/src/Assimalign.Cohesion.ApplicationModel.Protocol.csproj" />
-	</Folder>
-	<Folder Name="/cohesion/libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Protocol/tests/">
-		<Project Path="libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Protocol/tests/Assimalign.Cohesion.ApplicationModel.Protocol.Tests.csproj" />
-	</Folder>
-	<Folder Name="/cohesion/libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Definition/">
-		<File Path="libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Definition/README.md" />
-	</Folder>
-	<Folder Name="/cohesion/libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Definition/src/">
-		<Project Path="libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Definition/src/Assimalign.Cohesion.ApplicationModel.Definition.csproj" />
-	</Folder>
-	<Folder Name="/cohesion/libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Definition/tests/">
-		<Project Path="libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Definition/tests/Assimalign.Cohesion.ApplicationModel.Definition.Tests.csproj" />
-	</Folder>
-	<Folder Name="/cohesion/libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway/" />
-	<Folder Name="/cohesion/libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway/docs/">
-		<File Path="libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway/docs/DESIGN.md" />
-	</Folder>
-	<Folder Name="/cohesion/libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway/src/">
-		<Project Path="libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway/src/Assimalign.Cohesion.ApplicationModel.Gateway.csproj" />
-	</Folder>
-	<Folder Name="/cohesion/libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway/tests/">
-		<Project Path="libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway/tests/Assimalign.Cohesion.ApplicationModel.Gateway.Tests.csproj" />
-	</Folder>
-	<Folder Name="/cohesion/libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway.InProcess/">
-		<File Path="libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway.InProcess/README.md" />
-	</Folder>
-	<Folder Name="/cohesion/libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway.InProcess/docs/">
-		<File Path="libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway.InProcess/docs/DESIGN.md" />
-		<File Path="libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway.InProcess/docs/OVERVIEW.md" />
-	</Folder>
-	<Folder Name="/cohesion/libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway.InProcess/src/">
-		<Project Path="libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway.InProcess/src/Assimalign.Cohesion.ApplicationModel.Gateway.InProcess.csproj" />
-	</Folder>
-	<Folder Name="/cohesion/libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway.InProcess/tests/">
-		<Project Path="libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway.InProcess/tests/Assimalign.Cohesion.ApplicationModel.Gateway.InProcess.Tests.csproj" />
-	</Folder>
-	<Folder Name="/cohesion/libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Hosting.InProcess/">
-		<File Path="libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Hosting.InProcess/README.md" />
-	</Folder>
-	<Folder Name="/cohesion/libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Hosting.InProcess/docs/">
-		<File Path="libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Hosting.InProcess/docs/DESIGN.md" />
-		<File Path="libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Hosting.InProcess/docs/OVERVIEW.md" />
-	</Folder>
-	<Folder Name="/cohesion/libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Hosting.InProcess/src/">
-		<Project Path="libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Hosting.InProcess/src/Assimalign.Cohesion.ApplicationModel.Hosting.InProcess.csproj" />
-	</Folder>
-	<Folder Name="/cohesion/libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Hosting.InProcess/tests/">
-		<Project Path="libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Hosting.InProcess/tests/Assimalign.Cohesion.ApplicationModel.Hosting.InProcess.Tests.csproj" />
 	</Folder>
 	<Folder Name="/cohesion/libraries/Cache/">
 		<File Path="libraries/Cache/Directory.Build.props" />
@@ -819,19 +745,6 @@
 	</Folder>
 	<Folder Name="/cohesion/libraries/Hosting/Assimalign.Cohesion.Hosting/tests/">
 		<Project Path="libraries/Hosting/Assimalign.Cohesion.Hosting/tests/Assimalign.Cohesion.Hosting.Tests.csproj" />
-	</Folder>
-	<Folder Name="/cohesion/libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Hosting/">
-		<File Path="libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Hosting/README.md" />
-	</Folder>
-	<Folder Name="/cohesion/libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Hosting/docs/">
-		<File Path="libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Hosting/docs/DESIGN.md" />
-		<File Path="libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Hosting/docs/OVERVIEW.md" />
-	</Folder>
-	<Folder Name="/cohesion/libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Hosting/src/">
-		<Project Path="libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Hosting/src/Assimalign.Cohesion.ApplicationModel.Hosting.csproj" />
-	</Folder>
-	<Folder Name="/cohesion/libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Hosting/tests/">
-		<Project Path="libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Hosting/tests/Assimalign.Cohesion.ApplicationModel.Hosting.Tests.csproj" />
 	</Folder>
 	<Folder Name="/cohesion/libraries/Http/">
 		<File Path="libraries/Http/Directory.Build.props" />

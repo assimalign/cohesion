@@ -29,12 +29,12 @@ not an edge.
 
 | | Count |
 | --- | --- |
-| Projects indexed | 571 |
-| Shipped library/resource projects | 228 |
-| Library areas | 22 |
+| Projects indexed | 557 |
+| Shipped library/resource projects | 221 |
+| Library areas | 21 |
 | Resource areas | 18 |
-| Declared project references | 566 |
-| Declared shared-source links | 83 |
+| Declared project references | 550 |
+| Declared shared-source links | 80 |
 
 ## Ambiguous project names
 
@@ -64,35 +64,30 @@ Every remaining library area, with the resource areas collapsed into one node:
 ```mermaid
 flowchart LR
     L0["Amqp"]
-    L1["ApplicationModel"]
-    L2["Configuration"]
-    L3["Connections"]
-    L4["Content"]
-    L5["Core"]
-    L6["FileSystem"]
-    L7["Hosting"]
-    L8["Http"]
-    L9["ObjectPool"]
-    L10["OpenApi"]
-    L11["Resilience"]
-    L0 --> L3
-    L0 --> L5
+    L1["Configuration"]
+    L2["Connections"]
+    L3["Content"]
+    L4["Core"]
+    L5["FileSystem"]
+    L6["Http"]
+    L7["ObjectPool"]
+    L8["OpenApi"]
+    L9["Resilience"]
+    L0 --> L2
+    L0 --> L4
+    L1 --> L4
     L1 --> L5
-    L1 --> L7
-    L2 --> L5
-    L2 --> L6
+    L6 --> L2
+    L6 --> L4
     L8 --> L3
-    L8 --> L5
-    L10 --> L4
-    L11 --> L5
-    L11 --> L9
+    L9 --> L4
+    L9 --> L7
 ```
 
 No shipped library references `resources/**`: resources consume libraries, never the reverse.
 Test projects and the fixtures that drive real resource runtimes may, and are listed under
-*Harnesses*. `COHLIB001` enforces that direction for `libraries/**` and `sdks/**` (a same-area
-`sdks/Assimalign.Cohesion.Sdk.<Area>` project is the only exception), and `COHRES003` keeps
-every shipped `resources/**` project off the `ApplicationModel.Gateway*` assemblies.
+*Harnesses*. `COHLIB001` enforces that direction for `libraries/**`, `fabric/**`, and `sdks/**`.
+An `sdks/Assimalign.Cohesion.Sdk.<Area>` project may reference resources in its own area.
 
 | Area | References |
 | --- | --- |
@@ -102,7 +97,6 @@ every shipped `resources/**` project off the `ApplicationModel.Gateway*` assembl
 | `fabric/Storage` | fabric/Fabric |
 | `fabric/Workloads` | fabric/Fabric |
 | `libraries/Amqp` | libraries/Connections, libraries/Core |
-| `libraries/ApplicationModel` | libraries/Core, libraries/Hosting |
 | `libraries/Cache` | libraries/Core |
 | `libraries/Configuration` | libraries/Core, libraries/FileSystem |
 | `libraries/Connections` | libraries/Core |
@@ -201,43 +195,6 @@ flowchart LR
 | --- | --- | --- | --- | --- |
 | `Assimalign.Cohesion.Amqp` | `Assimalign.Cohesion.Connections`<br>`Assimalign.Cohesion.Core` | — | — | — |
 | `Assimalign.Cohesion.Amqp.Connections` | `Assimalign.Cohesion.Amqp`<br>`Assimalign.Cohesion.Connections`<br>`Assimalign.Cohesion.Core` | — | — | — |
-
-### `libraries/ApplicationModel`
-
-7 shipped projects.
-
-Intra-area references:
-
-```mermaid
-flowchart LR
-    N0["ApplicationModel"]
-    N1["ApplicationModel.Definition"]
-    N2["ApplicationModel.Gateway"]
-    N3["ApplicationModel.Gateway.InProcess"]
-    N4["ApplicationModel.Hosting"]
-    N5["ApplicationModel.Hosting.InProcess"]
-    N6["ApplicationModel.Protocol"]
-    N1 --> N0
-    N2 --> N1
-    N2 --> N6
-    N3 --> N2
-    N3 --> N4
-    N3 --> N5
-    N4 --> N6
-    N5 --> N4
-    N5 --> N6
-    N6 --> N0
-```
-
-| Project | References | Private references | Shared source | Packages |
-| --- | --- | --- | --- | --- |
-| `Assimalign.Cohesion.ApplicationModel` | `Assimalign.Cohesion.Core` | — | `Assimalign.Cohesion.ApplicationModel/Names` | — |
-| `Assimalign.Cohesion.ApplicationModel.Definition` | `Assimalign.Cohesion.ApplicationModel`<br>`Assimalign.Cohesion.Core` | — | `Assimalign.Cohesion.ApplicationModel/Names` | — |
-| `Assimalign.Cohesion.ApplicationModel.Gateway` | `Assimalign.Cohesion.ApplicationModel.Definition`<br>`Assimalign.Cohesion.ApplicationModel.Protocol` | — | — | — |
-| `Assimalign.Cohesion.ApplicationModel.Gateway.InProcess` | `Assimalign.Cohesion.ApplicationModel.Gateway`<br>`Assimalign.Cohesion.ApplicationModel.Hosting`<br>`Assimalign.Cohesion.ApplicationModel.Hosting.InProcess` | — | — | — |
-| `Assimalign.Cohesion.ApplicationModel.Hosting` | `Assimalign.Cohesion.ApplicationModel.Protocol`<br>`Assimalign.Cohesion.Core`<br>`Assimalign.Cohesion.Hosting` | — | — | — |
-| `Assimalign.Cohesion.ApplicationModel.Hosting.InProcess` | `Assimalign.Cohesion.ApplicationModel.Hosting`<br>`Assimalign.Cohesion.ApplicationModel.Protocol`<br>`Assimalign.Cohesion.Core` | — | — | — |
-| `Assimalign.Cohesion.ApplicationModel.Protocol` | `Assimalign.Cohesion.ApplicationModel`<br>`Assimalign.Cohesion.Core` | — | `Assimalign.Cohesion.ApplicationModel/Names` | — |
 
 ### `libraries/Cache`
 
@@ -1075,16 +1032,16 @@ warning, not a problem in itself: these are the assemblies whose contracts cost 
 | Assembly | Referenced by | Top referrers |
 | --- | --- | --- |
 | `Assimalign.Cohesion.Http` | 91 | Assimalign.Cohesion.ConfigurationStore.Hosting.Tests, Assimalign.Cohesion.Connections.NamedPipes.Tests, Assimalign.Cohesion.Connections.Tcp.Tests, Assimalign.Cohesion.Database.Hosting.Tests, … |
-| `Assimalign.Cohesion.Core` | 90 | Assimalign.Cohesion.Amqp, Assimalign.Cohesion.Amqp.Connections, Assimalign.Cohesion.ApiManager, Assimalign.Cohesion.ApplicationModel, … |
+| `Assimalign.Cohesion.Core` | 85 | Assimalign.Cohesion.Amqp, Assimalign.Cohesion.Amqp.Connections, Assimalign.Cohesion.ApiManager, Assimalign.Cohesion.Caching, … |
 | `Assimalign.Cohesion.Web` | 64 | Assimalign.Cohesion.ConfigurationStore.Hosting.Tests, Assimalign.Cohesion.Database, Assimalign.Cohesion.Database.Hosting.Tests, Assimalign.Cohesion.IdentityHub.Hosting, … |
 | `Assimalign.Cohesion.Connections` | 46 | Assimalign.Cohesion.Amqp, Assimalign.Cohesion.Amqp.Connections, Assimalign.Cohesion.Amqp.Connections.Tests, Assimalign.Cohesion.Connections.InMemory, … |
 | `Assimalign.Cohesion.Web.Routing` | 37 | Assimalign.Cohesion.IntegrationCheck, Assimalign.Cohesion.SourceGeneration.Web.Tests, Assimalign.Cohesion.Web.Antiforgery, Assimalign.Cohesion.Web.Antiforgery.Tests, … |
 | `Assimalign.Cohesion.Connections.Tcp` | 34 | Assimalign.Cohesion.Amqp.Connections.AotSample, Assimalign.Cohesion.Amqp.Connections.Tests, Assimalign.Cohesion.Connections.Tcp.Tests, Assimalign.Cohesion.Database, … |
 | `Assimalign.Cohesion.Connections.InMemory` | 31 | Assimalign.Cohesion.Amqp.Connections.Tests, Assimalign.Cohesion.Amqp.Tests, Assimalign.Cohesion.Connections.InMemory.Tests, Assimalign.Cohesion.Connections.Security.Tests, … |
 | `Assimalign.Cohesion.Web.Hosting` | 30 | Assimalign.Cohesion.ConfigurationStore.Hosting, Assimalign.Cohesion.Database.Hosting, Assimalign.Cohesion.IdentityHub.Hosting, Assimalign.Cohesion.LogSpace.Hosting, … |
-| `Assimalign.Cohesion.Hosting` | 27 | Assimalign.Cohesion.ApiManager.Hosting, Assimalign.Cohesion.ApplicationModel.Gateway.InProcess.Tests, Assimalign.Cohesion.ApplicationModel.Hosting, Assimalign.Cohesion.ConfigurationStore.Hosting, … |
 | `Assimalign.Cohesion.Http.Streaming` | 26 | Assimalign.Cohesion.Http.Connections.Tests, Assimalign.Cohesion.Http.Proxy, Assimalign.Cohesion.Http.ServerSentEvents, Assimalign.Cohesion.Http.ServerSentEvents.Examples.Sse, … |
 | `Assimalign.Cohesion.Web.Testing` | 26 | Assimalign.Cohesion.Web.Antiforgery.Tests, Assimalign.Cohesion.Web.Api.Tests, Assimalign.Cohesion.Web.Authentication.Bearer.Tests, Assimalign.Cohesion.Web.Authentication.Cookie.Tests, … |
+| `Assimalign.Cohesion.Hosting` | 25 | Assimalign.Cohesion.ApiManager.Hosting, Assimalign.Cohesion.ConfigurationStore.Hosting, Assimalign.Cohesion.Database.Hosting, Assimalign.Cohesion.Database.Testing, … |
 | `Assimalign.Cohesion.DependencyInjection` | 23 | Assimalign.Cohesion.ApiManager.Hosting, Assimalign.Cohesion.ConfigurationStore.Hosting, Assimalign.Cohesion.Database.Hosting, Assimalign.Cohesion.DependencyInjection.Tests, … |
 | `Assimalign.Cohesion.Http.Forwarded` | 22 | Assimalign.Cohesion.Http.Antiforgery, Assimalign.Cohesion.Http.Antiforgery.Tests, Assimalign.Cohesion.Http.Forwarded.Tests, Assimalign.Cohesion.Http.Proxy, … |
 | `Assimalign.Cohesion.Web.Server` | 22 | Assimalign.Cohesion.Web.Antiforgery, Assimalign.Cohesion.Web.Authentication.Bearer, Assimalign.Cohesion.Web.Authentication.Certificate, Assimalign.Cohesion.Web.Authentication.Cookie, … |
@@ -1102,7 +1059,7 @@ warning, not a problem in itself: these are the assemblies whose contracts cost 
 
 ## Harnesses
 
-264 test, sample, example, and fixture projects are indexed for fan-in but excluded from the
+257 test, sample, example, and fixture projects are indexed for fan-in but excluded from the
 area graphs above: they consume the shipped assemblies rather than forming part of the product
 graph, and the dependency guards exempt them by path.
 
@@ -1117,7 +1074,7 @@ membership is an item list, not a project reference: App's kernel roots in
 | `examples/` | 5 |
 | `fixtures/` | 16 |
 | `samples/` | 12 |
-| `tests/` | 231 |
+| `tests/` | 224 |
 
 Samples, which live in the repository-root `samples/` tree:
 

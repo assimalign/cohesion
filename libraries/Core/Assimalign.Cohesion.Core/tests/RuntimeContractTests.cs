@@ -81,8 +81,7 @@ public class RuntimeContractTests
         string[] areaRoots =
         [
             Path.Combine(repositoryRoot, "libraries", "Core"),
-            Path.Combine(repositoryRoot, "libraries", "Hosting"),
-            Path.Combine(repositoryRoot, "libraries", "ApplicationModel")
+            Path.Combine(repositoryRoot, "libraries", "Hosting")
         ];
         var violations = new List<string>();
 

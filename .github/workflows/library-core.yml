@@ -8,7 +8,6 @@ on:
       - "!libraries/Core/**/*.slnx"
       - "!libraries/Core/**/*.md"
       - "libraries/Hosting/**/src/**/*.cs"
-      - "libraries/ApplicationModel/**/src/**/*.cs"
       - "docs/RUNTIME_CONTRACT.md"
       - ".github/workflows/library-core.yml" # When Pipeline File Changes
       # Shared build infrastructure that every project in this workflow compiles with.
