@@ -110,10 +110,6 @@ expression renderer, avoiding a second literal grammar; it does not pull the SQL
 carrier check explicitly requires `SqlTableReference`; a derived relation cannot
 be substituted for the fixed carrier. No reference or schema-artifact format changes.
 
-## Managed resources
-
-The SDK emits no resource manifest.
-
 ## Model selection
 
 `CohesionDatabaseModel` is an exact selector. The shared targets file contains explicit,

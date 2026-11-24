@@ -11,7 +11,7 @@ Rules specific to the Database resource area. The concrete-first deviation appli
 projects under `resources/Database/`. This file also loads for `Sdk.Database` and Database Studio
 because they bind the area's type names (the extractor's metadata-name strings, Studio's engine
 casts). Code in those projects keeps the general rules, interface-first included. The rules here
-layer on `resource-areas.md`, whose hosting-isolation rules (COHRES001–004) apply
+layer on `resource-areas.md`, whose hosting-isolation rules (COHRES001/002/004) apply
 here unchanged. The plan that moves the existing code onto these rules, phase by phase, is
 `docs/programs/DATABASE_CONCRETE_TYPES_PLAN.md` (epic #1255, phases #1256–#1264); the owner
 decision is O34a in `docs/DEVELOPER_EXPERIENCE_DESIGN.md`.
@@ -55,10 +55,9 @@ only these.
 | `IDatabaseApplicationContext` | Database (root) | Same seam. `DatabaseApplicationContext` already derives from `HostContext`. |
 | `IDatabaseApplicationTestFactory` | Database.Testing | Parity with Web.Testing's `IWebApplicationTestFactory`. It is the test-harness surface, not an engine model. |
 
-Hosting-library contracts the area implements (`IHostService`, `IHealthContributor`,
-`IResourceCommandHandler`) belong to `libraries/Hosting` and are not affected. BCL interfaces
-(`IAsyncDisposable`, `IDisposable`, `IEquatable<T>` on value objects) are not public API
-contracts in this sense and stay.
+`IHostService`, which `Database.Hosting` implements, belongs to `libraries/Hosting`. This rule
+covers Database's own API contracts. BCL interfaces such as `IAsyncDisposable`, `IDisposable`
+and `IEquatable<T>` on value objects stay.
 
 ## Type shape
 

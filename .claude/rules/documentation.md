@@ -33,9 +33,7 @@ where an area's design document is, and a new area's docs folder is named before
 
 An area-level document is a *cross-project narrative*: it explains how a dozen packages compose,
 which is exactly the thing no single project folder owns. Left in the area, the same document type
-drifts into a different shape per area — this repository had three simultaneously
-(`resources/Database/DESIGN.md`, `resources/Web/docs/DESIGN.md`,
-`libraries/ApplicationModel/DESIGN.md`) before the layout was fixed. Centralizing also makes the
+drifts into a different shape per area. Centralizing also makes the
 architecture record readable as a set: `docs/resources/` is a shelf you can browse, whereas the
 same files scattered across `resources/*/` are 19 separate discoveries.
 
@@ -170,8 +168,7 @@ editing that section, never as a standalone sweep. Don't add new box art for gra
 [`docs/DEPENDENCIES.md`](../../docs/DEPENDENCIES.md) is the repository-wide reference graph: every
 project, every declared reference, an area roll-up, and a fan-in ranking. It is **generated** by
 reading the csprojs statically — no restore, no MSBuild evaluation — so it runs in seconds and
-reports exactly what the project files declare, which is the thing `COHRES001`–`COHRES004` and
-`COHLIB001` are written against.
+reports the project references that `COHRES001`, `COHRES002`, `COHRES004`, and `COHLIB001` check.
 
 > **When a dependency is added or removed, rerun the generator in the same commit.**
 

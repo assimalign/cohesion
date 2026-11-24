@@ -1,14 +1,12 @@
 # Cohesion developer tooling
 
 This L1 area contains the application CLI and installable .NET templates.
-Repository maintenance scripts live in [root scripts](../scripts/README.md). The tools wrap
-the SDKs and the gateway program a `Program.cs` declares; they add no application-model
-semantics of their own (see [docs/libraries/ApplicationModel/DESIGN.md](../docs/libraries/ApplicationModel/DESIGN.md)).
+Repository maintenance scripts live in [root scripts](../scripts/README.md).
 
 | Project | Purpose |
 | --- | --- |
 | [CLI](Cli/Assimalign.Cohesion.Cli/docs/OVERVIEW.md) | `Assimalign.Cohesion.Cli`: the `cohesion` .NET tool. |
-| [Templates](templates/README.md) | `Assimalign.Cohesion.Templates`: `dotnet new` applications, gateways and standalone resources. |
+| [Templates](templates/README.md) | `Assimalign.Cohesion.Templates`: `dotnet new` applications and standalone resources. |
 | [Database Studio](Assimalign.Cohesion.Database.Studio/README.md) | Throw-away, Windows-only MAUI editor for exercising the Database engines as a consumer. Not shipped: `IsPackable=false`, in no solution or CI matrix. |
 
 ## The cohesion tool
@@ -16,8 +14,8 @@ semantics of their own (see [docs/libraries/ApplicationModel/DESIGN.md](../docs/
 | Verb | Behavior |
 | --- | --- |
 | `new <template> [args...]` | Validates a shipped template name and invokes `dotnet new <template> <args...>`. `new --list` invokes `dotnet new list cohesion`. |
-| `run [--project <csproj\|dir>] [-- args...]` | Invokes `dotnet run --project <gateway> -- <args...>` in the gateway's directory. The gateway's `Program.cs` declares the model and the platform it runs on. |
-| `publish [<project>] [args...]` | Invokes `dotnet publish <project-or-gateway> <args...>`. Also accepts `--project`. |
+| `run [--project <csproj\|dir>] [-- args...]` | Invokes `dotnet run` for the selected project, or for the project in the current directory if no project is named. |
+| `publish [<project>] [args...]` | Invokes `dotnet publish` for the selected project, or for the project in the current directory if no project is named. Also accepts `--project`. |
 | `login --issuer <url> --client-id <id>` | Discovers IdentityHub's device flow, displays approval instructions and polls for an access token. Optional `--client-secret`, `--audience`, `--scope` (default `openid`), and `--print`. |
 | `--help` / `--version` | Prints syntax or the canonical Cohesion version, without SDK commit metadata. |
 
@@ -31,31 +29,15 @@ is nonblank, because a launch profile would otherwise override the inherited val
 developer-machine environment; Development is an ordinary deployed environment with strict
 security requirements. The framework's unset default remains Production.
 
-A gateway program has no command-line modes and keeps no local state under `.cohesion/`, and the
-CLI has no `deploy`, `trust`, `parameter` or `status` verb.
-
 The shipped `new` names are:
 
-`cohesion-app`, `cohesion-gateway`, `cohesion-web`, `cohesion-spa`, `cohesion-database`,
+`cohesion-app`, `cohesion-web`, `cohesion-spa`, `cohesion-database`,
 `cohesion-secretstore`, `cohesion-configurationstore`, `cohesion-identityhub`, `cohesion-rezolvr`.
 
-Names are accepted case-insensitively and forwarded verbatim. `-n` and `--applicationName`
+Names are accepted case-insensitively and forwarded verbatim. Template options such as `-n`
 pass through. A failed valid-template invocation prints one install hint using
 `Assimalign.Cohesion.Templates::<CLI version>`; the version is required for the prerelease
 package and is read from the CLI assembly, not hard-coded.
-
-## Gateway discovery
-
-Use `--project <csproj|dir>` for `run` and `publish`. An explicit csproj selects that file.
-Otherwise the CLI recursively finds exactly one csproj beneath the selected directory (current
-directory by default), skipping `bin/`, `obj/` and directory links. The marker is the root
-`Sdk="Assimalign.Cohesion.Sdk.Gateway"` attribute, including `Name/Version` forms, or a child
-`<Sdk Name="Assimalign.Cohesion.Sdk.Gateway" ... />`. Zero/multiple matches list the candidates
-and require explicit selection.
-
-The CLI explicitly launches `run` with the selected project directory as its working directory.
-A probe on SDK 10.0.401 showed that `dotnet run --project` alone retains the caller's directory,
-so relative passthrough paths resolve against the gateway project either way.
 
 ## IdentityHub login and deferred work
 

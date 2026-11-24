@@ -154,8 +154,7 @@ The engine references the Documents Language, Catalog, and Storage packages and
 the shared Database root. [DESIGN.md](DESIGN.md) describes transaction ownership,
 OQL semantics, and limits. The [language design](../../Assimalign.Cohesion.Database.Documents.Language/docs/DESIGN.md)
 defines the supported grammar; the [storage design](DESIGN.md#storage-component)
-defines the on-disk format. ApplicationModel and compiled-schema provisioning
-remain outside this composition change.
+defines the on-disk format. Compiled-schema provisioning remains outside this composition change.
 
 `DocumentDatabaseEngine.CreateBuilder(name)` returns the same model builder for
 standalone composition or the concrete hosting builder's build-aware engine
@@ -210,7 +209,7 @@ The Storage component is part of `Assimalign.Cohesion.Database.Documents`, with 
 The `src/Storage/` component stores immutable UTF-8 JSON content as chunk
 chains over `Database.Storage`. `Database.Transactions` supplies the shared logical coordinator,
 version stamps, undo ledger, and recovery classification. The package has no dependency on the
-document engine, Hosting, ApplicationModel, or a serializer that discovers runtime types.
+document engine, Hosting or a serializer that discovers runtime types.
 
 Create a file set with `DocumentStorage.Create`; construct a `TransactionCoordinator` using
 `WriteAheadJournal` and `Records`. `WriteContentAsync` validates a document, writes its chunks in

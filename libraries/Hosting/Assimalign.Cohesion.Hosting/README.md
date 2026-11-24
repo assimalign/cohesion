@@ -5,12 +5,7 @@ construction, service startup and shutdown, restartable run state, and the compl
 `RunAsync` starts the host, waits for a shutdown request or signal, and drains it. Its only
 Cohesion assembly dependency is `Assimalign.Cohesion.Core`.
 
-The package deliberately does not own resource behavior. Resource instances, their control plane,
-and the host service that joins an instance to its gateway are
-`Assimalign.Cohesion.ApplicationModel.Hosting` (under `libraries/ApplicationModel/`), which builds
-on this package; this package references none of it. The base `Assimalign.Cohesion.App` framework
-delivers both. Delivery is not activation: an application becomes a managed resource only when it
-calls its area's `builder.Services.AddResource(...)`, from `<Area>.Hosting.ApplicationModel`.
+The base `Assimalign.Cohesion.App` framework includes this package.
 
 While `RunAsync` runs, the process's shutdown signals (SIGINT, SIGQUIT and SIGTERM) request a
 graceful shutdown instead of ending the process, exactly as cancelling its token does. A platform's

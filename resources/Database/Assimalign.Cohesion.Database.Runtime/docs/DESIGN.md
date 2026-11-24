@@ -27,5 +27,4 @@ declarations preserves their evaluation order, membership and reference/runtime 
 compiler and AOT settings are inherited from the shared build rather than duplicated here.
 
 `Database.Hosting.ApplicationModel` was a public member (#1785) until #1869 removed it with the
-old application model. No ApplicationModel platform or gateway assembly belongs in either shared
-framework.
+old application model on 2026-11-18.

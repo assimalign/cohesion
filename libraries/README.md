@@ -7,7 +7,6 @@ Public API reference belongs in [cohesion-docs](https://github.com/assimalign/co
 | Area | Purpose |
 | --- | --- |
 | `Amqp` | AMQP protocol implementation and its connection bindings. |
-| `ApplicationModel` | Application orchestration contracts and deployment gateways (the control plane). |
 | `Cache` | Caching abstractions and the in-memory cache implementation. |
 | `Configuration` | Configuration model plus providers (JSON, XML, INI, environment variables, command line, file system). |
 | `Connections` | Connection contracts and transport drivers, including TLS via the Security area. |

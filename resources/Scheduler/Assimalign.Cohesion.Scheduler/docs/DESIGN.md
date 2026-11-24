@@ -14,7 +14,7 @@ Provider implementations are internal to trigger packages. IScheduleProvider is 
 
 ## Deferred behavior
 
-Retries, misfire policies, durable history, leader election, and distributed worker ownership are not implemented. The application model therefore enforces a singleton workload.
+Retries, misfire policies, durable history, leader election, and distributed worker ownership are not implemented.
 
 ## AOT posture
 

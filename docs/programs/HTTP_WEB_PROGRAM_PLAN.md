@@ -6,7 +6,7 @@
 
 This file is temporary scaffolding for the duration of the program. When the Web resource is assembled and this backlog is drained, fold anything durable into the relevant `docs/DESIGN.md` files and delete this doc.
 
-> **Application model (2026-10-31).** Entries that name `Hosting.Resources`, `Web.Hosting.Resources`, `Web.ApplicationModel`, `<Area>.ApplicationModel(.Orchestration)`, the resource control plane and its commands, or COHAM001 are the record of their sessions. The 2026-10-27 restart retired all of them: a Web application becomes a managed resource through `Web.Hosting.ApplicationModel` (`builder.Services.AddResource(...)`); see its [design](../../resources/Web/Assimalign.Cohesion.Web.Hosting.ApplicationModel/docs/DESIGN.md) and the [ApplicationModel area design](../libraries/ApplicationModel/DESIGN.md).
+> **Application model (2026-10-31).** Entries that name `Hosting.Resources`, `Web.Hosting.Resources`, `Web.ApplicationModel`, `<Area>.ApplicationModel(.Orchestration)`, the resource control plane and its commands, or COHAM001 are the record of their sessions. The 2026-10-27 restart retired all of them: a Web application becomes a managed resource through `Web.Hosting.ApplicationModel` (`builder.Services.AddResource(...)`).
 
 ---
 

@@ -20,8 +20,7 @@ The protocol listener starts after user services and drains before them. The hos
 `--endpoint` or the loopback default.
 `/cohesion/v1` accepts only transport peers at `127.0.0.1`, `::1`,
 or IPv4-mapped `127.0.0.1`; other peers receive 403, regardless of forwarded headers.
-Bare `/healthz`, `/readyz`, and `/livez` stay open. The area's resource integration is
-`Assimalign.Cohesion.ConfigurationStore.Hosting.ApplicationModel` (`builder.Services.AddResource(...)`), which references this module; this module references no application-model library.
+Bare `/healthz`, `/readyz`, and `/livez` stay open.
 
 ## Public types
 

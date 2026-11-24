@@ -5,9 +5,8 @@
 The named-pipe driver for the Cohesion Connections contracts: the Windows-native local
 inter-process transport, and the cross-platform peer of the Unix domain socket path in the
 stream (`Tcp`) driver. It produces reliable, ordered, single-stream connections over
-`NamedPipeServerStream` / `NamedPipeClientStream` for same-host IPC — the ApplicationModel
-LocalGateway addressing co-located service processes by pipe name instead of a loopback
-port. Because transports are selected by capability, a named-pipe listener composes into the
+`NamedPipeServerStream` / `NamedPipeClientStream` for same-host IPC. Because transports are
+selected by capability, a named-pipe listener composes into the
 same `UseHttp1/2(IDuplexConnectionListener)` seams a socket listener does, with no HTTP-layer
 change. This mirrors Kestrel's `ListenNamedPipe` surface.
 
@@ -42,13 +41,13 @@ Protocol semantics belong to the layers above; this driver only moves an ordered
 ```csharp
 // Server: accept connections on a local pipe.
 await using NamedPipeConnectionListener listener = NamedPipeConnectionListener.Create(
-    options => options.EndPoint = new NamedPipeEndPoint("cohesion-gateway"));
+    options => options.EndPoint = new NamedPipeEndPoint("cohesion-local"));
 
 ValueTask<DuplexConnection> accept = listener.AcceptAsync(cancellationToken);
 
 // Client: dial the same pipe.
 NamedPipeConnectionFactory factory = new();
-DuplexConnection dialed = await factory.ConnectAsync(new NamedPipeEndPoint("cohesion-gateway"), cancellationToken);
+DuplexConnection dialed = await factory.ConnectAsync(new NamedPipeEndPoint("cohesion-local"), cancellationToken);
 DuplexConnection accepted = await accept;
 
 // Compose HTTP/1.1 over it, exactly like a socket listener:

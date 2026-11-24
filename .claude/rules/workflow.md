@@ -14,8 +14,8 @@ out **beside** `cohesion`, not inside it:
 
 | Repository | Holds |
 | --- | --- |
-| [`cohesion-examples`](https://github.com/assimalign/cohesion-examples.git) | Consumer-facing examples and the package-only SDK consumer smoke projects (`smoke/SdkSmoke`, `smoke/GatewaySmoke`) |
-| `cohesion-platforms` | The platform gateway packages (`ApplicationModel.Gateway.{Containers,Docker,Kubernetes}`) |
+| [`cohesion-examples`](https://github.com/assimalign/cohesion-examples.git) | Consumer-facing examples and the package-only SDK consumer smoke project (`smoke/SdkSmoke`) |
+| `cohesion-platforms` | The platform packages |
 
 **If a companion repository is not checked out locally, clone it before doing work that touches
 it** — do not recreate its content inside `cohesion`, and do not skip the task:

@@ -1,6 +1,6 @@
 # Cohesion
 
-Cohesion is a code-first, multi-service application framework for .NET. It provides the building blocks — foundation libraries, an application model, MSBuild SDKs, and NuGet-distributed shared frameworks — for composing services that can run in-process, out-of-process, or across machines without changing application code. Everything targets the latest .NET with NativeAOT compatibility as a standing requirement.
+Cohesion is a code-first, multi-service application framework for .NET. It provides foundation libraries, MSBuild SDKs, and NuGet-distributed shared frameworks for composing services. The application model is being rebuilt under [`fabric/`](fabric/README.md). Everything targets the latest .NET with NativeAOT compatibility as a standing requirement.
 
 - [Cohesion](#cohesion)
 - [Sdk](#sdk)
@@ -18,7 +18,6 @@ Cohesion ships as a family of MSBuild SDKs (`Assimalign.Cohesion.Sdk`, `Assimali
 
 ## Libraries
 ![amqp](https://github.com/assimalign/cohesion/actions/workflows/library-amqp.yml/badge.svg?branch=main)
-![application model](https://github.com/assimalign/cohesion/actions/workflows/library-application-model.yml/badge.svg?branch=main)
 ![cache](https://github.com/assimalign/cohesion/actions/workflows/library-cache.yml/badge.svg?branch=main)
 ![configuration](https://github.com/assimalign/cohesion/actions/workflows/library-configuration.yml/badge.svg?branch=main)
 ![connections](https://github.com/assimalign/cohesion/actions/workflows/library-connections.yml/badge.svg?branch=main)
@@ -77,6 +76,7 @@ Cohesion is a mono repository that contains all the source code, extensions, and
 | `./build`       | Custom MSBuild infrastructure: centralized targets, package versions, and build tasks shared by every project. |
 | `./docs`        | Repository-level documentation (delivery roadmap, service design, build system, versioning).               |
 | `./extensions`  | IDE and platform integrations (Visual Studio extension); `dotnet new` templates moved to `./tooling/templates`. |
+| `./fabric`      | Application model rebuild. See [fabric/README.md](fabric/README.md). |
 | `./fixtures`    | Repository-wide integration, resource-generation, and isolated SDK consumer checks.                       |
 | `./libraries`   | Foundation libraries (L1) — every Cohesion building block. `libraries/App` produces the `App` hosting-kernel framework and holds the pack logic every framework shares. |
 | `./resources`   | Service/resource implementations (L3), each paired with an `Sdk.<Name>` + `App.<Name>` framework family. Each area produces its own framework; its members are listed in the area's `.Runtime/Directory.Build.props`. |
@@ -117,7 +117,6 @@ flowchart TD
 
     subgraph W4["Wave 4: Composition & High-Risk"]
         Hosting["Hosting L01.01.10"]
-        AppModel["ApplicationModel L01.01.02"]
         Dns["Dns L01.01.08"]
     end
 
@@ -140,10 +139,5 @@ flowchart TD
     Connections --> Http
     Connections --> Amqp
     DI --> Hosting
-    DI --> AppModel
-    Config --> AppModel
-    Logging --> AppModel
-    FS --> AppModel
-    Hosting --> AppModel
 
 ```

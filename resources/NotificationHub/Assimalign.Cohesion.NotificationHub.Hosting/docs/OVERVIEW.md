@@ -1,6 +1,6 @@
 # Assimalign.Cohesion.NotificationHub.Hosting
 
-`NotificationHubApplication.CreateBuilder(args)` returns the public concrete `NotificationHubApplicationBuilder`. Explicit services preserve registration/start order and reverse stop order. The area's resource integration is `Assimalign.Cohesion.NotificationHub.Hosting.ApplicationModel` (`builder.Services.AddResource(...)`), which references this module; this module references no application-model library.
+`NotificationHubApplication.CreateBuilder(args)` returns the public concrete `NotificationHubApplicationBuilder`. Explicit services preserve registration/start order and reverse stop order.
 
 Domain service behavior and command kinds remain deferred.
 

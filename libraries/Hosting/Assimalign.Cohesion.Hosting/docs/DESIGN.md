@@ -4,8 +4,7 @@
 
 The plain Hosting package coordinates a host lifetime without assuming how an application is
 supervised, how health is transported, or whether the process represents a Cohesion resource.
-Those policies live in other packages and integrate as ordinary host services:
-ApplicationModel.Hosting's `ApplicationInstanceService` is an `IHostLifecycleService`.
+Applications compose their own policies as host services.
 
 ## Lifecycle coordinator
 
@@ -117,16 +116,10 @@ never compete with the outer run for them. Each run registers afresh and removes
 ends. `ShutdownTimeout` should stay below the platform's grace period between SIGTERM and SIGKILL
 (30 seconds by default on Kubernetes).
 
-A run inside an `AppEnvironmentScope` (Core, 2026-10-29) shares its process with other programs,
-as each resource of an in-process gateway does, and calls `RunAsync` from its own `Main`. The
-process's signals are not its own there: it registers on the scope's `Shutdown` token instead, which
-the host of programs cancels to stop it, and registers no process signal. So a gateway program keeps
-SIGTERM for itself and stops its programs in the order it chooses, and a program's `Program.cs` needs
-no change to run in process.
-
-The registration itself is Core's `AppEnvironment.RegisterShutdown` (2026-10-29), which the
-application-model gateway's run uses too; Hosting's internal `HostShutdownSignals` keeps only the
-test seam and the never-throwing request that cancels the run.
+A run inside an `AppEnvironmentScope` (Core, 2026-10-29) registers on the scope’s `Shutdown` token.
+The outer host owns process signals and cancels the scoped token to stop the program.
+Core's `AppEnvironment.RegisterShutdown` handles the registration. Hosting's internal
+`HostShutdownSignals` keeps the test seam and the never-throwing request that cancels the run.
 
 Before this (2026-10-28), nothing in Hosting handled a signal. SIGTERM, which Kubernetes and Docker
 send to stop a container, ended the process without stopping the host and cut off in-flight work.
@@ -197,30 +190,13 @@ Both base classes signal their work token and join the real work. Cooperative ca
 clean stop; other faults surface to the host. A timed-out join retains run state so a later stop can
 join the same work.
 
-## Family map and dependency direction
-
-| Package | Direct dependencies | Policy boundary |
-| --- | --- | --- |
-| `Assimalign.Cohesion.Hosting` | Core | Plain lifecycle only |
-| `Assimalign.Cohesion.ApplicationModel.Hosting` | Core, Hosting, ApplicationModel.Protocol | Resource instances, their control plane, and the host service that joins one to its gateway (`libraries/ApplicationModel/`) |
-
-Hosting does not reference ApplicationModel.Hosting. ApplicationModel.Hosting is the opt-in
-composition layer: an area's `<Area>.Hosting.ApplicationModel` registers its
-`ApplicationInstanceService`, an `IHostLifecycleService`, with the application's host.
-
-Both ship in the base `Assimalign.Cohesion.App` framework. Framework presence is not activation: an
-application becomes a managed resource only when it calls its area's
-`builder.Services.AddResource(...)`.
+Hosting depends on Core and ships in the base `Assimalign.Cohesion.App` framework.
 
 ## Non-goals
 
-- Resource behavior belongs to `Assimalign.Cohesion.ApplicationModel.Hosting`. Stdout readiness messages
-  and exit-code classification belong to no package: a resource reports readiness to its gateway,
-  and a platform restarts a process on any failed exit.
 - Other signals, and shutdown signals outside a run: Hosting registers SIGINT, SIGQUIT and SIGTERM
   only while `RunAsync` runs.
-- Health checks. A resource reports its health through ApplicationModel.Hosting
-  (`IApplicationHealthContributor`), and a Web application serves health endpoints through Web.Health.
+- Health checks. A Web application serves health endpoints through Web.Health.
 - Dependency injection, configuration, logging, and HTTP delivery belong to their respective
   packages.
 - Hosting does not install a synchronization context or task scheduler.

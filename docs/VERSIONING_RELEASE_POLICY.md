@@ -249,10 +249,9 @@ deleting anything. One run at a time; a queued run replaced by a newer one loses
 
 ## Consumer SDK pin agreement
 
-A repository `global.json` pins the .NET SDK and its Cohesion MSBuild SDKs. Templates write all 20
-Cohesion identities: `Assimalign.Cohesion.Sdk`, the 18 resource-area SDKs (including `Sdk.Web`),
-and `Sdk.Gateway`. Every Cohesion pin present in the block must use exactly the same version string,
-and the pinned .NET SDK version must be `10.0.300` or newer. The base SDK enforces those rules during
+A repository `global.json` pins the .NET SDK and its Cohesion MSBuild SDKs. Every Cohesion pin
+present in the block must use exactly the same version string, and the pinned .NET SDK version must
+be `10.0.300` or newer. The base SDK enforces those rules during
 restore and build with COHSDK002 after finding the nearest `global.json` above the consumer project.
 A consumer without `global.json` is unaffected.
 

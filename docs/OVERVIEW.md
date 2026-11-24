@@ -8,8 +8,8 @@ Repository-level documentation for the Cohesion mono repository. Coding standard
 - [Service Layer Design](./SERVICE_LAYER_DESIGN.md) — high-level design for each service under `resources/`
 - [Service Story Requirements](./programs/SERVICE_STORY_REQUIREMENTS.md) — implementation requirements for service-level backlog stories
 - [Developer Experience Design](./DEVELOPER_EXPERIENCE_DESIGN.md) — how a project picks a Cohesion SDK, the frameworks it receives, the canonical runtime API, and the hosting decisions in force
-- [Runtime Contract](./RUNTIME_CONTRACT.md) — the language-neutral `COHESION_*` variables a gateway gives the instances it runs
-- [Application Model design](./libraries/ApplicationModel/DESIGN.md) — gateways, managed resource instances, and the platforms between them
+- [Runtime Contract](./RUNTIME_CONTRACT.md) — the language-neutral `COHESION_*` environment contract
+- [Fabric](../fabric/README.md) — the application model is being rebuilt under `fabric/`
 - Build
   - [Cohesion Custom MSBuild Items](./build/MSBUILD_COHESION_PROPS.md) — `CohesionProjectReference`, `CohesionPackageReference`, code generation
   - [Common MSBuild Properties](./build/MSBUILD_COMMON_PROPS.md) — where shared build properties are defined
@@ -25,10 +25,8 @@ L3 service platforms.
 
 | Family | Packages and responsibility |
 |---|---|
-| ApplicationModel | `Assimalign.Cohesion.ApplicationModel` (the shared identity), `.Protocol` (the gateway-to-instance wire), `.Definition` (the logical model a gateway runs), `.Hosting` (the running instance), `.Hosting.InProcess` (the in-process platform's instance half), `.Gateway` (deploys and manages one gateway's model through an infrastructure provider), `.Gateway.InProcess` (the in-process platform's gateway half). Rebuilt since 2026-10-27; see the [area README](../libraries/ApplicationModel/README.md). The Kubernetes and Docker platform pairs live in `cohesion-platforms`. |
 | Hosting | `Assimalign.Cohesion.Hosting` (the nestable lifecycle host every area application is). |
 | OpenTelemetry | `Assimalign.Cohesion.OpenTelemetry`: `OtlpProtocol`, `OtlpSignal`, `OtlpExporterOptions`, `IOtlpLogExporter`, `OtlpLogRecord`, and `OtlpExporter`; OTLP/HTTP JSON logs, with traces, metrics, and protobuf deferred. |
-| Resource application-model integrations | Each area makes its application a managed resource with one package, `<Area>.Hosting.ApplicationModel`, a member of its `App.<Area>` framework: `builder.Services.AddResource(name, resource => resource.UseInProcess())`. Web's is the reference implementation ([Web.Hosting.ApplicationModel](../resources/Web/Assimalign.Cohesion.Web.Hosting.ApplicationModel/docs/DESIGN.md)). |
 | Area clients | `Database.Client`, `Database.{Sql,Documents,Graph,Blob,Cache,KeyValuePair}.Client`, `ConfigurationStore.Client`, `SecretStore.Client`, `IdentityHub.Client`, `MessageHub.Client`, and `NotificationHub.Client` are ordinary client packages; an area framework carries one only when the area's own applications use it at run time. |
 
 The seven areas with real service hosts are **Web, Database, ConfigurationStore, SecretStore,

@@ -8,7 +8,6 @@ protocol served on the resource's `api` endpoint.
 
 ## Current behavior
 
-- The area's resource integration is `Assimalign.Cohesion.SecretStore.Hosting.ApplicationModel` (`builder.Services.AddResource(...)`), which references this module; this module references no application-model library.
 - Always appends an HTTP/1 endpoint service after caller-registered host services, so the endpoint
   starts last and drains first.
 - Interoperates with `SecretStore.Client` for secret reads and durable leaf-certificate reads.

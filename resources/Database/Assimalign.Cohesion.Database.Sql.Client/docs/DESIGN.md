@@ -652,8 +652,8 @@ The package has no public interface left and no `Abstractions/` folder
 - **Typed surface.** `ConnectAsync` returns the sealed `SqlConnection`, which wraps the core's
   sealed `DatabaseConnection`; nothing casts. `Settings` reads the core's settings.
 - **What changed for a caller.** `ISqlClient` and `ISqlConnection` become `SqlClient` and
-  `SqlConnection` (the Sdk.ApplicationModel `EnabledWeb` fixture and Studio's SQL workspace were
-  retyped), and an observer overrides `protected` hooks instead of implementing public ones.
+  `SqlConnection` (phase 5 retyped the former `Sdk.ApplicationModel` `EnabledWeb` fixture and
+  Studio's SQL workspace), and an observer overrides `protected` hooks instead of implementing public ones.
   An observer cannot forward to another observer instance: outside this assembly the hooks are
   protected (CS1540), so an application that needs several sinks fans out inside one subclass
   (plan §7, "P5, as landed", owner review 38).

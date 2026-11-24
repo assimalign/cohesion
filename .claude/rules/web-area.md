@@ -7,7 +7,7 @@ canonical prose lives in `resources/Web/README.md`; this file is the working rul
 ## The dependency rule (build-enforced)
 
 > **`Assimalign.Cohesion.Web.Hosting` is the runtime module — no Web-area library may reference
-> it, and it may reference any Web-area library except `Web.Testing`,
+> it except the named exemption holder, `Web.Testing`. It may reference any Web-area library except `Web.Testing`,
 > the `App.Web` producers (`Web.Refs`, `Web.Runtime`), and test,
 > example, sample, and fixture projects.** (COHRES002, relaxed by owner decision 2026-10-09; before
 > that, `Web.Hosting` could reference only the root `Assimalign.Cohesion.Web` and its own hosting
@@ -21,9 +21,7 @@ canonical prose lives in `resources/Web/README.md`; this file is the working rul
 - **Never reference `Assimalign.Cohesion.Web.Hosting`** from a feature library. Hosting composes
   DI, configuration, logging, and transports; a reference to it drags that surface into every
   consumer and pushes users toward container-driven design.
-- `Web.Hosting` is a plain host. The Web area has no application-model integration: phase 1 of
-  the application-model rebuild removed `Web.Hosting.ApplicationModel` (2026-11-18), and the
-  replacement is the ResourceManager's provider model (`fabric.md`), not a per-area package. A future `Web.Hosting.<Suffix>` package is permitted only for an
+- A future `Web.Hosting.<Suffix>` package is permitted only for an
   integration that must not land in every framework carrying `Web.Hosting`; it retains the
   family constraints in `resource-areas.md`. Roots and features may not reference the hosting
   module, its family (COHRES001) or shared Hosting libraries (COHRES004).

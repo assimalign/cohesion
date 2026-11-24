@@ -1,6 +1,6 @@
 # Assimalign.Cohesion.Rezolvr.Hosting
 
-`RezolvrApplication.CreateBuilder(args)` returns the public concrete `RezolvrApplicationBuilder`. Explicit services preserve registration/start order and reverse stop order. The area's resource integration is `Assimalign.Cohesion.Rezolvr.Hosting.ApplicationModel` (`builder.Services.AddResource(...)`), which references this module; this module references no application-model library. The plain host opens no listener without registration.
+`RezolvrApplication.CreateBuilder(args)` returns the public concrete `RezolvrApplicationBuilder`. Explicit services preserve registration/start order and reverse stop order. The plain host opens no listener without registration.
 
 The module stores no records and serves no DNS answers yet.
 

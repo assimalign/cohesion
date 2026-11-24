@@ -12,11 +12,7 @@ Each build creates a new context, invokes every registered service factory exact
 
 ## Boundaries
 
-The module references the area root, DependencyInjection, and Hosting publicly. It references no Web, HTTP, or transport library: none of its services opens a listener yet. It references no application-model library: the resource integration, `VpnGateway.Hosting.ApplicationModel`, references this module instead. It uses no reflection or dynamic activation and remains trimming- and NativeAOT-safe.
-
-## Resource integration
-
-The area's resource integration is `Assimalign.Cohesion.VpnGateway.Hosting.ApplicationModel` (`builder.Services.AddResource(...)`), which references this module; this module references no application-model library.
+The module references the area root, DependencyInjection, and Hosting publicly. It references no Web, HTTP, or transport library: none of its services opens a listener yet. It uses no reflection or dynamic activation and remains trimming- and NativeAOT-safe.
 
 ## Concrete composition (T10 / O34)
 

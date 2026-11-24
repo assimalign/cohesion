@@ -5,10 +5,7 @@
 The client is the narrow protocol boundary for ConfigurationStore. It reads named configuration
 namespaces without exposing or depending on the store's hosting implementation, so no consumer
 acquires a transitive dependency on `Assimalign.Cohesion.ConfigurationStore.Hosting`. A program that
-reads the store's namespaces references the package directly. A gateway does not use it: a managed
-ConfigurationStore instance is reached through its resource integration,
-`Assimalign.Cohesion.ConfigurationStore.Hosting.ApplicationModel`, whose actions the gateway runs
-through the platform the instance runs on.
+reads the store's namespaces references the package directly.
 
 ## Dependency boundary
 
@@ -16,7 +13,7 @@ The package references only `Assimalign.Cohesion.Core`, solely for the Cohesion 
 `System.Uri`. The guard requires an absolute, host-bearing URI with a port from 1 through 65535 and
 rejects user information, query strings, and fragments. HTTP transport, authentication headers,
 and JSON processing use BCL APIs. The package deliberately does not depend on the ConfigurationStore
-area root, Hosting, DependencyInjection, Web, or ApplicationModel.
+area root, Hosting, DependencyInjection, or Web.
 
 `ClientCredential` is a package-local contract, so a request needs no runtime assembly.
 
@@ -45,8 +42,7 @@ duplicates.
 
 ### Read-only
 
-The client reads; it changes no store state. A managed instance's state changes arrive as actions
-through its platform (`ConfigurationStore.Hosting.ApplicationModel`).
+The client reads store state.
 
 ## Transport and ownership
 
@@ -74,7 +70,7 @@ NativeAOT settings.
 ## Non-goals
 
 - Hosting or implementing ConfigurationStore endpoints.
-- Changing a store's state: a managed instance takes changes as actions through its platform.
+- Changing a store's state.
 - Discovering endpoints or credentials from process state.
 - Parsing, validating, or refreshing the opaque Bearer credential.
 - Following redirects or retrying failed requests.

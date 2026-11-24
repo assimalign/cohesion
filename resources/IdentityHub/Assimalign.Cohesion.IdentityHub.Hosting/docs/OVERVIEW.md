@@ -9,8 +9,6 @@ The host serves discovery, persisted ES256 JWKS, client-credentials tokens, and 
 
 The builder also defines the hub's directory in code. `AddUser` and `AddGroup` define users and groups, `AddStore` names the store that holds the ones created at run time (an in-memory store when it is not called), and the built application serves both through `Context.Directory`, the code-defined ones locked. No endpoint reads the directory yet: the issuer serves applications only.
 
-This module references no application-model library. The old application model's integration, `Assimalign.Cohesion.IdentityHub.Hosting.ApplicationModel`, was removed with the old model.
-
 Device authorization and its fixed-subject browser approval page are exposed only by a loopback Local endpoint. Applications needing account login, subject selection, consent, recovery, or federation compose an authenticated user-facing flow separately.
 
 Self-signed TLS is limited to loopback Local; non-Local HTTPS fails closed rather than generating production TLS material.

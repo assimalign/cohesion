@@ -1,6 +1,6 @@
 # Assimalign.Cohesion.IoTHub.Hosting
 
-`IoTHubApplication.CreateBuilder(args)` returns the public concrete `IoTHubApplicationBuilder`. Explicit services preserve registration/start order and reverse stop order. The area's resource integration is `Assimalign.Cohesion.IoTHub.Hosting.ApplicationModel` (`builder.Services.AddResource(...)`), which references this module; this module references no application-model library.
+`IoTHubApplication.CreateBuilder(args)` returns the public concrete `IoTHubApplicationBuilder`. Explicit services preserve registration/start order and reverse stop order.
 
 Domain service behavior remains deferred.
 

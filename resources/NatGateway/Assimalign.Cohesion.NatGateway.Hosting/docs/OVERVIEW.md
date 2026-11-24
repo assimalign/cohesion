@@ -1,6 +1,6 @@
 # Assimalign.Cohesion.NatGateway.Hosting
 
-`NatGatewayApplication.CreateBuilder(args)` returns the public concrete `NatGatewayApplicationBuilder`. Explicit services preserve registration/start order and reverse stop order. The area's resource integration is `Assimalign.Cohesion.NatGateway.Hosting.ApplicationModel` (`builder.Services.AddResource(...)`), which references this module; this module references no application-model library.
+`NatGatewayApplication.CreateBuilder(args)` returns the public concrete `NatGatewayApplicationBuilder`. Explicit services preserve registration/start order and reverse stop order.
 
 Domain service behavior and command kinds remain deferred.
 

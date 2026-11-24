@@ -3,10 +3,7 @@
 ## Design intent
 
 The client is the SecretStore protocol boundary: a program that reads secrets and certificates
-references it, without referencing a runtime module, and the package takes no application-model
-reference. A gateway does not use it: a managed SecretStore instance is reached through its
-resource integration, `Assimalign.Cohesion.SecretStore.Hosting.ApplicationModel`, whose actions the
-gateway runs through the platform the instance runs on. The public contract is interface-first and
+references it directly. The public contract is interface-first and
 the HTTP implementation remains internal.
 
 ## Dependency boundary
@@ -49,14 +46,12 @@ Every request carries `Authorization: Bearer <opaque-token>`. Redirects and cook
 a credential is never forwarded to a different authority or mixed with ambient cookie state. Non-success status codes surface as
 `HttpRequestException`; cancellation propagates unchanged.
 
-`Assimalign.Cohesion.SecretStore.Hosting` serves the secret and certificate routes. The area's resource
-integration is `Assimalign.Cohesion.SecretStore.Hosting.ApplicationModel`. Secret and certificate
+`Assimalign.Cohesion.SecretStore.Hosting` serves the secret and certificate routes. Secret and certificate
 responses are marked `no-store`.
 
 ### Read-only
 
-The client reads; it changes no store state. A managed instance takes state changes as actions
-through its platform (`SecretStore.Hosting.ApplicationModel`).
+The client reads store state.
 
 ## Credential contract
 
@@ -81,7 +76,6 @@ preserving trimming and NativeAOT compatibility.
 ## Non-goals
 
 - Reading token files or acquiring and rotating credentials.
-- Changing a store's state: a managed instance takes changes as actions through its platform.
+- Changing a store's state.
 - Hosting SecretStore endpoints or implementing persistence or certificate issuance.
-- Defining SecretStore-specific verbs or handlers; those belong to SecretStore.Hosting and its
-  resource integration.
+- Defining SecretStore-specific verbs or handlers.

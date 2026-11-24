@@ -1,6 +1,6 @@
 # Assimalign.Cohesion.MediaHub.Hosting
 
-`MediaHubApplication.CreateBuilder(args)` returns the public concrete `MediaHubApplicationBuilder`. Explicit services preserve registration/start order and reverse stop order. The area's resource integration is `Assimalign.Cohesion.MediaHub.Hosting.ApplicationModel` (`builder.Services.AddResource(...)`), which references this module; this module references no application-model library.
+`MediaHubApplication.CreateBuilder(args)` returns the public concrete `MediaHubApplicationBuilder`. Explicit services preserve registration/start order and reverse stop order.
 
 Domain service behavior remains deferred.
 

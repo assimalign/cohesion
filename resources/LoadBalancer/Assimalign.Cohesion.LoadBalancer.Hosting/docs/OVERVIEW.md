@@ -1,6 +1,6 @@
 # Assimalign.Cohesion.LoadBalancer.Hosting
 
-`LoadBalancerApplication.CreateBuilder(args)` returns the public concrete `LoadBalancerApplicationBuilder`. Explicit services preserve registration/start order and reverse stop order. The area's resource integration is `Assimalign.Cohesion.LoadBalancer.Hosting.ApplicationModel` (`builder.Services.AddResource(...)`), which references this module; this module references no application-model library.
+`LoadBalancerApplication.CreateBuilder(args)` returns the public concrete `LoadBalancerApplicationBuilder`. Explicit services preserve registration/start order and reverse stop order.
 
 Domain service behavior remains deferred.
 

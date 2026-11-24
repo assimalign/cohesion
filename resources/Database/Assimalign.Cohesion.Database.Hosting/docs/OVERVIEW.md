@@ -56,14 +56,13 @@ Instance engines and services remain caller-owned. Factory products belong to th
 
 The runtime references the area root and non-area infrastructure, never Database model packages.
 
-The concrete builder's AddHealthEndpoint(Uri) starts an owned HTTP health listener. The last call
-wins; when the runtime names a gateway and assigns plain http at a bindable host, that assignment
-wins instead (#1790), reporting both endpoints when it replaces an explicit value. Other schemes
-and DNS bind hosts are reported and skipped, preserving explicit health or composing no listener.
-The listener awaits bind before model servers start and remains available until they drain.
-Without a gateway assignment or this verb, no listener is created. Model servers independently
-default a missing listener from sql, documents, graph, kv or blob only when a gateway is named;
-explicit listeners win.
+The concrete builder's `AddHealthEndpoint(Uri)` configures an owned HTTP health listener. Its last
+value applies unless a nonblank `COHESION_GATEWAY` and a bindable plain HTTP `http` assignment
+supply the endpoint (#1790). The builder reports when it replaces a different explicit value.
+Other schemes and DNS bind hosts are reported and skipped. The health listener, when configured,
+binds before model servers start and stays available until they drain. Model servers independently
+default a missing listener from `sql`, `documents`, `graph`, `kv` or `blob` when `COHESION_GATEWAY`
+is nonblank. Explicit model listeners win.
 
 The `admin` endpoint accepts `/cohesion/v1` only from transport
 peers at `127.0.0.1`, `::1`, or IPv4-mapped `127.0.0.1`; other peers receive 403 regardless of

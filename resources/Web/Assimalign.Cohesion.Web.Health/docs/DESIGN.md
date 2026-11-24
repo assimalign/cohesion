@@ -33,9 +33,8 @@ service location is unnecessary.
 
 ## Hosting integration
 
-A Web application registers its checks here directly; a managed resource joins its gateway through
-`Web.Hosting.ApplicationModel`, which does not read these checks. This package references only the Web root, and no
-Web root or feature library may reference the hosting module.
+A Web application registers its checks here directly. This package references only the Web root.
+COHRES001 prevents Web roots and features from referencing the hosting module.
 
 ## Status model and aggregation
 

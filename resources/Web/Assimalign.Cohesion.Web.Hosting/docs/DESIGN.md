@@ -14,7 +14,7 @@ composition surface into every consumer — and this package references two
 Web feature libraries: `Web.Routing` and `Web.Server` (#1379). It references the root `Assimalign.Cohesion.Web` abstractions, those packages, and
 non-Web infrastructure. The rule as adopted forbade this module's references to Web features too;
 since its relaxation (COHRES002, owner decision 32 of 2026-10-09) the module may reference any Web
-library except `Web.Testing`, `Web.Hosting.ApplicationModel`, the `App.Web` producers, and harnesses, and
+library except `Web.Testing`, the `App.Web` producers, and harnesses, and
 takes such a reference only for runtime machinery it composes itself, because each one ships in App.Web and in every
 area framework that carries Web.Hosting privately. Routing and Server supply the terminal and server engine, whose contracts left the Web root
 under owner decision 33: `Web.Routing` for the pipeline terminal (`WebApplicationTerminal`) and the
@@ -25,10 +25,7 @@ verbs ship with their features: feature registration is a component integration 
 package declares and the application's compilation projects onto `builder.Services`
 (`builder.Services.AddAuthentication(auth => auth.AddCookie())`, owner decision 34), and pipeline
 verbs extend the root `IWebApplicationPipelineBuilder` seam, so this module needs no reference to a
-feature to host it. The two sanctioned
-exceptions are `Web.Testing`, the harness that drives this concrete runtime, and
-`Web.Hosting.ApplicationModel`, the application-model integration that joins it to
-`ApplicationModel.Hosting`.
+feature to host it. `Web.Testing` holds the standing exemption to reference this concrete runtime.
 
 This document records hosting composition. The engine implementation and lifecycle are documented
 in [Web.Server](../../Assimalign.Cohesion.Web.Server/docs/DESIGN.md).
@@ -46,9 +43,7 @@ flowchart LR
 ```
 
 The runtime references the root, `Web.Routing`, and `Web.Server`. These feature packages reference
-the root within the area; Web.Server also references Web.Routing. The application-model integration
-lives in [`Web.Hosting.ApplicationModel`](../../Assimalign.Cohesion.Web.Hosting.ApplicationModel/docs/DESIGN.md),
-which references this module; this module references no application-model package.
+the root within the area. Web.Server also references Web.Routing.
 
 ## Design intent
 
@@ -173,8 +168,7 @@ that list removes HTTP policy defaults but cannot remove the engine's required f
 
 ## Diagnostics
 
-The assembly owns no `EventSource`. A managed resource's instance side is
-ApplicationModel.Hosting's, through `Web.Hosting.ApplicationModel`. The server's
+The assembly owns no `EventSource`. The server's
 `EventSource`, Meter and ActivitySource are named `Assimalign.Cohesion.Web.Server` and belong to
 Web.Server; the default `Assimalign.Cohesion.Web.` forwarding prefix covers them. No spans or HTTP
 request metrics originate here.
@@ -543,12 +537,6 @@ surface at once. The broader server/runtime shape (per-connection dispatch,
 error isolation, graceful stop) is being reworked under issue #762; this file
 currently captures only the design decisions that are settled.
 
-## Resources
-
-This module knows nothing of resources. `Web.Hosting.ApplicationModel` makes a Web application a managed
-resource with `builder.Services.AddResource(name, ...)`: it registers the resource service as a host
-service, and exposes the application's settings as actions.
-
 ## Default application configuration
 
 `WebApplication.CreateBuilder(args)` composes the application configuration in
@@ -794,10 +782,8 @@ A **plain entry-point application** — `WebApplication.CreateBuilder(args)` —
   configuration source the entry point composes (appsettings, `COHESION_CONFIG__*`, command line);
 - otherwise HTTP/1.1 on the **platform's endpoint**: the runtime contract's `http` endpoint
   (`COHESION_ENDPOINT_HTTP_HOST`, `_PORT`, and `_SCHEME` `http`), when the application's platform
-  assigned one. A gateway that runs its resources in its own process does, because its resources share
-  the machine's ports; inside the program's scope Core's `AppEnvironment` reads the values
-  (2026-10-29). An `https` endpoint needs a certificate the application configures itself, so it is
-  not bound here;
+  assigned one. Core's `AppEnvironment` reads the values from the program's scope. The application
+  configures HTTPS listeners explicitly with a certificate.
 - otherwise HTTP/1.1 on the **development endpoint**, `127.0.0.1:5000` (loopback only, so an
   unconfigured application is never exposed beyond the machine), with any configured `Http:Limits`.
 
@@ -1301,13 +1287,6 @@ absent `Certificate` names no file and is refused with `EndpointCertificateRequi
 platform's own endpoint is bound only when it is plain `http` (see "Entry-point defaults"): an
 `https` endpoint needs a certificate the application configures itself.
 `Server.UseConfiguration` stays opt-in for explicit compositions; a plain entry-point application with no listener of its own binds `Http:Endpoints` by default.
-
-## Hosting integrations
-
-The root contracts and feature libraries reference no `Assimalign.Cohesion.Hosting*` library. This
-module references plain Hosting only and no application-model package. The application-model
-integration is `Web.Hosting.ApplicationModel`, a separate package that references this module, so
-the module stays free of resource contracts; `App.Web` delivers both.
 
 ## Default EventSource forwarding
 

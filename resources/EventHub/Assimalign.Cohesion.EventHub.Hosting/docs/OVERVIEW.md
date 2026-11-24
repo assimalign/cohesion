@@ -1,6 +1,6 @@
 # Assimalign.Cohesion.EventHub.Hosting
 
-`EventHubApplication.CreateBuilder(args)` returns the public concrete `EventHubApplicationBuilder`. Explicit services preserve registration/start order and reverse stop order. The area's resource integration is `Assimalign.Cohesion.EventHub.Hosting.ApplicationModel` (`builder.Services.AddResource(...)`), which references this module; this module references no application-model library.
+`EventHubApplication.CreateBuilder(args)` returns the public concrete `EventHubApplicationBuilder`. Explicit services preserve registration/start order and reverse stop order.
 
 Domain service behavior remains deferred.
 

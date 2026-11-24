@@ -1,6 +1,6 @@
 # Assimalign.Cohesion.ApiManager.Hosting
 
-`ApiManagerApplication.CreateBuilder(args)` returns the public concrete `ApiManagerApplicationBuilder`. Explicit services preserve registration/start order and reverse stop order. The area's resource integration is `Assimalign.Cohesion.ApiManager.Hosting.ApplicationModel` (`builder.Services.AddResource(...)`), which references this module; this module references no application-model library.
+`ApiManagerApplication.CreateBuilder(args)` returns the public concrete `ApiManagerApplicationBuilder`. Explicit services preserve registration/start order and reverse stop order.
 
 Domain service behavior and command kinds remain deferred.
 

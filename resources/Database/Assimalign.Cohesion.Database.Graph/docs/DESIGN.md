@@ -3005,8 +3005,7 @@ Names are single path components, directory lookup is case insensitive, and enum
 persisted databases not yet open in memory. Root-builder `AddGraph` captures a deferred
 engine factory without Hosting dependencies. Engine packages ship in the App.Database framework;
 Graph.Client ships separately as a NuGet-only package, with all solution, CI and release-inventory
-entries. Model security policies, replication, Hosting/ApplicationModel changes and compiled-schema
-provisioning remain out of scope. The graph server uses the shared authenticator rather than adding
+entries. Model security policies, replication and compiled-schema provisioning remain out of scope. The graph server uses the shared authenticator rather than adding
 graph-specific authentication contracts.
 No reflection or runtime code generation is used.
 

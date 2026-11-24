@@ -4,9 +4,7 @@
 
 This package is the protocol boundary for reading secret bytes and PEM certificates from a
 SecretStore instance. A program that reads the store
-references it directly; a gateway does not, because it reaches a managed instance through the
-resource integration, `Assimalign.Cohesion.SecretStore.Hosting.ApplicationModel`. It hides its
-BCL HTTP implementation behind `ISecretStoreClient`.
+references it directly. It hides its BCL HTTP implementation behind `ISecretStoreClient`.
 
 ## Public surface
 
@@ -47,5 +45,4 @@ it.
 
 ## Read-only
 
-The client reads; it changes no store state. A managed instance takes state changes as actions
-through its platform (see [Design](./DESIGN.md)).
+The client reads store state (see [Design](./DESIGN.md)).

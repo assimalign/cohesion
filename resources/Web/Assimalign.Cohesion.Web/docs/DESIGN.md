@@ -151,8 +151,7 @@ on `IWebApplicationContext.Settings`.
 A pipeline verb only reads a setting: it finds the one its feature registered when the pipeline is built,
 and its middleware reads `Value` on each request. An operator surface finds the same setting on the context
 and replaces its value, which applies from the next request without rebuilding the pipeline. Web.Cors is the
-first feature with one: the `cors` setting holds the default policy, and Web.Hosting.ApplicationModel exposes it as
-the `cors` resource action.
+first feature with one. The `cors` setting holds the default policy.
 
 *Rejected:* a dynamic-middleware interface, a middleware that exposes its state and reconfigures itself.
 Middleware instances are not discoverable once composed (`Use` keeps delegates), state also lives outside

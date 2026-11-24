@@ -115,7 +115,7 @@ the source boundary while the existing public construction and execution APIs re
 `Database.Language`, `Database.Protocol`, `Database.Security`, `Database.Storage`,
 `Database.Transactions`, `Database.Types`, `Database.Types.Text` — child roots never reference the root), and the
 existing private `Web` implementation reference (excluded from the package dependency list). The
-HTTP `admin` control plane is a separate Hosting concern implemented through that project's
+HTTP health listener is composed by `Database.Hosting` through its
 private `Web.Hosting`/`Web.Health` references.
 
 ## Consumers

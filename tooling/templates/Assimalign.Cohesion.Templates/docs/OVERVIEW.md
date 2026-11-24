@@ -1,30 +1,19 @@
 # Assimalign.Cohesion.Templates
 
 The package supplies the Cohesion .NET CLI templates. Every project has an authored `Program.cs`,
-and every template pins the complete 20-SDK inventory plus the repository's .NET SDK version.
+and every template pins the complete 19-SDK inventory plus the repository's .NET SDK version.
 
 ```bash
 dotnet new install Assimalign.Cohesion.Templates
 dotnet new cohesion-app -n Acme
-dotnet new cohesion-gateway -n Acme.Gateway --applicationName acme
 ```
 
 The standalone resource names are `cohesion-web`, `cohesion-spa`, `cohesion-database`,
 `cohesion-secretstore`, `cohesion-configurationstore`, `cohesion-identityhub` and `cohesion-rezolvr`.
-Use `-n` to name a project. `cohesion-gateway` names its gateway from `--applicationName`, defaulting
-to the lowercased first name segment.
+Use `-n` to name a project.
 
-`cohesion-app` is an API, a database and a gateway. `Acme.Api` makes itself a managed resource with
-`builder.Services.AddResource("acme-api", resource => resource.UseInProcess())`; `Acme.Gateway`
-declares the model (`ApplicationGateway.CreateBuilder("acme")`, `AddResource("Web", "acme-api")`) and
-runs it on the in-process platform; `Acme.Database` is a plain Database application.
-The standalone resources are plain
-applications whose READMEs show the one call that makes them managed.
-
-Both gateways reference the in-process platform, the only one that ships from this repository. It
-runs the programs registered on its `InProcessInfrastructure`, so a generated gateway deploys a
-resource only after its program is registered; the READMEs show how, and how to switch to the
-Kubernetes pair from `cohesion-platforms` instead. The [design](DESIGN.md) records why.
+`cohesion-app` generates two executable projects, `Acme.Api` and `Acme.Database`. The API reads
+its database endpoint from `Database:Endpoint`. See the [design](DESIGN.md) for the template layout.
 
 `cohesion-spa` serves `wwwroot` and falls back to `index.html` for GET/HEAD client-side routes
 such as `/settings`. Missing assets whose last path segment names a file remain 404 responses.
@@ -38,7 +27,7 @@ so launch settings do not override it. Development is a strict deployed environm
 framework's unset default remains Production.
 
 The template package contains content only, with no runtime dependency or public assembly API.
-Generated applications consume Cohesion SDK, framework and platform packages.
+Generated applications consume Cohesion SDK and framework packages.
 
 Build and verify from the repository root:
 

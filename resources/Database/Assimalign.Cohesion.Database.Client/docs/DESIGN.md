@@ -575,9 +575,8 @@ Runtime reference consulted: [.NET 10 `dotnet/runtime` v10.0.0](https://github.c
 ownership), and `:829–846` (linked parent-registration cleanup). No code was copied. This corrects
 the exchange-join guarantee of #1313.
 
-## Managed-resource boundary (#1785)
+## Wire client boundary
 
-The retired HTTP command client and its command/observation envelopes are removed. Its bootstrap
-credential and /commands route belong to the old resource design; those routes now return 403.
-This package supplies wire clients only. The old application model's Database integration was
-removed in #1869; no client-side counterpart remains. HTTP health binding follows T3 EN-A1–A3.
+This package supplies wire clients. The old application model's Database integration was removed
+in #1869. The retired HTTP command client used command and observation envelopes and a bootstrap
+credential. The `/cohesion/v1/commands` route returns 403.

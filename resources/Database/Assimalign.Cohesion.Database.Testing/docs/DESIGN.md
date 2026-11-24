@@ -17,7 +17,7 @@ preserves those layers.
 
 The retired resource integration was removed on 2026-10-31 with the application-model restart
 (assimalign/cohesion#1759), and its successor, `Assimalign.Cohesion.Database.Hosting.ApplicationModel`,
-was removed with the old application model in #1869.
+was removed with the old application model in #1869 on 2026-11-18.
 
 `TProgram` is an assembly and entry-point marker, not a composition interface. Requiring an
 `IDatabaseApplicationProgram` implementation or a factory delegate would add a test-only API
@@ -78,8 +78,7 @@ builder. One application Build
 constructs and owns the engine and nested server, with every declared database
 provisioned; the program disposes the application. The standalone template still
 uses its ordinary local data path.
-This migration changes composition only; it adds no ApplicationModel declarations,
-manifests or resource control planes. Template acceptance explicitly builds all
+The Phase 29 migration changed composition only. Template acceptance explicitly builds all
 five emitted Database programs; the Templates workflow runs when Database.Hosting,
 Database.Sql, Database.Sql.Schema, Database.Client, Database.Sql.Client or
 libraries/Connections change (`tooling-templates.yml`), so an API change those

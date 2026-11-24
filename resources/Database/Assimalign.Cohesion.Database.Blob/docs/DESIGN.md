@@ -1749,7 +1749,7 @@ flowchart LR
 
 The engine and catalog components use Blob storage within the same assembly. Blob storage references shared
 Storage and Transactions, and Transactions references Storage. The Storage component has
-no Hosting, ApplicationModel, or wire-client dependency.
+no Hosting or wire-client dependency.
 
 #### Storage: File and record format
 

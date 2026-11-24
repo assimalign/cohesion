@@ -1543,19 +1543,18 @@ B-tree manager. Indexing DESIGN owns the physical rollback decision #1393 and pr
 ## Named platform endpoints (#1790)
 
 Server creation snapshots options before validation. When that snapshot has no Listener and
-COHESION_GATEWAY is nonempty, DatabaseServerOptions reads the current AppEnvironment flow with TryGetEndpoint: SQL uses sql,
-Documents documents, Graph graph, KeyValuePair kv, and Blob blob. An explicit Listener, including
-Listen(Uri), wins without reading the platform endpoint. Missing or malformed contract values
-retain CK08001. A DNS bind host retains CK07101. No endpoint is invented and no server is added.
-Only the reserved diagnostic names SQL, Documents, Graph, KeyValuePair and Blob select these
-assignments; other model names have no fallback. Without a gateway, a missing listener retains
-CK08001 even when endpoint values exist. Each model validates its timers, then the common session
-limit, before resolving a platform listener, so a later option refusal cannot abandon that listener.
+`COHESION_GATEWAY` is nonblank, `DatabaseServerOptions` reads the current `AppEnvironment` flow
+with `TryGetEndpoint`. SQL uses `sql`, Documents `documents`, Graph `graph`, KeyValuePair `kv`,
+and Blob `blob`. An explicit `Listener`, including one set by `Listen(Uri)`, wins without reading
+the assigned endpoint. If `COHESION_GATEWAY` is blank or unset, the assignment is missing or
+malformed, or the model name has no mapping, server creation without an explicit listener fails
+with `CK08001`. An assigned DNS bind host fails with `CK07101`. Each model validates its timers
+and the common session limit before resolving a listener.
 
 This follows Web.Hosting's HttpServerConfiguration.GetPlatformEndPoint
 (resources/Web/Assimalign.Cohesion.Web.Hosting/src/Internal/HttpServerConfiguration.cs:853-874):
 read the runtime contract from the current AppEnvironment flow: the scope when inside one,
-otherwise the process environment. Database additionally requires a named gateway for fallback.
+otherwise the process environment. Database also requires a nonblank `COHESION_GATEWAY` for fallback.
 The root
 privately references Connections.Tcp; the existing App.Database runtime-private membership already
 carries it. Models keep their generic Connections surface and gain no transport reference, public
@@ -1574,9 +1573,8 @@ its listener nor its assignment origin for Build validation, so a coded Build re
 approved composition seam; currently Start reports AddressAlreadyInUse and the host rolls back,
 releasing the first listener.
 
-The in-process platform currently assigns only http. Five-model tests assign the named runtime
-values directly and complete handshake/Ping, including under NativeAOT; named platform allocation
-and per-endpoint outputs remain ApplicationModel.Hosting's named-endpoint open question. No wire or store format changes.
+Five-model tests assign the named runtime values directly and complete handshake and `Ping`,
+including under NativeAOT.
 
 ## Shared server options and TCP composition (#1391, D7 B)
 

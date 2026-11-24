@@ -14,8 +14,6 @@ flowchart LR
     P0["Scheduler — area root"]
     P2["Scheduler.Cron"]
     P3["Scheduler.Hosting — runtime module"]
-    PAM["Scheduler.Hosting.ApplicationModel — resource integration"]
-    AMH["Assimalign.Cohesion.ApplicationModel.Hosting — L2"]
     P4["Scheduler.Timer"]
     CORE["Assimalign.Cohesion.Core — L1"]
     HOSTFAM["Assimalign.Cohesion.Hosting family — L2"]
@@ -24,10 +22,6 @@ flowchart LR
     P3 --> HOSTFAM
     P3 --> P0
     P4 --> P0
-    PAM --> P3
-    PAM --> P0
-    PAM --> AMH
-    AMH --> HOSTFAM
     P0 -.->|"COHRES001 ✗"| P3
 ```
 
@@ -35,10 +29,6 @@ Solid edges are the references this area permits. The dotted edge is the one `CO
 rejects: **no library in the area may reference its own `Scheduler.Hosting` runtime
 module**. The area root and its feature
 libraries likewise reference no `Assimalign.Cohesion.Hosting*` library at all (`COHRES004`).
-
-The one exception is the resource integration, `Scheduler.Hosting.ApplicationModel`, which joins
-the runtime module to the application model's hosting; `COHRES001` sanctions that
-reference by the integration's exact name, with no exemption property.
 
 The full reference graph for every Cohesion assembly, including the exact external dependencies
 collapsed above, is in [docs/DEPENDENCIES.md](../../docs/DEPENDENCIES.md).
@@ -49,11 +39,10 @@ collapsed above, is in [docs/DEPENDENCIES.md](../../docs/DEPENDENCIES.md).
 - Assimalign.Cohesion.Scheduler.Hosting contains the public concrete application, builder, and context, plus the internal execution service.
 - Assimalign.Cohesion.Scheduler.Cron implements exact five-field cron parsing and occurrence evaluation.
 - Assimalign.Cohesion.Scheduler.Timer implements fixed-delay timer occurrences.
-- Assimalign.Cohesion.Scheduler.Hosting.ApplicationModel registers the application as a managed resource instance (`builder.Services.AddResource(name, ...)`) on the platform its gateway names, with the actions the application adds.
 
 ## Runtime shape
 
-The root is the cross-package composition seam. Feature packages depend on the root and register internal providers through ISchedulerApplicationBuilder. Hosting consumes only root contracts. A Scheduler application becomes a managed resource instance with `Assimalign.Cohesion.Scheduler.Hosting.ApplicationModel`: `builder.Services.AddResource("jobs", resource => resource.UseInProcess())` joins the gateway that runs it through the platform it opted into.
+The root is the cross-package composition seam. Feature packages depend on the root and register internal providers through ISchedulerApplicationBuilder. Hosting consumes only root contracts.
 
 Scheduler is deliberately singleton until leader election or distributed occurrence coordination is designed. Persistence, retry policy execution, misfire handling, and distributed ownership remain future work.
 
@@ -61,8 +50,6 @@ Scheduler is deliberately singleton until leader election or distributed occurre
 
 - [Root design](./Assimalign.Cohesion.Scheduler/docs/DESIGN.md)
 - [Hosting design](./Assimalign.Cohesion.Scheduler.Hosting/docs/DESIGN.md)
-- [Resource integration overview](./Assimalign.Cohesion.Scheduler.Hosting.ApplicationModel/docs/OVERVIEW.md)
-- [Resource integration design](./Assimalign.Cohesion.Scheduler.Hosting.ApplicationModel/docs/DESIGN.md)
 - [Cron design](./Assimalign.Cohesion.Scheduler.Cron/docs/DESIGN.md)
 - [Timer design](./Assimalign.Cohesion.Scheduler.Timer/docs/DESIGN.md)
 
