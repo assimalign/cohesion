@@ -1,6 +1,6 @@
 # Assimalign.Cohesion.VpnGateway.Hosting
 
-`VpnGatewayApplication.CreateBuilder(args)` returns the public concrete `VpnGatewayApplicationBuilder`. Explicit services preserve registration/start order and reverse stop order. The area's resource integration is `Assimalign.Cohesion.VpnGateway.Hosting.ApplicationModel` (`builder.Services.AddResource(...)`), which references this module; this module references no application-model library.
+`VpnGatewayApplication.CreateBuilder(args)` returns the public concrete `VpnGatewayApplicationBuilder`. Explicit services preserve registration/start order and reverse stop order.
 
 Domain service behavior and command kinds remain deferred.
 

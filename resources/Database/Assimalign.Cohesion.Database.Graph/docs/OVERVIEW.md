@@ -146,7 +146,7 @@ schema provisioning remains a separate feature.
 
 The implementation depends on the Database root for ownership contracts, Graph.Storage for
 the file-set facade, and the shared Storage, Transactions, and Types packages. It has no
-reference to the Graph engine, Hosting, or ApplicationModel. Physical B+Trees and their
+reference to the Graph engine or Hosting. Physical B+Trees and their
 maintenance belong to Graph.Storage. See [DESIGN.md](DESIGN.md) for the binary format,
 MVCC behavior, and division of responsibilities.
 
@@ -188,7 +188,7 @@ decode only matching visible nodes; node create/update calls take the caller-res
 to the frozen `GraphNodeId` and `GraphRelationshipId` contracts and plans traversals.
 
 Dependencies are `Database.Storage`, `Database.Transactions` and `Database.Indexing`.
-There is no dependency on the Graph root, its catalog, Hosting or ApplicationModel.
+There is no dependency on the Graph root, its catalog or Hosting.
 Owner-zero pages remain available to `Graph.Catalog` through the low-level record seam.
 
 See [DESIGN.md](DESIGN.md) for the binary format, adjacency costs, numeric index

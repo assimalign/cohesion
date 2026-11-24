@@ -136,11 +136,11 @@ what is deliberately not emitted.
 Within its area the module references the Web root, `Web.Routing`, and `Web.Server`. Routing
 supplies the pipeline terminal; Server supplies the engine, telemetry and exchange features,
 including request id, completion and drain. COHRES002 permits Web libraries except Web.Testing,
-Web.Hosting.ApplicationModel, the App.Web producers, and harnesses. Every reference ships in each
+the App.Web producers, and harnesses. Every reference ships in each
 area framework that carries this module.
 
 The module also references Cohesion hosting, configuration, DI, logging, and transport
-infrastructure: plain Hosting, and no application-model package. The Web root references no hosting library.
+infrastructure. The Web root references no hosting library.
 All public composition is explicit and AOT-compatible. See [Design](DESIGN.md) for listener
 ownership, cancellation, and failure isolation.
 
@@ -178,8 +178,4 @@ Compared with 10.0.0-preview.1, entry-point applications now forward these frame
 their existing sinks. The built application owns its logger factory and disposes its providers and
 forwarders at final teardown; a factory obtained from its service provider cannot outlive the app.
 
-## Resources
-
-A Web application becomes a managed resource through `Web.Hosting.ApplicationModel`, with
-`builder.Services.AddResource("orders-api", ...)`. That package references this module; this module knows nothing
-of resources. Health endpoints come from Web.Health, which an application maps itself.
+Health endpoints come from Web.Health, which an application maps itself.

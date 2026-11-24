@@ -21,7 +21,7 @@ flowchart LR
 | --- | --- |
 | `Assimalign.Cohesion.Sdk.Web` | Executable marker, Web defaults, static-asset copying, and implicit framework references. |
 | `Assimalign.Cohesion.Sdk` | .NET SDK chaining, common build defaults, and framework registrations. |
-| `Assimalign.Cohesion.App` / `.Web` | Hosting kernel and HTTP/Web compile-time and runtime framework closure, including `Web.Hosting.ApplicationModel`, whose `builder.Services.AddResource(...)` makes the application a managed resource. |
+| `Assimalign.Cohesion.App` / `.Web` | Hosting kernel and HTTP/Web compile-time and runtime framework closure. |
 
 ## Import ordering and overrides
 
@@ -30,8 +30,7 @@ App and App.Web framework references unless `CohesionAutoIncludeAppFramework=fal
 `Targets/Sdk.Web.props` before the consumer's project body. `Sdk/Sdk.targets` imports the base targets, then
 `Targets/Sdk.Web.targets`.
 
-The SDK declares no endpoints, probes, or other manifest items: application-model composition
-is code. `wwwroot/**` files copy to both build and publish
+`wwwroot/**` files copy to both build and publish
 output unless the consumer replaces the item metadata. The SDK also enables the generated Web API
 interceptor namespace required for typed route handlers.
 

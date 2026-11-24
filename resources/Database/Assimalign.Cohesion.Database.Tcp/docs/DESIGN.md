@@ -3,9 +3,9 @@
 ## Named platform endpoints (#1790)
 
 The [root design](../../Assimalign.Cohesion.Database/docs/DESIGN.md#named-platform-endpoints-1790)
-owns resolution, precedence, transport and ownership. Fallback requires a nonempty COHESION_GATEWAY.
-Values come from the current AppEnvironment flow: the scope when inside one, otherwise the process
-environment. Explicit Listener/Listen(Uri) wins; unmanaged applications must supply a listener.
+owns resolution, precedence, transport and ownership. Fallback requires a nonblank
+`COHESION_GATEWAY`. Values come from the current `AppEnvironment` scope, or from the process
+when there is no scope. An explicit `Listener` or `Listen(Uri)` wins.
 The shared stateless binder retains IdnHost and literal-address validation. Its two consumer
 EndpointHostUnsupported resources are checked for identical text to keep CK07101 consistent.
 

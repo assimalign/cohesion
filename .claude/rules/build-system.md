@@ -156,7 +156,7 @@ What follows from it:
 - **The Refs producer references its sibling Runtime producer** (`..\..\Assimalign.Cohesion.<Area>.Runtime\src\Assimalign.Cohesion.<Area>.Runtime.csproj` with `ReferenceOutputAssembly="false"`), and `App.targets` locates that sibling's `bin/` by the same convention. A Refs producer with no `.Runtime` sibling cannot pack.
 - **An area's producers carry a `Directory.Build.props` each.** The Runtime producer's holds the `App.<Area>` member list; the Refs producer's only imports it (*Framework membership*).
 - **`Assimalign.Cohesion.<Area>.Refs` and `Assimalign.Cohesion.<Area>.Runtime` are reserved project names** in every area. No library may use them.
-- **The resource guards skip an area's two producers by exact identity**: the conventional name for that area and kind, declaring that area's framework. The Runtime producer references the whole framework, the hosting module and the `Hosting.*` closure included, so COHRES001, COHRES002, and COHRES004 do not apply to it. COHRES003 still does, because no shared framework may carry a Gateway assembly. A project that matches only part of that identity is guarded like any library (`resource-areas.md`).
+- **The resource guards skip an area's two producers by exact identity**: the conventional name for that area and kind, declaring that area's framework. The Runtime producer references the whole framework, the hosting module and the `Hosting.*` closure included, so COHRES001, COHRES002, and COHRES004 do not apply to it. A project that matches only part of that identity is guarded like any library (`resource-areas.md`).
 - **One function resolves producer paths:** `Get-CohesionFrameworkProjectPath` in `scripts/modules/CohesionPackaging.psm1`, used by `Install-Local.ps1`, the release pack plan, and `Assert-CohesionReleaseInventory`. The inventory check fails for any csproj that declares a `CohesionFrameworkName` but sits off its conventional path, declares a different `AssemblyName`, or belongs to a family the release does not ship. That includes a producer recreated under the retired top-level `frameworks/` folder.
 - **Producers stay out of the area workflows' `projects` matrices.** `sdk-smoke.yml` packs every framework (`Pack-Release.ps1 -SkipLibraries`) and consumer-tests App, App.Web, and App.Database; `release.yml` packs them for release. They have no source files, so the blind-spot census does not ask for a matrix entry either.
 
@@ -202,17 +202,9 @@ The Runtime csproj converts the public items to `<CohesionProjectReference>` ite
 
 **Package-delivered assemblies are members too.** A member that takes a `CohesionPackageReference` on a package outside `Microsoft.NETCore.App` needs that package's assembly at run time, and an `Sdk.<Area>` application has no reference to the package. The framework lists the assembly by name, beside the members: public when a member's public API exposes its types (`System.Threading.RateLimiting` in `App.Web`, because `RateLimitingPolicy` takes a `PartitionedRateLimiter<IHttpContext>`), private otherwise. The name resolves to no project. Every Runtime producer sets `CopyLocalLockFileAssemblies` (in `App.props`), so the package's runtime asset reaches the producer's bin through the member's project reference, and the pack collects it there like any member. Its manifest entries keep the package's own versions and token (*Each framework is two NuGet packages*). The framework tests read each closure member's package references. They reject a package the framework does not carry, and a package entry no member references. The App framework's packages count for every area. The tests read direct package references only, and the packages assume the assembly name equals the package id.
 
-Base App is different: never add a library directly to its assembly list. `@(CohesionAppKernelRoot)` in `App.props` is the sole policy input, and `App.targets` derives the transitive Assimalign project-reference closure plus the umbrella assembly. The roots are Hosting, ApplicationModel.Hosting, Connections and its StreamAbort, StreamLimits, and Tls siblings, the host-composed configuration providers, Logging.Console, Logging.EventSource, OpenTelemetry, DependencyInjection, and FileSystem.Physical. Everything outside that hosting kernel remains an ordinary package. The derivation walks project references only, so the kernel's package-delivered assemblies would be App's one explicit list, as `CohesionFrameworkPrivateAssembly` items in App's group; the kernel references no package today.
+Base App is different: never add a library directly to its assembly list. `@(CohesionAppKernelRoot)` in `App.props` is the sole policy input, and `App.targets` derives the transitive Assimalign project-reference closure plus the umbrella assembly. The roots are Hosting, Connections and its StreamAbort, StreamLimits, and Tls siblings, the host-composed configuration providers, Logging.Console, Logging.EventSource, OpenTelemetry, DependencyInjection, and FileSystem.Physical. Everything outside that hosting kernel remains an ordinary package. The derivation walks project references only, so the kernel's package-delivered assemblies would be App's one explicit list, as `CohesionFrameworkPrivateAssembly` items in App's group; the kernel references no package today.
 
-`Assimalign.Cohesion.ApplicationModel.Hosting` is a kernel root because the remaining
-`<Area>.Hosting.ApplicationModel` integration (Database's, an `App.Database` member, until phase 2
-of the application-model rebuild removes it; `fabric.md`) builds on it; carrying it once in App
-keeps it out of the area frameworks. Its closure (the ApplicationModel identity and
-Protocol packages) arrives with it. The platform packages a resource opts into
-(`ApplicationModel.Hosting.InProcess`, the `cohesion-platforms` instance halves) are not in the
-kernel: the application references the ones it uses. Every area hosting module reaches
-Connections, so Connections is likewise carried once by App rather than repeated in all 18 area
-frameworks.
+Every area hosting module reaches Connections, so App carries it once for all area frameworks.
 
 ## Cross-resource dependencies (private implementation details)
 
@@ -234,38 +226,26 @@ Also available: `CohesionValueType` for generating strongly typed value objects.
 [`MSBUILD_COHESION_PROPS.md`](../../docs/build/MSBUILD_COHESION_PROPS.md#value-types) for metadata,
 generated contracts, default-value semantics, diagnostics, and write-on-change generation.
 
-## Resource orchestration dependency guards
+## Resource hosting-isolation guards
 
-`build/Targets/Build.Rules.targets` protects the boundary between resource-area packages and the
-orchestration gateway:
+`build/Targets/Build.Rules.targets` enforces hosting isolation within resource areas.
 
-- **COHRES003** applies automatically to every non-harness project under `resources/**` and bans
-  any `Assimalign.Cohesion.ApplicationModel.Gateway*` assembly. It has no opt-in and no exemption.
-  A resource builds on the instance side only: its `<Area>.Hosting.ApplicationModel` integration
-  references `Assimalign.Cohesion.ApplicationModel.Hosting`.
+- **COHRES001** rejects references to an area's exact `<Area>.Hosting` module, and rejects
+  references to `<Area>.Hosting.<Suffix>` integrations from roots and features. Each assembly is
+  filtered against the project's named exemptions independently. `<Area>.Testing` is the standing
+  exemption holder for the exact module.
+- **COHRES002** checks direct references of the exact runtime module. Since the owner decision
+  of 2026-10-09, it rejects only same-area `<Area>.Testing`, framework-producer, and harness
+  projects (`resource-areas.md`).
 - **COHRES004** rejects `Assimalign.Cohesion.Hosting` and every `Assimalign.Cohesion.Hosting.*`
-  assembly for roots and features. Only `<Area>.Hosting`, `<Area>.Hosting.<Suffix>` (which
-  includes `<Area>.Hosting.ApplicationModel`), and `<Area>.Testing` may depend on that closure.
-  The hosting family is classified case-insensitively.
-  COHRES001 separately rejects an area's exact runtime module and rejects hosting-family
-  integrations from roots/features. Each assembly is filtered against the project's named
-  exemptions independently; `<Area>.Testing` is the standing exemption holder for the exact
-  module, and `<Area>.Hosting.ApplicationModel` references it with no exemption: COHRES001
-  sanctions that one integration by its exact name. COHRES002 checks only the exact runtime module; since
-  owner decision 2026-10-09 it rejects only the same-area `Testing`, `Hosting.ApplicationModel`,
-  framework-producer, and harness projects among its direct references (`resource-areas.md`).
+  assembly for roots and features. Only `<Area>.Hosting`, `<Area>.Hosting.<Suffix>`, and
+  `<Area>.Testing` may depend on that closure. The hosting family is classified case-insensitively.
 
-An area's integration package declares its own `RootNamespace`
-(`Assimalign.Cohesion.<Area>.Hosting.ApplicationModel`), like any library; no rule pins a shared
-ApplicationModel namespace on resource packages.
-
-COHRES003 and COHRES004 inspect the direct/transitive project-reference graph before
+COHRES001 and COHRES004 inspect the direct/transitive project-reference graph before
 assembly resolution and the complete `ReferencePath` closure after `ResolveAssemblyReferences`. The
 latter catches package assets and raw `<Reference>`+`HintPath` routes. Tests, examples, samples, and
-fixtures are exempt from every guard in this section; error text names each offending assembly so
-the dependency can be removed at its source. An area's two framework producers are exempt from
-COHRES004 (and from COHRES001/002) by exact identity, never by path; COHRES003 still applies to
-them (see *Framework producer projects*).
+fixtures are exempt from these guards. An area's two framework producers are exempt by exact
+identity (see *Framework producer projects*).
 
 ## Library and SDK boundary guard (COHLIB001)
 
@@ -293,15 +273,11 @@ decided by path in both layers. It never covers another area. The base SDK
 guard's scope also includes `fabric/**`, which never references `resources/` (rule F1, `fabric.md`).
 
 - **Harnesses are exempt by path:** `tests`, `examples`, `samples`, and `fixtures` as complete
-  path segments, matched case-insensitively. This is why test projects under
-  `libraries/ApplicationModel/**` may compose resource runtimes. The match runs against the path
+  path segments, matched case-insensitively. The match runs against the path
   **relative to the repository root**, so a checkout under a folder named `tests` or `libraries`
   is not misread.
 - **There is no opt-out property.** A library that "needs" a resource type is missing a contract
-  in `libraries/`: move the seam there and let the resource package implement it. The
-  managed-instance contracts in `Assimalign.Cohesion.ApplicationModel.Hosting`
-  (`IApplicationInstance`, `IApplicationInstanceAction`, `ApplicationInstanceOptions`) are the
-  precedent; each area implements them in `resources/<Area>/…Hosting.ApplicationModel`.
+  in `libraries/`: move the seam there and let the resource package implement it.
 - **The scope is computed from strings.** `Path.GetFullPath` takes one argument, and the relative
   path comes from `StartsWith`/`Substring`. It evaluates the same under Visual Studio's .NET
   Framework MSBuild, Core MSBuild, and on Unix.

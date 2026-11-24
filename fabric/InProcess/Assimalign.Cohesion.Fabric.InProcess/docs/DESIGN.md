@@ -5,7 +5,7 @@
 The in-process platform uses the same mechanism as Docker and Kubernetes, which keeps the
 platform contract honest: if the in-process platform needs a back door, so will the others. It
 replaces the old `ApplicationModel.Gateway.InProcess` and `ApplicationModel.Hosting.InProcess`
-pair, which phase 2 of the removal deletes.
+pair, which the removal deleted.
 
 ## What it registers
 

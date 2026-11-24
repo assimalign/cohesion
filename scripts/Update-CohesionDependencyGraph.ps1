@@ -13,7 +13,7 @@
     This is a *static* read of the project files, deliberately: it does not restore, evaluate
     MSBuild, or build anything, so it runs in seconds on a clean tree and cannot be perturbed by
     package state. It therefore reports what the csprojs declare, which is the thing the
-    dependency rules (COHRES001-004, COHLIB001) are written against.
+    dependency rules (COHRES001, COHRES002, COHRES004, COHLIB001) are written against.
 
     Run it whenever a dependency is added or removed — see .claude/rules/documentation.md.
 
@@ -383,9 +383,8 @@ Add-Line '```'
 Add-Line ''
 Add-Line 'No shipped library references `resources/**`: resources consume libraries, never the reverse.'
 Add-Line 'Test projects and the fixtures that drive real resource runtimes may, and are listed under'
-Add-Line '*Harnesses*. `COHLIB001` enforces that direction for `libraries/**` and `sdks/**` (a same-area'
-Add-Line '`sdks/Assimalign.Cohesion.Sdk.<Area>` project is the only exception), and `COHRES003` keeps'
-Add-Line 'every shipped `resources/**` project off the `ApplicationModel.Gateway*` assemblies.'
+Add-Line '*Harnesses*. `COHLIB001` enforces that direction for `libraries/**`, `fabric/**`, and `sdks/**`.'
+Add-Line 'An `sdks/Assimalign.Cohesion.Sdk.<Area>` project may reference resources in its own area.'
 Add-Line ''
 Add-Line '| Area | References |'
 Add-Line '| --- | --- |'

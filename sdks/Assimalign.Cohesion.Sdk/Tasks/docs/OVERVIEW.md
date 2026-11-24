@@ -2,8 +2,7 @@
 
 `Assimalign.Cohesion.Sdk` is Cohesion's general-purpose base MSBuild SDK. It
 chains to `Microsoft.NET.Sdk` and can be used for ordinary libraries and
-executables. It generates no application-model sources: a resource makes itself a
-managed instance in its `Program.cs`, and a gateway declares its model in its own.
+executables.
 
 ## Project defaults
 
@@ -29,8 +28,7 @@ The base SDK registers every Cohesion framework but includes none implicitly.
 An executable that uses the base SDK opts into the hosting kernel with an
 explicit `FrameworkReference`; resource-area SDKs add the kernel and their area
 framework unless `CohesionAutoIncludeAppFramework=false`. The kernel carries
-Connections and ApplicationModel.Hosting once because every area hosting module
-and every area integration depend on them.
+Connections because every area hosting module depends on it.
 
 ## Base build tooling
 

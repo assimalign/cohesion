@@ -6,8 +6,8 @@ Integration testing for Cohesion database programs. The package's
 requests shutdown through that scope and waits for `Main` to return; a non-zero exit code throws.
 The retired resource integration (an isolated `ResourceContext`, and readiness and stop through
 the generated admin plane) was removed on 2026-10-31 with the application-model restart
-(assimalign/cohesion#1759), so `StartAsync` returns once the entry point is running, without
-waiting for readiness.
+(assimalign/cohesion#1759). `StartAsync` returns once the entry point is running, without waiting
+for readiness.
 
 The program stays an ordinary top-level `Program.cs`:
 

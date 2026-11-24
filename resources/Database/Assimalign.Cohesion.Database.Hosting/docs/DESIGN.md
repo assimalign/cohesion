@@ -40,39 +40,37 @@ flowchart LR
     Model["Database model packages"] --> Root
 ```
 
-COHRES001–004 remain enforced. The runtime references no ApplicationModel package; the old model's Database integration was removed in #1869.
+`COHRES001` reserves the exact `Database.Hosting` reference for named exemption holders, with
+`Database.Testing` the standing holder. `COHRES002` allows `Database.Hosting` to reference other
+same-area libraries except `Database.Testing`, `Database.Refs`, `Database.Runtime`, and test,
+example, sample and fixture projects. `COHRES004` keeps shared `Hosting` libraries out of the
+area root and feature libraries. The old model's Database integration was removed in #1869.
 
 ## Platform binding and HTTP health (#1790)
 
-When COHESION_GATEWAY is nonempty, each model server's options snapshot defaults a missing listener from its named runtime endpoint
-(sql, documents, graph, kv or blob); an explicit Listener or Listen(Uri) wins. The common root
-owns that resolution, because Hosting receives an already constructed server. It runs inside the
-model's validation, after the model's timer checks and the session-limit check, and before the
-missing-listener refusal, so an invalid snapshot never allocates a platform listener. It privately uses Connections.Tcp and shares the stateless binder with
-Database.Tcp. Hosting adds no model reference or public composition seam. See the
+When `COHESION_GATEWAY` is nonblank, each model server's options snapshot defaults a missing
+listener from its named runtime endpoint (`sql`, `documents`, `graph`, `kv` or `blob`). An
+explicit `Listener` or `Listen(Uri)` wins. The common root resolves the endpoint during model
+validation, after the timer and session-limit checks and before the missing-listener refusal.
+Hosting receives an already constructed server. The root privately uses `Connections.Tcp` and
+shares the stateless binder with `Database.Tcp`. Hosting adds no model reference or public composition seam. See the
 [root design](../../Assimalign.Cohesion.Database/docs/DESIGN.md#named-platform-endpoints-1790).
 
 The concrete builder's AddHealthEndpoint(Uri) configures one plain HTTP listener; the last call
 wins. Registration validates an endpoint URI, literal IP address or localhost and refuses HTTPS
-without a certificate source. At Build, a nonempty runtime COHESION_GATEWAY plus a valid http
-endpoint assignment with a plain http scheme and a literal IP address or localhost overrides that explicit value (#1790).
+without a certificate source. At Build, when `COHESION_GATEWAY` is nonblank, an `http` assignment
+with a plain HTTP scheme and a literal IP address or localhost overrides that value (#1790).
 Event 19 names both endpoints when the assignment replaces a different explicit endpoint.
 A malformed or missing assignment is
 unset under Core's TryGetEndpoint contract; absent an explicit value, no listener is composed.
 An assignment with an unsupported scheme or DNS bind host is skipped with informational event 18,
 which names the assignment, its endpoint and scheme. The explicit endpoint is kept, or no health
 listener is composed, so an unusable implicit health assignment cannot prevent engine availability.
-Explicit AddHealthEndpoint input remains strictly validated. An unmanaged host
-creates no listener unless AddHealthEndpoint is called, even if http values are present.
+Explicit `AddHealthEndpoint` input remains strictly validated. With `COHESION_GATEWAY` unset or
+blank, only an explicit `AddHealthEndpoint` call configures a health listener.
 
-This filtering follows Web.Hosting's HttpServerConfiguration.GetPlatformEndPoint scheme policy
-(resources/Web/Assimalign.Cohesion.Web.Hosting/src/Internal/HttpServerConfiguration.cs:865-874).
-At cohesion-platforms HEAD 40a9052, DockerPlanCompiler.cs:936-966
-(platforms/Docker/Assimalign.Cohesion.ApplicationModel.Gateway.Docker/src/Internal/) and
-KubernetesPlanCompiler.cs:1446-1465
-(platforms/Kubernetes/Assimalign.Cohesion.ApplicationModel.Gateway.Kubernetes/src/Internal/)
-write a port's scheme, then an exposure's scheme, then tcp/udp; Docker additionally uses http for
-an HTTP probe. Thus an assignment named http can legitimately carry https or tcp.
+`AppEnvironment.TryGetEndpoint` reads the bind scheme from the runtime contract. The name `http`
+alone does not determine that scheme.
 
 Build registers the internal DatabaseAdminEndpointService as a singleton IHostService factory in
 Services, before closing the container. The factory runs after the engine/server registry exists,
@@ -115,8 +113,8 @@ including opening stored Documents, Graph and Blob databases through recovery.
 HealthComponentNames builds live membership synchronously from the registry frozen at Build,
 each engine's OpenDatabases, its pending reopens and FailedOpens. Discovery evaluates no health, awaits no
 work, blocks on no database lifecycle operation and tolerates a custom inventory failure by
-keeping that engine's name. Managed Build therefore runs no health pass, emits no health
-transition event, and needs no discovery cancellation token.
+keeping that engine's name. Build runs no health pass, emits no health transition event, and
+needs no discovery cancellation token.
 Pending reopens are published as immutable snapshots when membership or reported detail changes,
 so discovery and health never acquire the reopen service's scheduling monitor. FailedOpens likewise
 publishes immutable snapshots on change; health and discovery take no engine completion gate.
@@ -162,8 +160,7 @@ matrix. The HTTP routes and their Ready/Live tags remain unchanged.
 The builder reserves and registers DatabaseApplicationContext and IDatabaseApplicationContext
 through the same factory returning the application's context, alongside configuration,
 environment and logging. The application owns the non-disposable context; the provider must
-never own it. ValidateOnBuild does not invoke the factory before the context exists. Hosting
-takes no ApplicationModel reference.
+never own it. ValidateOnBuild does not invoke the factory before the context exists.
 
 ## Build and configuration
 

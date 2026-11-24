@@ -10,7 +10,7 @@ IdentityHub is code-first: its identity objects are defined in code, and the sam
 
 Users and groups follow the same rules. `AddUser` and `AddGroup` on the application builder define them in code, `IIdentityHubDirectory` serves them locked over the ones kept in the store, and a built application exposes the directory on its context. Nothing signs a user in yet: the issuer serves applications only. The root's design holds the catalog of every family of identity object the hub is meant to hold, from applications and users to sign-in flows and conditional access, with what each corresponds to in Microsoft Entra and other identity providers, and the order they are built in. The directory lives in the root; conditional access, sign-in flows, and federation are planned as feature packages that bring their own builder verbs.
 
-The old application model's integration, `IdentityHub.Hosting.ApplicationModel` (`builder.Services.AddResource(...)`), was removed with the old model. Its replacement is the resource-provider design in `fabric/`.
+The application model is being rebuilt under [`fabric/`](../../fabric/README.md).
 
 ## Project map
 

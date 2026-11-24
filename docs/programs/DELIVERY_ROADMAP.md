@@ -84,7 +84,7 @@ Use issue dependencies to encode the real execution path in GitHub:
 ## Nested Service Composition
 
 - The public composition model is the concrete `<Area>.Hosting` builder's `AddService` verb (O34; root contracts reference no hosting library) over nestable `IHost` (item 9, `51045965`; design note `4ef29290`). `HostToServiceWrapper.cs` and `HostExtensions.cs` in `libraries/Hosting/Assimalign.Cohesion.Hosting/src/` are the underlying host-as-service plumbing.
-- `Assimalign.Cohesion.ApplicationModel.Gateway.InProcess` runs a gateway's resources in the gateway's own process, each program on a thread and in an environment of its own; its [package design](../../libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway.InProcess/docs/DESIGN.md) owns that lifecycle.
+- `Assimalign.Cohesion.ApplicationModel.Gateway.InProcess` runs a gateway's resources in the gateway's own process, each program on a thread and in an environment of its own.
 - The built layers are L1 foundation plus SDK/tooling; L2 application runtime and composition (`ApplicationModel`, the gateway family, and `Hosting`); and L3 the 18 service platforms.
 - Service dependencies remain explicit relationships in a gateway's model (`ApplicationModel.Definition`), which the gateway deploys in dependency order.
 

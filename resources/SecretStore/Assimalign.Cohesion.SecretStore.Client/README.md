@@ -2,8 +2,7 @@
 
 Thin, NativeAOT-safe protocol client for reading SecretStore secrets and certificates. A program
 that reads the store's secrets or certificates references it directly; the client never references
-the SecretStore runtime, and a gateway reaches a managed instance through the resource integration,
-`Assimalign.Cohesion.SecretStore.Hosting.ApplicationModel`, instead.
+the SecretStore runtime.
 
 The package exposes `ISecretStoreClient` and the `SecretStoreClient.Create(Uri, ClientCredential)`
 factory, with an overload that takes a caller-owned transport. It references Core only; it does not

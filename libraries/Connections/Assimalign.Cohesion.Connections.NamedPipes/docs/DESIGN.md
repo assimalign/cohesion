@@ -8,12 +8,10 @@ inter-process transport, and the cross-platform peer of the Unix domain socket p
 `IDuplexConnectionListener` / `IDuplexConnectionFactory` producing `IDuplexConnection`s — but the wire is a named pipe
 (`NamedPipeServerStream` / `NamedPipeClientStream`) rather than a socket.
 
-Named pipes matter for Cohesion's own architecture. The ApplicationModel LocalGateway spawns
-co-located service processes; local IPC over a named pipe (or a Unix domain socket) removes port
-allocation, firewall, and loopback-security concerns and replaces them with filesystem/ACL access
-control. Because the Connections stack selects transports by **capability, not protocol identity**, a
-named-pipe listener drops into the same `UseHttp1/2(IDuplexConnectionListener)` seams a TCP or UDS listener
-uses, with no change to the HTTP stack above it.
+Local IPC over a named pipe or a Unix domain socket lets co-located service processes use
+filesystem permissions and ACLs for access control. The Connections stack selects transports by
+capability, so a named-pipe listener uses the same `UseHttp1/2(IDuplexConnectionListener)` seams as
+TCP and UDS listeners.
 
 The driver is a peer of `Tcp` / `Udp` / `Quic` / `InMemory`: it lives beside them under
 `libraries/Connections`, depends only on the Connections contracts (plus `Core`), and adds no contract
@@ -166,8 +164,6 @@ reachable on other operating systems.
 - **`Assimalign.Cohesion.Http.Connections`** — composes this listener via
   `UseHttp1/UseHttp2(IDuplexConnectionListener)` with no HTTP-layer change (validated by the
   `HttpOverNamedPipeTests` end-to-end test).
-- **ApplicationModel LocalGateway** — the intended consumer: co-located service processes addressed by a
-  named pipe instead of a loopback port.
 
 ## Connection hierarchy compatibility
 

@@ -8,8 +8,7 @@ The hosting module implements the area root's contract-only application seam. `C
 
 The builder captures code-first namespace declarations, materializes explicit services once, and
 appends the ConfigurationStore HTTP endpoint. Explicit services therefore start before the listener
-and stop after it. The area's resource integration is
-`Assimalign.Cohesion.ConfigurationStore.Hosting.ApplicationModel` (`builder.Services.AddResource(...)`), which references this module; this module references no application-model library. The host accepts `--endpoint`
+and stop after it. The host accepts `--endpoint`
 and `--data` overrides (defaulting to `http://127.0.0.1:8080` and `data` under the content root).
 
 ## Persistence and protocol

@@ -5,7 +5,8 @@
 `Assimalign.Cohesion.Database.Testing` runs a Database program's real entry
 point in the test process. The retired resource integration was removed on 2026-10-31 with the
 application-model restart (assimalign/cohesion#1759), and its successor,
-`Assimalign.Cohesion.Database.Hosting.ApplicationModel`, was removed with the old application model in #1869.
+`Assimalign.Cohesion.Database.Hosting.ApplicationModel`, was removed with the old application
+model in #1869 on 2026-11-18.
 
 ## Public surface
 

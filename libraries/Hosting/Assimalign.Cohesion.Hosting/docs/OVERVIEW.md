@@ -49,13 +49,4 @@ The stop-begun marker belongs to the run, so a later run starts with fresh seman
 - `BackgroundService`, `DedicatedThreadService`
 - `HostState`, `HostException`, `HostStartupException`
 
-## Hosting family
-
-| Package | Owns |
-| --- | --- |
-| `Assimalign.Cohesion.Hosting` | Plain host lifetime and service execution |
-| `Assimalign.Cohesion.ApplicationModel.Hosting` | Resource instances, their control plane, and the host service that joins one to its gateway (`libraries/ApplicationModel/`; builds on this package) |
-
-The base `Assimalign.Cohesion.App` framework delivers both. Its presence does not activate resource
-behavior: an application becomes a managed resource only when it calls its area's
-`builder.Services.AddResource(...)`.
+The base `Assimalign.Cohesion.App` framework includes this package.

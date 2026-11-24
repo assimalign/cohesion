@@ -2,8 +2,7 @@
 
 Sdk.Web builds a Cohesion HTTP application with the base SDK's executable defaults and the App and
 App.Web shared frameworks. It enables generated typed-handler interceptors and copies `wwwroot/**` into
-build and publish output. An application makes itself a managed resource in `Program.cs` with
-`builder.Services.AddResource(...)` from `Web.Hosting.ApplicationModel`, which App.Web carries.
+build and publish output.
 
 Select `Assimalign.Cohesion.Sdk.Web` as the project SDK and pin both it and
 `Assimalign.Cohesion.Sdk` to the same exact version in `global.json`, as described in the

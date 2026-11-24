@@ -1,8 +1,7 @@
 # Assimalign.Cohesion.Cli
 
 `Assimalign.Cohesion.Cli` ships the `cohesion` .NET tool on net10.0. It wraps `dotnet new`,
-`dotnet run` of the one gateway project below the current directory, and `dotnet publish`, and
-performs IdentityHub OIDC device login.
+`dotnet run`, and `dotnet publish`, and performs IdentityHub OIDC device login.
 
 The [tooling guide](../../../README.md) is the command reference, template roster and
 local-tool-path installation guide. The [design](DESIGN.md) records contracts and boundaries.

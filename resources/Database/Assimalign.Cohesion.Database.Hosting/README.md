@@ -1,15 +1,14 @@
 # Assimalign.Cohesion.Database.Hosting
 
 The Database area's runtime composition root. `DatabaseApplication` hosts the
-registered database servers and additional host services; it never references
-an ApplicationModel package.
+registered database servers and additional host services.
 
-`DatabaseAdminEndpointService` exists and can
-serve Web.Health's `/healthz`, `/readyz`, and `/livez`. Under `/cohesion/v1`, only the namespaced
+When the builder resolves a health endpoint, the internal `DatabaseAdminEndpointService` serves
+Web.Health's `/healthz`, `/readyz`, and `/livez`. Under `/cohesion/v1`, only the namespaced
 health aliases (`healthz`, `readyz`, `livez`) answer, and only to loopback callers; every other
 `/cohesion/v1` route, the retired resource control plane, returns 403.
-Nothing in production starts that service today. T3 run EN-A1 binds it on the platform's `http`
-endpoint.
+Configure it with `AddHealthEndpoint(Uri)`. When `COHESION_GATEWAY` is nonblank, a bindable plain
+HTTP `http` assignment takes precedence. See the [hosting design](docs/DESIGN.md#platform-binding-and-http-health-1790).
 
 The module provisions nothing and knows no schema. A model's engine builder declares
 the databases its engine owns (`sql.AddDatabase("orders", ...)` inside `AddSql`), and

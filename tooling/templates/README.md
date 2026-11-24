@@ -9,7 +9,7 @@ environment still defaults to Production.
 
 | Project | Purpose |
 | --- | --- |
-| [Assimalign.Cohesion.Templates](Assimalign.Cohesion.Templates/docs/OVERVIEW.md) | Application, gateway and standalone resource templates. |
+| [Assimalign.Cohesion.Templates](Assimalign.Cohesion.Templates/docs/OVERVIEW.md) | Application and standalone resource templates. |
 
 See the [design](Assimalign.Cohesion.Templates/docs/DESIGN.md) for the package lifecycle,
 template roster, version substitution and consumer acceptance tests.

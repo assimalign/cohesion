@@ -13,8 +13,7 @@ public static partial class AppEnvironment
     /// value is a breaking wire-contract change. <c>docs/RUNTIME_CONTRACT.md</c> is the language-neutral
     /// statement of the same contract; the Core runtime-contract tests hold this file's constants and
     /// that document in lockstep, and reject any line containing <c>COHESION_</c> (code or comment)
-    /// elsewhere in the <c>src/</c> trees of <c>libraries/Core</c>, <c>libraries/Hosting</c>, and
-    /// <c>libraries/ApplicationModel</c>.
+    /// elsewhere in the <c>src/</c> trees of <c>libraries/Core</c> and <c>libraries/Hosting</c>.
     /// </para>
     /// <para>
     /// This class is the contract's only .NET home. Changes to <see cref="AppEnvironment"/> must keep it

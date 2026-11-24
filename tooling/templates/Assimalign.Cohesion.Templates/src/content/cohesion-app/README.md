@@ -12,7 +12,4 @@ dotnet run --project Acme.Database   # the database
 dotnet run --project Acme.Api        # the API
 ```
 
-Composing the two as one application, and deploying it, moves to the Application Model's resource
-manager and fabric, which are being redesigned; this scaffold will gain that project when they land.
-
 Set the organization feed owner in `nuget.config`.

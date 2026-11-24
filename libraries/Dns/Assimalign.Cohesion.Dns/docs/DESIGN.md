@@ -254,8 +254,7 @@ These are intentional behavioral breaks under the preview compatibility policy.
 
 ## Non-goals
 
-- **A drop-in BIND/Unbound replacement.** The package family targets
-  Cohesion's application model, not zone-hosting at internet scale.
+- **A drop-in BIND/Unbound replacement.** The package family targets DNS for Cohesion services.
 - **Runtime-extensible RR types via reflection.** A future opt-in
   extension point may emerge; the default surface stays sealed and
   AOT-clean.

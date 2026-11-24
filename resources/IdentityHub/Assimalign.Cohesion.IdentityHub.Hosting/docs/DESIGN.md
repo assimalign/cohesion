@@ -18,10 +18,6 @@ An ephemeral self-signed certificate is allowed only on loopback in Local; every
 
 Issued access tokens contain `iss`, `sub`, `aud`, `iat`, `nbf`, `exp`, `jti`, `client_id`, and token-use metadata. The configured lifetime is capped at 24 hours.
 
-## Resource integration
-
-This module references no application-model library. The old application model's integration, `Assimalign.Cohesion.IdentityHub.Hosting.ApplicationModel` (`builder.Services.AddResource(...)`), was removed with the old model, and its replacement is the resource-provider design in `fabric/`.
-
 ## AOT and dependency boundary
 
 Hosting privately composes Cohesion Web/HTTP/connection libraries and the shared IdentityModel JWT implementation. Routes use direct dispatch and `Utf8JsonWriter`; there is no reflection-based routing, serializer metadata discovery, or dynamic activation.

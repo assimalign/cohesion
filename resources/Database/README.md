@@ -2,10 +2,10 @@
 
 The multi-model OLTP database engine family for Cohesion: five independent database engines — **SQL**, **Documents**, **Graph**, **Blob**, and **KeyValuePair** — sharing one durable kernel (storage, write-ahead logging, transactions, indexing). A hosted database is an ordinary customer-owned `Sdk.Database` executable whose `Program.cs` composes its engines, code-first schema, servers, and provisioning. See [DESIGN.md](../../docs/resources/Database/DESIGN.md) for the architecture, requirements, and decision log; sequencing lives in [docs/programs/DATABASE_PROGRAM_PLAN.md](../../docs/programs/DATABASE_PROGRAM_PLAN.md).
 
-A model server without an explicit listener consumes its named runtime endpoint when
-COHESION_GATEWAY is nonempty (sql, documents, graph, kv or blob); explicit Listen wins. Managed
-HTTP health binds the platform's plain http endpoint at a bindable host, reporting and skipping
-unsuitable assignments. Unmanaged applications opt in with builder.AddHealthEndpoint(uri).
+A model server without an explicit listener reads its named runtime endpoint (`sql`, `documents`,
+`graph`, `kv` or `blob`) when `COHESION_GATEWAY` is nonblank. For HTTP health, the same variable
+enables the `http` assignment. A bindable plain HTTP assignment takes precedence over
+`builder.AddHealthEndpoint(uri)`. Unsuitable assignments are reported and skipped.
 Hosting's health observations cover each engine and database, plus the database.accepting host
 accept gate. Offline databases are Unhealthy; provisioning and held schemas are Degraded with
 their existing refusal details. Each check evaluates only its engine, or the host accept gate,
@@ -18,8 +18,7 @@ which need repair and an explicit open.
 
 The old application model's Database integration, `Database.Hosting.ApplicationModel`
 (`builder.Services.AddResource(...)` and its health contributors), was removed in #1869 with the
-old model. Its replacement is the resource-provider design in `fabric/`; Database adopts it once
-that design is in main.
+old model on 2026-11-18.
 
 ## Storage corruption diagnostics (#1160)
 
@@ -99,9 +98,11 @@ libraries likewise reference no `Assimalign.Cohesion.Hosting*` library at all (`
 `Database.Testing → Database.Hosting` uses the area's **single sanctioned exemption**:
 the test factory drives the concrete runtime, which cannot
 be done through abstractions alone, so the project declares
-`CohesionHostingIsolationExemptions` in its own csproj. Nothing else in the area may, and a second
-holder needs the deviation protocol in `.claude/rules/deviations.md`. The application-model
-integration needs no exemption property.
+`CohesionHostingIsolationExemptions` in its own csproj. A second exemption holder needs the
+deviation protocol in [deviations.md](../../.claude/rules/deviations.md). Under `COHRES002`, the
+hosting module may reference any library in its own area except `Database.Testing`, the two
+framework producers (`Database.Refs` and `Database.Runtime`), and test, example, sample and
+fixture projects.
 
 The diagram is the area's **spine** — the root, the runtime module, the hosting-family
 integrations, and the client and test packages. The area has more
@@ -113,7 +114,7 @@ collapsed above, is in [docs/DEPENDENCIES.md](../../docs/DEPENDENCIES.md).
 
 ## Layering
 
-In the repo's L1/L2/L3 model (see `docs/programs/DELIVERY_ROADMAP.md`), this area is **L3.2 — Data Platform**: a service platform built on the L1 foundation libraries (`Core`, `Connections`, `Hosting`, `Security`) and the L2 application runtime (`ApplicationModel`). It ships to consumers through the `Assimalign.Cohesion.Sdk.Database` MSBuild SDK and the `Assimalign.Cohesion.App.Database` shared framework.
+In the repo's L1/L2/L3 model (see `docs/programs/DELIVERY_ROADMAP.md`), this area is **L3.2 — Data Platform**: a service platform built on the L1 foundation libraries (`Core`, `Connections`, `Security`) and the L2 `Hosting` family. The application model is being rebuilt under [`fabric/`](../../fabric/README.md). Database ships to consumers through the `Assimalign.Cohesion.Sdk.Database` MSBuild SDK and the `Assimalign.Cohesion.App.Database` shared framework.
 
 ## Project catalog
 
@@ -210,7 +211,7 @@ Each implemented remote client references its model Protocol and shared Client/P
   `Database.Hosting`. The Database root and feature libraries reference no hosting library (O34).
 - `libraries/Connections` — transport drivers for the per-model servers (`Database.Sql`'s `SqlDatabaseServer`, and every future model's server)
 - `resources/Web` — private implementation details: the root's existing Web dependency plus
-  `Web.Hosting`/`Web.Health` in `Database.Hosting` for the `admin` control plane. The coordinated
+  `Web.Hosting`/`Web.Health` in `Database.Hosting` for HTTP health. The coordinated
   `CohesionPrivateProjectReference`/`CohesionFrameworkPrivateAssembly` path keeps that closure in
   the `App.Database` runtime pack and out of its reference surface.
 

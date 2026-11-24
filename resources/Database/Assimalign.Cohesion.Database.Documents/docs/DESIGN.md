@@ -401,7 +401,7 @@ flowchart TD
 
 The engine references the model language package and the Database root. Its Catalog component
 uses Documents Storage and shared indexing/transactions, never engine types.
-There are no Hosting or ApplicationModel references.
+There are no Hosting references.
 
 ## Sessions and authority
 
@@ -2377,8 +2377,7 @@ managed memory. UNNEST multiplies input rows and has no row cap; scalar key JOIN
 look up another stored collection in the same database. Chunk persistence handles documents larger than a page but does
 not promise a bounded heap independent of document/query size. Database-wide
 writer locking is conservative; there are no persisted query statistics, general-predicate joins,
-external sort, replication, model-specific security,
-ApplicationModel integration, or compiled-schema provisioning.
+external sort, replication, model-specific security or compiled-schema provisioning.
 
 Co-located tests cover nested/mixed JSON, expected-version writes, explicit commit
 and rollback, both isolation levels, cross-database/session guards, direct-marked
@@ -2885,8 +2884,7 @@ Documents.Catalog depends on the Database root for ownership vocabulary, Documen
 record/content access, Database.Transactions for MVCC and statement brackets, Database.Indexing
 for B+Trees, and Database.Types for scalar key encoding. The engine uses this component and
 owns sessions, OQL planning/execution, lock acquisition, ownership enforcement, and
-commit/rollback. There is no Hosting or ApplicationModel dependency and no compiled-schema
-provisioning.
+commit/rollback. There is no Hosting dependency or compiled-schema provisioning.
 
 Catalog and Storage live within `Database.Documents`; the diagram shows their internal
 dependency direction and references to shared packages.

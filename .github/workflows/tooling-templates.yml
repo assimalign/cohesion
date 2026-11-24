@@ -5,8 +5,6 @@ on:
       - "tooling/templates/**"
       - "sdks/**"
       - "libraries/App/**"
-      # The App framework still carries ApplicationModel.Hosting as a kernel root.
-      - "libraries/ApplicationModel/**"
       - "resources/*/Assimalign.Cohesion.*.Refs/**"
       - "resources/*/Assimalign.Cohesion.*.Runtime/**"
       # Database template programs compose the Hosting, Sql and Sql.Schema builder APIs, the
@@ -32,7 +30,6 @@ on:
       - "tooling/templates/**"
       - "sdks/**"
       - "libraries/App/**"
-      - "libraries/ApplicationModel/**"
       - "resources/*/Assimalign.Cohesion.*.Refs/**"
       - "resources/*/Assimalign.Cohesion.*.Runtime/**"
       - "resources/Database/Assimalign.Cohesion.Database*/**"

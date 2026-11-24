@@ -2,17 +2,15 @@
 
 ## Intent and authority
 
-The CLI is a thin wrapper with no gateway semantics of its own. A gateway is an ordinary
-executable whose `Program.cs` declares its model and the platform it runs on, so the CLI
-delegates execution and errors to `dotnet` and to that program. Its own behavior is argument
-mapping, gateway project discovery, and OIDC device login. The command reference and the single
-documented template roster live in the [tooling README](../../../README.md).
+The CLI delegates project execution and errors to `dotnet`. Its own behavior is argument
+mapping and OIDC device login. The command reference and the documented template roster
+live in the [tooling README](../../../README.md).
 
 ```mermaid
 flowchart LR
     Cli["cohesion"] -->|"dotnet new"| Templates["Assimalign.Cohesion.Templates"]
-    Cli -->|"dotnet run"| Gateway["gateway project on Sdk.Gateway"]
-    Cli -->|"dotnet publish"| Project["named or discovered project"]
+    Cli -->|"dotnet run"| Project["named project or current directory"]
+    Cli -->|"dotnet publish"| Project
     Cli -->|"device flow"| Hub["IdentityHub"]
 ```
 
@@ -35,17 +33,9 @@ nonblank, `run` supplies `--no-launch-profile` to `dotnet run`: launch profile v
 otherwise override the inherited shell values. The injected environment reader keeps tests
 independent of the developer's shell.
 
-`GatewayDiscovery` reads project XML without MSBuild execution. SDK markers accept
-attribute name/version and child Sdk forms. Explicit project paths avoid ambiguous recursive
-selection. The CLI starts `run` in the gateway project's directory: an SDK 10.0.401 probe showed
-that `dotnet run --project` alone retains the caller's directory.
-
-## Gateway state
-
-The CLI has no deploy, trust, parameter, or status verbs and keeps no local state for a gateway:
-a gateway program has no command-line modes, and its record lives in the `IApplicationGatewayStore`
-its `Program.cs` chooses. `publish` forwards to `dotnet publish` and adds no container-image
-option.
+When `--project` selects a project, the CLI starts `run` in that project’s directory so relative
+paths in passthrough arguments resolve there. Without `--project`, `dotnet run` selects the
+project in the working directory. `publish` forwards to `dotnet publish`.
 
 ## Login protocol and proposed credential store
 
@@ -65,8 +55,7 @@ The host filename intentionally has one slot per host (ports, issuer paths and c
 collide; IPv6 colons are replaced by underscores). **Item 27 (#972) must pin or revise this
 proposal.** Client secrets and device codes are not saved.
 
-IdentityHub's landed flow is Local/loopback-only. It does not yet issue a token that a
-gateway accepts; an IdentityHub-to-gateway token bridge remains later work.
+IdentityHub’s landed flow is Local/loopback-only. Login stores its token for a later IdentityHub bridge.
 
 ## Error model and extension points
 

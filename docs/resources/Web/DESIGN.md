@@ -1,39 +1,24 @@
 # Web area design
 
-## Application-model integration
+## Hosting
 
 Web.Hosting is a plain host. It references the Web root, Web.Routing, Web.Server, and non-Web
 infrastructure (Hosting, DependencyInjection, configuration, logging, file system, the HTTP
-transport, and the connection drivers), and no application-model package. COHRES001 prevents Web
+transport, and the connection drivers). COHRES001 prevents Web
 roots and features from referencing it.
-
-A Web application becomes a managed resource instance through
-[Web.Hosting.ApplicationModel](../../../resources/Web/Assimalign.Cohesion.Web.Hosting.ApplicationModel/docs/DESIGN.md),
-the area's one application-model integration:
-`builder.Services.AddResource("orders-api", resource => resource.UseInProcess())`. The package
-references Web.Hosting, the one reference `COHRES001` sanctions by the integration's exact name, plus Web.Cors,
-DependencyInjection, Hosting, and ApplicationModel.Hosting, and it carries no transport: the
-platform the resource opts into publishes for it and carries the gateway's calls in. Unmanaged, it
-registers nothing; managed, it registers one `IHostService` factory, and the resource's actions come
-from the settings the application's features registered (the `cors` setting becomes the `cors`
-action). It is a public member of App.Web; ApplicationModel.Hosting arrives with the App kernel.
 
 Web.Hosting is a private member of five other area frameworks, App.ConfigurationStore,
 App.Database, App.IdentityHub, App.LogSpace and App.SecretStore, whose hosting modules serve HTTP
 through a nested WebApplication. Each references it privately through the coordinated
-CohesionPrivateProjectReference / CohesionFrameworkPrivateAssembly pair. Web.Testing and
-Web.Hosting.ApplicationModel are the only Web packages that reference Web.Hosting.
+CohesionPrivateProjectReference / CohesionFrameworkPrivateAssembly pair. Web.Testing holds the
+standing exemption to reference Web.Hosting.
 
 Arrows mean "references".
 
 ```mermaid
 flowchart LR
-    App["The application's Program.cs"] --> WHA["Web.Hosting.ApplicationModel"]
-    App --> Platform["ApplicationModel.Hosting.InProcess"]
-    WHA --> WebHost["Web.Hosting"]
-    WHA --> Instance["ApplicationModel.Hosting"]
-    WHA --> Cors["Web.Cors"]
-    Platform --> Instance
+    App["The application's Program.cs"] --> WebHost["Web.Hosting"]
+    Test["Web.Testing"] --> WebHost
     WebHost --> Web["Web"]
     WebHost --> Server["Web.Server"]
     WebHost --> Routing["Web.Routing"]

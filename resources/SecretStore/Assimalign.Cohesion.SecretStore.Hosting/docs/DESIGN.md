@@ -4,8 +4,6 @@
 
 The hosting module is the SecretStore runtime and protocol boundary. `SecretStoreApplication.CreateBuilder(args)` returns the public concrete `SecretStoreApplicationBuilder`; its `Build()` returns the public `SecretStoreApplication : Host<SecretStoreApplicationContext>`. The public `SecretStoreApplicationContext` implements `ISecretStoreApplicationContext`, reading `ContentRootPath` from the host environment. The application explicitly forwards the root lifecycle contract to `IHost`, and consumers use the concrete application for `RunAsync` and `await using`. Runtime options and supporting services remain internal. Persistence, the certificate-authority manager, and endpoint service remain internal.
 
-The area's resource integration is `Assimalign.Cohesion.SecretStore.Hosting.ApplicationModel` (`builder.Services.AddResource(...)`), which references this module; this module references no application-model library.
-
 ## Composition and endpoint selection
 
 `Local` is the developer-machine environment. `Development` is a deployable environment and requires HTTPS even on loopback, as does `Production`. An unset environment still resolves to `Production`.

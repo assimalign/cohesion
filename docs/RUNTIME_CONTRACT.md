@@ -14,15 +14,15 @@ formatting without introducing a Cohesion-specific address type (R9 and R6 in th
 The variables are what a platform tells a workload. An out-of-process platform delivers them as
 process environment variables (Kubernetes: the pod template's environment). The in-process
 platform delivers the same keys through an ambient context: the `AppEnvironmentScope` (Core) that
-`ApplicationModel.Gateway.InProcess` enters on the thread it runs each resource's program on
-(2026-10-29). Inside it, `AppEnvironment` reads the scope's values, a contract variable the scope
+the host enters on the thread where it runs each resource's program.
+Inside it, `AppEnvironment` reads the scope's values, a contract variable the scope
 does not set reads as unset, and a host run stops on the scope's shutdown signal instead of the
 process's. A standalone process with no gateway has `COHESION_GATEWAY` unset, runs unmanaged, and
 resolves its environment name as `COHESION_ENVIRONMENT ?? DOTNET_ENVIRONMENT ?? "Production"`.
 
 How an instance uses these values (publishing its manifest, restoring state, serving the
-gateway's actions) is the application model's design:
-[docs/libraries/ApplicationModel/DESIGN.md](libraries/ApplicationModel/DESIGN.md).
+gateway's actions) is defined by the application model, which is being rebuilt under
+[`fabric/`](../fabric/README.md).
 
 ## Variable contract
 

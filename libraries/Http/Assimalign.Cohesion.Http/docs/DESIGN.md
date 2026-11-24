@@ -1884,10 +1884,8 @@ Lookup semantics and the public surface are unchanged from 10.0.0-preview.1.
 
 The core owns the value objects that parse and serialize the proxy-forwarding
 headers — the RFC 7239 `Forwarded` element list and the de-facto
-`X-Forwarded-For` / `X-Forwarded-Proto` / `X-Forwarded-Host` list forms. Every
-Cohesion web service is deployed behind at least one proxy hop (the
-ApplicationModel K8s self-registry gateway, LoadBalancer/NatGateway resources),
-so without these primitives every downstream concern — CORS, cookie `Secure`
+`X-Forwarded-For` / `X-Forwarded-Proto` / `X-Forwarded-Host` list forms. Behind a proxy,
+without these primitives every downstream concern — CORS, cookie `Secure`
 decisions, session partitioning, rate-limit keys, access logging — sees the
 proxy's IP and `http://` scheme instead of the client's.
 

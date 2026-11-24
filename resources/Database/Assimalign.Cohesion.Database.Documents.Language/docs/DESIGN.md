@@ -85,8 +85,7 @@ Database.Language DESIGN records the shared configuration and scanner reference.
 
 `Database.Documents.Language` references only `Assimalign.Cohesion.Database.Language`.
 `Database.Documents` consumes its AST for logical planning, physical index selection,
-collection and index catalog changes, and execution. This package has no catalog, storage, hosting, or
-ApplicationModel dependency.
+collection and index catalog changes, and execution. This package has no catalog, storage or hosting dependency.
 
 Parsing runs shared lexing, capability validation, statement/expression parsing, then shared
 analyzers. Malformed input remains an `OqlQueryStatement` with error diagnostics; consumers

@@ -4,8 +4,6 @@ The builder materializes user host services, validates every provider binding ag
 
 The execution service snapshots schedules from every registered IScheduleProvider and runs their evaluation loops concurrently. It does not execute unbound jobs. On stop it cancels trigger waits, prevents new occurrences, and joins any occurrence already underway within the shared host shutdown budget.
 
-The area's resource integration is `Assimalign.Cohesion.Scheduler.Hosting.ApplicationModel` (`builder.Services.AddResource(...)`), which references this module; this module references no application-model library.
-
 `SchedulerApplication.CreateBuilder(args)` returns the public concrete `SchedulerApplicationBuilder`; its `Build()` returns the public `SchedulerApplication : Host<SchedulerApplicationContext>`. The public `SchedulerApplicationContext` implements `ISchedulerApplicationContext`, reading `ContentRootPath` from the host environment. The application explicitly forwards the root lifecycle contract to `IHost`, and consumers use the concrete application for `RunAsync` and `await using`. Runtime options and supporting services remain internal.
 
 ## Concrete composition (T10 / O34)

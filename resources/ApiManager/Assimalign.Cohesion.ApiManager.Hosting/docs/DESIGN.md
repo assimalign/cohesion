@@ -12,11 +12,7 @@ The built host exposes the ordered `HostedServices` materialized from explicit b
 
 ## Boundaries
 
-The module references the area root, DependencyInjection, and Hosting publicly. It references no Web, HTTP, or transport library: none of its services opens a listener yet. It references no application-model library: the resource integration, `ApiManager.Hosting.ApplicationModel`, references this module instead. It uses no reflection or dynamic activation and remains trimming- and NativeAOT-safe.
-
-## Resource integration
-
-The area's resource integration is `Assimalign.Cohesion.ApiManager.Hosting.ApplicationModel` (`builder.Services.AddResource(...)`), which references this module; this module references no application-model library.
+The module references the area root, DependencyInjection, and Hosting publicly. It references no Web, HTTP, or transport library: none of its services opens a listener yet. It uses no reflection or dynamic activation and remains trimming- and NativeAOT-safe.
 
 ## Concrete composition (T10 / O34)
 

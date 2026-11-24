@@ -8,6 +8,7 @@ The rules in `.claude/rules/` are the canonical coding standard for this repo. T
 
 ## Repository structure
 
+- `fabric/` — the application model is being rebuilt here. See [fabric.md](rules/fabric.md)
 - `libraries/` — shared libraries, infrastructure, runtime, and cross-service foundations. `libraries/App/` holds the root `Assimalign.Cohesion.App` framework producers (`Assimalign.Cohesion.App.Refs` / `.Runtime`) plus `Assimalign.Cohesion.App.props` (the App hosting kernel's roots and the defaults every framework producer shares) and `Assimalign.Cohesion.App.targets` (App's closure derivation and every framework's pack logic)
 - `resources/` — service and resource implementations. Every folder under `resources/` has a corresponding `Sdk.<Name>` and `App.<Name>` framework family, and produces its framework itself: `Assimalign.Cohesion.<Name>.Refs` / `.Runtime` sit beside the area's libraries while their assembly and package names keep the `App` segment (naming convention: `.claude/rules/build-system.md`). Each area's framework members are listed by hand in its Runtime producer's `Directory.Build.props`, which the Refs producer's `Directory.Build.props` imports
 - `build/` — custom MSBuild logic, centralized targets, package-version management. `build/Targets/Build.Version.props` is the single source of truth for `$(CohesionVersion)`

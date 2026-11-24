@@ -5,16 +5,13 @@
 The base SDK is the Cohesion equivalent of `Microsoft.NET.Sdk`: a general build
 foundation for plain libraries and executables. It owns defaults, framework
 registrations, strongly typed settings, name-only project references, and pin
-validation. It owns no application-model behavior: no SDK in the family generates a
-manifest, a resource accessor, or a gateway surface. A resource makes itself a managed
-instance in its `Program.cs`, and a gateway declares its model in its own.
+validation.
 
 The layered SDKs chain to the base:
 
 ```mermaid
 flowchart LR
     Area["Assimalign.Cohesion.Sdk.<Area>"] --> Base["Assimalign.Cohesion.Sdk"]
-    Gateway["Assimalign.Cohesion.Sdk.Gateway"] --> Base
     Base --> DotNet["Microsoft.NET.Sdk"]
 ```
 
@@ -75,13 +72,10 @@ identity is supported.
 The base registers every `KnownFrameworkReference` but auto-includes none. It is
 a library SDK like `Microsoft.NET.Sdk`; a direct executable names App explicitly.
 Each resource-area SDK adds App plus App.<Area> under one
-`CohesionAutoIncludeAppFramework` condition. Gateway adds no framework; it references
-the gateway package only. App itself is the
-transitive Assimalign project-reference closure of the hosting-kernel roots in
-`libraries/App/Assimalign.Cohesion.App.props`, plus its umbrella assembly. Connections
-is a kernel root because every area hosting module depends on it, and
-ApplicationModel.Hosting because every area's `Hosting.ApplicationModel` integration
-builds on it. Other libraries are consumed as ordinary packages.
+`CohesionAutoIncludeAppFramework` condition. App is the transitive Assimalign project-reference
+closure of the hosting-kernel roots in `libraries/App/Assimalign.Cohesion.App.props`, plus its
+umbrella assembly. Connections is a kernel root because every area hosting module depends on it.
+Other libraries are consumed as ordinary packages.
 
 ## Diagnostics
 
@@ -96,11 +90,9 @@ host.
 
 The shared consumer workspace derives Cohesion SDK pins from the repository's SDK families
 at the package version under test. Root `global.json` supplies only the .NET SDK settings.
-The Gateway SDK's tests link the same workspace (`COHESION_GATEWAY_SDK_TESTS`) and build
-their own fixtures.
 
 ## Non-goals
 
 The base SDK does not create resource manifests, generated resource or control-
 plane source, image indexes, OCI archives, or application image gathers, and no
-other SDK in the family does either. Application-model composition is code.
+other SDK in the family does either.

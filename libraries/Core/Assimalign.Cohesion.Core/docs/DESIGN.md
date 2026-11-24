@@ -72,8 +72,8 @@ JSON null handling, invalid-value exceptions and dictionary-key conversion are u
 
 The public nested converters add public surface compared with 10.0.0-preview.1's non-public
 converters. On regeneration, handwritten converter partials that declare `internal` or `private`
-conflict with the new public declaration (CS0262). Remove redundant partial declarations, as
-ApplicationModel does, or omit their accessibility modifier if they supply additional members.
+conflict with the new public declaration (CS0262). Remove redundant partial declarations, or
+omit their accessibility modifier if they supply additional members.
 
 `System.Ulid` owns validation for every string, character-span and UTF-8 `Parse` and `TryParse`
 overload, including those with a nullable format provider. Input must have exactly 26 characters
@@ -100,14 +100,14 @@ intentional behavioral breaking change (#1490); the public member signatures are
 
 ## Frozen runtime contract
 
-`AppEnvironment.Variables` is the only .NET home of the version 1 gateway-to-resource contract
+`AppEnvironment.Variables` is the only .NET home of the version 1 runtime contract
 documented in `docs/RUNTIME_CONTRACT.md`. Its fixed names and parameterized patterns are
 `public const string` values. Constants are inlined into consuming assemblies, so changing any
 value is a breaking wire-contract change rather than an ordinary implementation change. The Core
 runtime-contract guard tests pin `AppEnvironment.Variables.cs`: its public string constants must
 equal the document's variable table exactly, in order, and no line containing `COHESION_` (code,
-string literal, or comment) may appear in the `src/` C# files of `libraries/Core`,
-`libraries/Hosting`, or `libraries/ApplicationModel` outside that file; XML docs name a
+string literal, or comment) may appear outside that file in the `src/` C# files of `libraries/Core`
+or `libraries/Hosting`. XML docs name a
 variable with `<see cref="AppEnvironment.Variables.X"/>` instead.
 Future `AppEnvironment` work must leave `Variables` where it is and as it is.
 
@@ -123,8 +123,7 @@ normalization rule to endpoint, resource, and mount components: lowercase ASCII 
 ASCII letters and digits are retained, and each other character becomes one underscore.
 `Configuration` inserts its section and key verbatim. `AppEnvironment`'s readers
 (`TryGetEndpoint`, `TryGetDependency`, `TryGetMount`) compose every name they read through those
-builders, and the gateways write names with the same builders, so the two sides cannot normalize
-differently. Typed endpoint readers return `System.Uri`: the BCL type already owns scheme, host,
+builders. Typed endpoint readers return `System.Uri`. The BCL type already owns scheme, host,
 port, path, parsing, and equality, so Core does not duplicate that state in a framework-specific
 address type. A declared endpoint's HOST/PORT/SCHEME values describe its bind address; its
 separately advertised PUBLIC_URL remains available through the URI reader. Dependency URLs may
@@ -140,8 +139,7 @@ slash for the root. Code crossing into socket APIs uses `Uri.IdnHost` by convent
 literals are unbracketed and internationalized hosts use their ASCII-compatible form.
 
 `AppEnvironment` owns the single environment-name rule:
-`COHESION_ENVIRONMENT ?? DOTNET_ENVIRONMENT ?? "Production"`. ApplicationModel delegates to this
-Core rule rather than parsing process variables itself. Every `AppEnvironment` reader has an
+`COHESION_ENVIRONMENT ?? DOTNET_ENVIRONMENT ?? "Production"`. Every `AppEnvironment` reader has an
 environment overload and a dictionary overload, so a carrier of the same keys reuses their parsing
 rules.
 
@@ -149,29 +147,27 @@ rules.
 
 The runtime contract delivers every variable to an in-process resource through an "ambient
 context", and stops it on an "outer host signal" (RUNTIME_CONTRACT.md). That carrier is Core's
-`AppEnvironmentScope`: a frozen set of variables and a shutdown `CancellationToken`. A host of
-programs, such as Gateway.InProcess, enters one (`AppEnvironment.Enter`) on the flow it runs each
-program on, and `AppEnvironment.Current` flows with the execution context into everything the program
-starts. Inside a scope:
+`AppEnvironmentScope`, a frozen set of variables and a shutdown `CancellationToken`. A host of
+programs enters a scope (`AppEnvironment.Enter`) on the flow it runs each program on.
+`AppEnvironment.Current` flows with the execution context into everything the program starts.
+Inside a scope:
 
 - `GetValue`, and every reader without a dictionary, reads the scope's variables first.
 - A contract variable (`COHESION_` prefix, compared without case as Windows compares variable
-  names) that the scope does not set reads as unset, so one program never reads another's gateway,
-  endpoints, or configuration from the process. Every other variable, such as `PATH`, reads through
+  names) that the scope does not set reads as unset, so one program never reads another's
+  endpoints or configuration from the process. Every other variable, such as `PATH`, reads through
   to the process.
 - `GetValues` is the merged snapshot, which the environment-variable configuration source loads.
 - `RegisterShutdown(callback)` registers on the scope's `Shutdown` instead of the process's
   SIGINT, SIGQUIT, and SIGTERM, which stay with the host of programs. Outside a scope it registers
-  the signals, cancels each one's default action, and calls the callback instead. Every entry-point
-  run uses it: Hosting's `RunAsync` and the application-model gateway's (2026-10-29), so a program
-  that stops on signals in its own process stops on its scope in a host of programs, with no change.
+  the signals, cancels each one's default action, and calls the callback instead. Hosting's
+  `RunAsync` uses it in both cases.
 
-It lives in Core because every reader of the contract already does, and both sides of the line,
-the Configuration and Hosting readers and the gateway that writes the scope, reference Core. *Rejected:* a typed context
+It lives in Core because the Configuration and Hosting readers already reference Core. *Rejected:* a typed context
 carrying the same keys, which every reader would have to know. `Variables.Prefix` is internal, so the
 contract test, which reads `public const string` declarations, still sees exactly the documented
 variables. `Variables.Configuration(key)` builds the bridge variable of a whole colon-separated key
-(`Orders:Url` becomes `…CONFIG__Orders__Url`), the form a gateway writes a setting in.
+(`Orders:Url` becomes `…CONFIG__Orders__Url`).
 
 ## `FileSystemPath.Merge` navigates; it does not confine
 
